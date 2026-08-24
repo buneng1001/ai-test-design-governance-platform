@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { createProject, getProject, listProjects, Project, ProjectInput, updateProject } from "./api";
 import { AssetProvenancePanel } from "./AssetProvenancePanel";
+import { AIRunPanel } from "./AIRunPanel";
 import { RequirementImportPanel } from "./RequirementImportPanel";
 import "./styles.css";
 
@@ -85,6 +86,7 @@ export function App() {
           {error && <p role="alert" className="error">{error}</p>}
         </section>
         <AssetProvenancePanel projectId={activeProject.id} />
+        <AIRunPanel projectId={activeProject.id} />
         <RequirementImportPanel projectId={activeProject.id} />
       </main>
     );
