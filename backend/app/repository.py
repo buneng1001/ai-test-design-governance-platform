@@ -49,6 +49,26 @@ MIGRATIONS = (
         PRIMARY KEY (asset_id, revision)
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS requirement_packages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        name TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        published_version_id INTEGER,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS requirement_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        package_id INTEGER NOT NULL REFERENCES requirement_packages(id),
+        version INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(project_id, version),
+        UNIQUE(package_id)
+    );
+    """,
 )
 
 

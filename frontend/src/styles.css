@@ -53,6 +53,11 @@ button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; backgro
   border: 1px solid #d8dfd9;
 }
 .project-card span { color: #657169; font-weight: 400; }
+.requirement-summary, .version-list { display: grid; gap: 12px; margin-top: 24px; }
+.requirement-summary article { display: grid; gap: 4px; padding: 14px; border-left: 3px solid #7a9b88; }
+.requirement-summary span, .version-list { color: #657169; }
+.requirement-summary details { color: #526057; }
+.requirement-summary li { margin-top: 6px; overflow-wrap: anywhere; }
 
 @media (max-width: 640px) {
   .page-header { align-items: stretch; flex-direction: column; }
