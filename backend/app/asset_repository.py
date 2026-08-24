@@ -152,7 +152,7 @@ class AssetRepository:
 
     @staticmethod
     def _to_record(row: sqlite3.Row) -> AssetProvenanceRecord:
-        boundary, formal, model, reason = classify_boundary(row)
+        boundary, can_enter_requirement_package, can_enter_model_context, reason = classify_boundary(row)
         return AssetProvenanceRecord(
             id=row["asset_id"],
             project_id=row["project_id"],
@@ -169,8 +169,8 @@ class AssetRepository:
             change_reason=row["change_reason"],
             created_at=row["created_at"],
             boundary=boundary,
-            can_enter_formal_package=formal,
-            can_enter_model_context=model,
+            can_enter_requirement_package=can_enter_requirement_package,
+            can_enter_model_context=can_enter_model_context,
             reason=reason,
         )
 
@@ -186,13 +186,16 @@ def classify_boundary(row: sqlite3.Row) -> tuple[Boundary, bool, bool, str]:
     }[row["provenance_kind"]]
     if row["usage_permission"] != expected_permission:
         return "unknown", False, False, "来源边界与使用权限不一致，属于来源不明资产"
-    model_allowed = row["model_permission"] == "allowed"
+    can_enter_requirement_package = row["asset_type"] == "requirement_material"
+    if row["asset_type"] == "evaluation_truth":
+        return row["provenance_kind"], False, False, "评估真值必须与普通模型上下文隔离"
+    can_enter_model_context = row["model_permission"] == "allowed"
     if row["provenance_kind"] == "public_authorized":
         reason = "公开授权资产已登记，允许按登记用途和模型权限使用"
-        if not model_allowed:
+        if not can_enter_model_context:
             reason = "公开授权资产可用于登记用途，但未获模型使用权限"
-        return "public_authorized", True, model_allowed, reason
+        return "public_authorized", can_enter_requirement_package, can_enter_model_context, reason
     reason = "原创合成资产已登记，允许按登记用途使用"
-    if not model_allowed:
+    if not can_enter_model_context:
         reason = "原创合成资产可用于登记用途，但未获模型使用权限"
-    return "original_synthetic", True, model_allowed, reason
+    return "original_synthetic", can_enter_requirement_package, can_enter_model_context, reason

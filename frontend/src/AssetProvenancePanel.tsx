@@ -10,7 +10,7 @@ import {
 
 const initialInput: AssetProvenanceInput = {
   name: "",
-  asset_type: "需求资料",
+  asset_type: "requirement_material",
   provenance_kind: "original_synthetic",
   source: "",
   usage_permission: "project_owned",
@@ -57,12 +57,20 @@ export function AssetProvenancePanel({ projectId }: { projectId: number }) {
   return (
     <section className="panel">
       <h2>资产来源记录</h2>
-      <p>资产必须先登记来源、权限和内容哈希，来源不明资产不会进入正式流程或模型上下文。</p>
+      <p>资产必须先登记来源、权限和内容哈希，来源不明资产不会进入需求资料包或模型上下文。</p>
       <form className="project-form" onSubmit={submit}>
         <label>资产文件<input type="file" onChange={(event) => void selectFile(event.target.files?.[0])} /></label>
-        <label>资产类型<input value={input.asset_type} onChange={(event) => setInput({
-          ...input, asset_type: event.target.value,
-        })} /></label>
+        <label>资产类型<select value={input.asset_type} onChange={(event) => setInput({
+          ...input,
+          asset_type: event.target.value as AssetProvenanceInput["asset_type"],
+        })}>
+          <option value="requirement_material">需求资料</option>
+          <option value="case_template">用例模板</option>
+          <option value="mock_output">Mock 输出</option>
+          <option value="evaluation_truth">评估真值</option>
+          <option value="result_input">结果输入</option>
+          <option value="other">其他</option>
+        </select></label>
         <label>来源边界<select value={input.provenance_kind} onChange={(event) => setInput({
           ...input,
           provenance_kind: event.target.value as AssetProvenanceInput["provenance_kind"],
@@ -120,4 +128,3 @@ const boundaryLabel = (boundary: AssetProvenanceRecord["boundary"]): string => (
 })[boundary];
 
 const message = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";
-

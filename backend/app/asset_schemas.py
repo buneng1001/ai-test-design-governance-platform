@@ -7,6 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 ProvenanceKind = Literal["original_synthetic", "public_authorized", "prohibited"]
+AssetType = Literal[
+    "requirement_material",
+    "case_template",
+    "mock_output",
+    "evaluation_truth",
+    "result_input",
+    "other",
+]
 UsagePermission = Literal["project_owned", "public_license", "prohibited", "unknown"]
 ModelPermission = Literal["allowed", "denied", "unknown"]
 Boundary = Literal["original_synthetic", "public_authorized", "prohibited", "unknown"]
@@ -16,7 +24,7 @@ class AssetProvenanceInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: NonEmptyText
-    asset_type: NonEmptyText
+    asset_type: AssetType
     provenance_kind: ProvenanceKind
     source: Annotated[str, Field(max_length=2000)]
     usage_permission: UsagePermission
@@ -48,7 +56,7 @@ class AssetProvenanceRecord(BaseModel):
     project_id: int
     revision: int
     name: str
-    asset_type: str
+    asset_type: AssetType
     provenance_kind: ProvenanceKind
     source: str
     usage_permission: UsagePermission
@@ -59,7 +67,7 @@ class AssetProvenanceRecord(BaseModel):
     change_reason: str
     created_at: datetime
     boundary: Boundary
-    can_enter_formal_package: bool
+    can_enter_requirement_package: bool
     can_enter_model_context: bool
     reason: str
 
@@ -76,4 +84,3 @@ class HashVerification(BaseModel):
     matches: bool
     expected_sha256: str
     actual_sha256: str
-

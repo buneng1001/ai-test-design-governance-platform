@@ -17,7 +17,13 @@ export interface Project extends ProjectInput {
 
 export interface AssetProvenanceInput {
   name: string;
-  asset_type: string;
+  asset_type:
+    | "requirement_material"
+    | "case_template"
+    | "mock_output"
+    | "evaluation_truth"
+    | "result_input"
+    | "other";
   provenance_kind: "original_synthetic" | "public_authorized" | "prohibited";
   source: string;
   usage_permission: "project_owned" | "public_license" | "prohibited" | "unknown";
@@ -35,7 +41,7 @@ export interface AssetProvenanceRecord extends Omit<AssetProvenanceInput, "conte
   sha256: string;
   created_at: string;
   boundary: "original_synthetic" | "public_authorized" | "prohibited" | "unknown";
-  can_enter_formal_package: boolean;
+  can_enter_requirement_package: boolean;
   can_enter_model_context: boolean;
   reason: string;
 }

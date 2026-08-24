@@ -25,7 +25,7 @@ def encoded(content: bytes) -> str:
 def asset_input(**overrides: object) -> dict:
     payload = {
         "name": "synthetic-v1.md",
-        "asset_type": "需求资料",
+        "asset_type": "requirement_material",
         "provenance_kind": "original_synthetic",
         "source": "测试工程师从零创作",
         "usage_permission": "project_owned",
@@ -48,7 +48,7 @@ def test_original_synthetic_asset_is_registered_with_deterministic_hash(client: 
     assert asset["sha256"] == hashlib.sha256("原创合成需求".encode()).hexdigest()
     assert asset["revision"] == 1
     assert asset["boundary"] == "original_synthetic"
-    assert asset["can_enter_formal_package"] is True
+    assert asset["can_enter_requirement_package"] is True
     assert asset["can_enter_model_context"] is True
     assert asset["reason"] == "原创合成资产已登记，允许按登记用途使用"
 
@@ -78,12 +78,12 @@ def test_public_asset_and_prohibited_asset_have_explicit_boundaries(client: Test
 
     assert public_response.status_code == 201
     assert public_response.json()["boundary"] == "public_authorized"
-    assert public_response.json()["can_enter_formal_package"] is True
+    assert public_response.json()["can_enter_requirement_package"] is True
     assert public_response.json()["can_enter_model_context"] is False
     assert public_response.json()["reason"] == "公开授权资产可用于登记用途，但未获模型使用权限"
     assert prohibited_response.status_code == 201
     assert prohibited_response.json()["boundary"] == "prohibited"
-    assert prohibited_response.json()["can_enter_formal_package"] is False
+    assert prohibited_response.json()["can_enter_requirement_package"] is False
     assert prohibited_response.json()["can_enter_model_context"] is False
     assert prohibited_response.json()["reason"] == "资产被明确标记为禁止使用"
 
@@ -98,7 +98,7 @@ def test_unknown_asset_is_recorded_but_blocked_from_downstream_use(client: TestC
     assert response.status_code == 201
     asset = response.json()
     assert asset["boundary"] == "unknown"
-    assert asset["can_enter_formal_package"] is False
+    assert asset["can_enter_requirement_package"] is False
     assert asset["can_enter_model_context"] is False
     assert asset["reason"] == "缺少来源或明确使用权限，属于来源不明资产"
 
@@ -112,7 +112,7 @@ def test_inconsistent_source_boundary_and_permission_is_blocked(client: TestClie
 
     assert response.status_code == 201
     assert response.json()["boundary"] == "unknown"
-    assert response.json()["can_enter_formal_package"] is False
+    assert response.json()["can_enter_requirement_package"] is False
     assert response.json()["reason"] == "来源边界与使用权限不一致，属于来源不明资产"
 
 
@@ -174,8 +174,8 @@ def test_model_context_filters_assets_without_explicit_permission(client: TestCl
         f"/api/projects/{project_id}/assets",
         json=asset_input(
             name="truth.json",
-            asset_type="评估真值",
-            model_permission="denied",
+            asset_type="evaluation_truth",
+            model_permission="allowed",
             purpose="AI 效果评价",
         ),
     )
@@ -188,6 +188,11 @@ def test_model_context_filters_assets_without_explicit_permission(client: TestCl
 
     assert response.status_code == 200
     assert [asset["id"] for asset in response.json()] == [allowed["id"]]
+
+    truth = client.get(f"/api/projects/{project_id}/assets").json()[1]
+    assert truth["can_enter_requirement_package"] is False
+    assert truth["can_enter_model_context"] is False
+    assert truth["reason"] == "评估真值必须与普通模型上下文隔离"
 
 
 def test_asset_endpoints_reject_missing_project_and_invalid_content(client: TestClient) -> None:
