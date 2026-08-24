@@ -133,6 +133,23 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS template_mappings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        version INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(project_id, version)
+    );
+    CREATE TABLE IF NOT EXISTS template_mapping_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mapping_id INTEGER NOT NULL REFERENCES template_mappings(id),
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

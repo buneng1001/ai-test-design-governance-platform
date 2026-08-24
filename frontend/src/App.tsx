@@ -6,6 +6,7 @@ import { AIRunPanel } from "./AIRunPanel";
 import { RequirementImportPanel } from "./RequirementImportPanel";
 import { RequirementReviewPanel } from "./RequirementReviewPanel";
 import { TestDesignPanel } from "./TestDesignPanel";
+import { TemplateMappingPanel } from "./TemplateMappingPanel";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
@@ -93,6 +94,7 @@ export function App() {
         <p className="muted">发布需求版本后，可在下方输入版本编号进入需求确认。</p>
         <RequirementReviewPanel projectId={activeProject.id} />
         <TestDesignPanel projectId={activeProject.id} />
+        <TemplateMappingPanel projectId={activeProject.id} />
       </main>
     );
   }
