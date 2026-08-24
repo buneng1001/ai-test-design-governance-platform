@@ -173,6 +173,38 @@ export interface TestDesign {
   confirmed_by: string | null;
 }
 
+export interface TemplateColumn {
+  index: number;
+  name: string;
+  sample_values: string[];
+}
+
+export interface TemplateSheet {
+  name: string;
+  index: number;
+  role_suggestion: "case" | "instruction" | "dictionary" | "statistics" | "unknown";
+  role: "case" | "instruction" | "dictionary" | "statistics" | "unknown";
+  title_row_candidates: number[];
+  title_row: number | null;
+  columns: TemplateColumn[];
+  participates: boolean;
+  field_mapping: Record<string, string>;
+  diagnostics: Array<{ code: string; severity: "warning" | "error"; message: string }>;
+}
+
+export interface TemplateMappingVersion {
+  id: number;
+  project_id: number;
+  version: number;
+  filename: string;
+  format: "xlsx" | "csv";
+  status: "draft" | "confirmed";
+  sheets: TemplateSheet[];
+  diagnostics: Array<{ code: string; severity: "warning" | "error"; message: string }>;
+  retained_sheet_names: string[];
+  confirmed_by: string | null;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -324,4 +356,34 @@ export const decideAutomation = (
   method: "PATCH",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ factors, decision, decision_reason: "测试工程师在页面确认自动化决定" }),
+});
+
+export const uploadTemplate = (
+  projectId: number, filename: string, contentBase64: string,
+): Promise<TemplateMappingVersion> => request(`/api/projects/${projectId}/template-mappings`, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ filename, content_base64: contentBase64 }),
+});
+
+export const confirmTemplate = (
+  projectId: number, mappingId: number, confirmerName: string, mappings: TemplateSheet[],
+): Promise<TemplateMappingVersion> => request(
+  `/api/projects/${projectId}/template-mappings/${mappingId}/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmer_name: confirmerName, mappings: mappings.map(toTemplateMapping) }),
+  },
+);
+
+export const validateTemplate = (
+  projectId: number, mappingId: number, confirmerName: string, mappings: TemplateSheet[],
+): Promise<{ valid: boolean; diagnostics: TemplateSheet["diagnostics"] }> => request(
+  `/api/projects/${projectId}/template-mappings/${mappingId}/validate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmer_name: confirmerName, mappings: mappings.map(toTemplateMapping) }),
+  },
+);
+
+const toTemplateMapping = (sheet: TemplateSheet) => ({
+  sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,
+  title_row: sheet.title_row, field_mapping: sheet.field_mapping,
 });

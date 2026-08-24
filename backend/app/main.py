@@ -21,6 +21,8 @@ from app.review_schemas import AtomicRequirementUpdate, FindingUpdate, Requireme
 from app.review_schemas import RequirementConfirmationInput, RequirementReviewFinding, VisualInferenceUpdate
 from app.review_service import build_analysis_candidates, source_reference_exists
 from app.schemas import Project, ProjectInput
+from app.template_api import register_template_routes
+from app.template_repository import TemplateMappingRepository
 def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -29,6 +31,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     review_repository = RequirementReviewRepository(resolved_database_path)
     design_repository = DesignRepository(resolved_database_path)
     ai_run_repository = AIRunRepository(resolved_database_path)
+    template_repository = TemplateMappingRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
     @asynccontextmanager
@@ -45,6 +48,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     register_design_routes(
         app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
     )
+    register_template_routes(app, repository, template_repository)
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
