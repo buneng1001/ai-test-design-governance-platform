@@ -69,6 +69,40 @@ MIGRATIONS = (
         UNIQUE(package_id)
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        task_type TEXT NOT NULL,
+        model_config_json TEXT NOT NULL,
+        prompt_version TEXT NOT NULL,
+        input_asset_versions_json TEXT NOT NULL,
+        output_json TEXT,
+        validation_status TEXT NOT NULL,
+        validation_errors_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        is_mock INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ai_run_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES ai_runs(id),
+        attempt INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        elapsed_ms INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        error_code TEXT,
+        retryable INTEGER NOT NULL,
+        UNIQUE(run_id, attempt)
+    );
+    CREATE TABLE IF NOT EXISTS ai_run_dispositions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES ai_runs(id),
+        decision TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

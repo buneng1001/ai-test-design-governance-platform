@@ -104,6 +104,17 @@ export interface RequirementVersion {
   created_at: string;
 }
 
+export interface AIRun {
+  id: number;
+  task_type: string;
+  prompt_version: string;
+  status: "succeeded" | "validation_failed" | "failed";
+  validation_status: "passed" | "failed" | "not_run";
+  is_mock: boolean;
+  attempts: Array<{ attempt: number; status: string; error_code: string | null }>;
+  disposition: { decision: string; reason: string } | null;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -179,3 +190,4 @@ export const publishRequirementPackage = (
 );
 export const listRequirementVersions = (projectId: number): Promise<RequirementVersion[]> =>
   request(`/api/projects/${projectId}/requirement-versions`);
+export const listAIRuns = (projectId: number): Promise<AIRun[]> => request(`/api/projects/${projectId}/ai-runs`);
