@@ -463,11 +463,16 @@ export const createCaseReviews = (
 );
 
 export const disposeCaseReviewSuggestion = (
-  projectId: number, batchId: number, suggestionId: string, decision: "accepted" | "rejected",
+  projectId: number, batchId: number, suggestionId: string, decision: "accepted" | "rejected" | "modified",
+  modifiedFields: Record<string, string> = {},
 ): Promise<CaseReviewBatch> => request(
   `/api/projects/${projectId}/case-review-batches/${batchId}/suggestions/${suggestionId}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ decision, reason: `测试工程师${decision === "accepted" ? "采纳" : "拒绝"}该建议` }),
+    body: JSON.stringify({
+      decision,
+      reason: `测试工程师${decision === "accepted" ? "采纳" : decision === "rejected" ? "拒绝" : "修改并采纳"}该建议`,
+      modified_fields: modifiedFields,
+    }),
   },
 );
 

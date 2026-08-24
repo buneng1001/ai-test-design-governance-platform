@@ -16,6 +16,7 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
   candidateIds: string[];
 }) {
   const [batch, setBatch] = useState<CaseReviewBatch | null>(null);
+  const [modifiedTitles, setModifiedTitles] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
 
   const startReview = async () => {
@@ -27,10 +28,15 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
     }
   };
 
-  const dispose = async (suggestion: CaseReviewSuggestion, decision: "accepted" | "rejected") => {
+  const dispose = async (
+    suggestion: CaseReviewSuggestion, decision: "accepted" | "rejected" | "modified",
+  ) => {
     if (!batch) return;
     try {
-      setBatch(await disposeCaseReviewSuggestion(projectId, batch.id, suggestion.id, decision));
+      const modifiedFields: Record<string, string> = decision === "modified"
+        ? { title: modifiedTitles[suggestion.id] ?? "" }
+        : {};
+      setBatch(await disposeCaseReviewSuggestion(projectId, batch.id, suggestion.id, decision, modifiedFields));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "AI 评审建议处置失败");
@@ -63,8 +69,16 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
         <p>{suggestion.rationale}</p>
         <p>限制：{suggestion.limitations.join("；")}</p>
         {!suggestion.disposition && <>
+          <label>修改后的用例标题
+            <input
+              aria-label={`修改后的用例标题-${suggestion.id}`}
+              value={modifiedTitles[suggestion.id] ?? suggestion.summary}
+              onChange={(event) => setModifiedTitles({ ...modifiedTitles, [suggestion.id]: event.target.value })}
+            />
+          </label>
           <button onClick={() => void dispose(suggestion, "accepted")}>采纳</button>
           <button onClick={() => void dispose(suggestion, "rejected")}>拒绝</button>
+          <button onClick={() => void dispose(suggestion, "modified")}>修改并采纳</button>
         </>}
         {suggestion.disposition && <p>处置：{suggestion.disposition}</p>}
       </article>)}
