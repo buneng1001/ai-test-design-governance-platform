@@ -20,15 +20,22 @@ export function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const load = initialProjectId ? getProject(initialProjectId) : listProjects();
-    load.then((result) => {
-      if (Array.isArray(result)) {
-        setProjects(result);
-      } else {
-        setActiveProject(result);
-        setProjectInput(toInput(result));
+    const loadInitialView = async () => {
+      try {
+        const result = initialProjectId ? await getProject(initialProjectId) : await listProjects();
+        if (Array.isArray(result)) {
+          setProjects(result);
+        } else {
+          setActiveProject(result);
+          setProjectInput(toInput(result));
+        }
+      } catch (reason) {
+        setError(errorMessage(reason));
+      } finally {
+        setLoading(false);
       }
-    }).catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false));
+    };
+    void loadInitialView();
   }, [initialProjectId]);
 
   const openProject = (project: Project) => {
