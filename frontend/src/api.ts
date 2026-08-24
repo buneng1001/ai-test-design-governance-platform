@@ -104,6 +104,34 @@ export interface RequirementVersion {
   created_at: string;
 }
 
+export interface RequirementAnalysis {
+  id: number;
+  requirement_version_id: number;
+  status: "draft" | "confirmed";
+  atomic_requirements: Array<{
+    candidate_id: string;
+    stable_requirement_id: string | null;
+    statement: string;
+    source_reference: { locator: string; filename: string };
+    decision: "pending_confirmation" | "accepted" | "rejected";
+  }>;
+  findings: Array<{
+    finding_id: string;
+    finding_type: string;
+    summary: string;
+    reason: string;
+    status: string;
+    source_reference: { locator: string; filename: string } | null;
+  }>;
+  visual_inferences: Array<{
+    inference_id: string;
+    description: string;
+    source_reference: { locator: string; filename: string };
+    decision: "pending_confirmation" | "accepted" | "rejected";
+  }>;
+  confirmed_by: string | null;
+}
+
 export interface AIRun {
   id: number;
   task_type: string;
@@ -190,4 +218,45 @@ export const publishRequirementPackage = (
 );
 export const listRequirementVersions = (projectId: number): Promise<RequirementVersion[]> =>
   request(`/api/projects/${projectId}/requirement-versions`);
+export const createRequirementReview = (projectId: number, versionId: number): Promise<RequirementAnalysis> =>
+  request(`/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review`, { method: "POST" });
+export const updateAtomicRequirement = (
+  projectId: number,
+  analysisId: number,
+  candidateId: string,
+  input: { decision: "accepted" | "rejected"; statement?: string },
+): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/atomic-requirements/${candidateId}`,
+  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
+);
+export const updateFinding = (
+  projectId: number,
+  analysisId: number,
+  findingId: string,
+  status: string,
+): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/findings/${findingId}`,
+  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) },
+);
+export const updateVisualInference = (
+  projectId: number,
+  analysisId: number,
+  inferenceId: string,
+  decision: "accepted" | "rejected",
+): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/visual-inferences/${inferenceId}`,
+  { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }) },
+);
+export const confirmRequirementReview = (
+  projectId: number,
+  analysisId: number,
+  confirmerName: string,
+): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/confirm`,
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmer_name: confirmerName }),
+  },
+);
 export const listAIRuns = (projectId: number): Promise<AIRun[]> => request(`/api/projects/${projectId}/ai-runs`);
