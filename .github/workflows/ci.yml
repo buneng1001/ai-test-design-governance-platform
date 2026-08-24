@@ -1,0 +1,31 @@
+name: 基础检查
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.19.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: 安装后端依赖
+        run: python -m pip install -e ".[test]"
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+      - name: 后端 API 测试
+        run: python -m pytest
+      - name: 前端关键闭环测试
+        run: pnpm test
+      - name: 前端类型检查与构建
+        run: pnpm build

@@ -7,14 +7,20 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest_tmp/
 .mypy_cache/
 .ruff_cache/
 .venv/
+*.egg-info/
 
 # Node.js
 node_modules/
 dist/
 coverage/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.pnpm-store/
 
 # 编辑器与系统文件
 .idea/
@@ -25,3 +31,5 @@ Thumbs.db
 # 项目临时文件
 .tmp/
 tmp/
+pytest-cache-files-*/
+data/*.db
