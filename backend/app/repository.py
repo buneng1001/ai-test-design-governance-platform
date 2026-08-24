@@ -26,6 +26,29 @@ MIGRATIONS = (
         updated_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS asset_provenance_revisions (
+        asset_id INTEGER NOT NULL REFERENCES assets(id),
+        revision INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        asset_type TEXT NOT NULL,
+        provenance_kind TEXT NOT NULL,
+        source TEXT NOT NULL,
+        usage_permission TEXT NOT NULL,
+        model_permission TEXT NOT NULL,
+        requirement_version TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        change_reason TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (asset_id, revision)
+    );
+    """,
 )
 
 
@@ -129,4 +152,3 @@ class ProjectRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
-

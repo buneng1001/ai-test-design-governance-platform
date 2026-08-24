@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { createProject, getProject, listProjects, Project, ProjectInput, updateProject } from "./api";
+import { AssetProvenancePanel } from "./AssetProvenancePanel";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
@@ -82,6 +83,7 @@ export function App() {
           <ProjectForm input={projectInput} setInput={setProjectInput} submitLabel="保存修改" onSubmit={submitUpdate} />
           {error && <p role="alert" className="error">{error}</p>}
         </section>
+        <AssetProvenancePanel projectId={activeProject.id} />
       </main>
     );
   }

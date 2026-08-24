@@ -15,6 +15,31 @@ export interface Project extends ProjectInput {
   updated_at: string;
 }
 
+export interface AssetProvenanceInput {
+  name: string;
+  asset_type: string;
+  provenance_kind: "original_synthetic" | "public_authorized" | "prohibited";
+  source: string;
+  usage_permission: "project_owned" | "public_license" | "prohibited" | "unknown";
+  model_permission: "allowed" | "denied" | "unknown";
+  requirement_version: string;
+  purpose: string;
+  content_base64: string;
+  change_reason: string;
+}
+
+export interface AssetProvenanceRecord extends Omit<AssetProvenanceInput, "content_base64"> {
+  id: number;
+  project_id: number;
+  revision: number;
+  sha256: string;
+  created_at: string;
+  boundary: "original_synthetic" | "public_authorized" | "prohibited" | "unknown";
+  can_enter_formal_package: boolean;
+  can_enter_model_context: boolean;
+  reason: string;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -62,3 +87,13 @@ export const updateProject = (projectId: number, project: ProjectInput): Promise
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(project),
   });
+export const listAssets = (projectId: number): Promise<AssetProvenanceRecord[]> =>
+  request(`/api/projects/${projectId}/assets`);
+export const createAsset = (
+  projectId: number,
+  asset: AssetProvenanceInput,
+): Promise<AssetProvenanceRecord> => request(`/api/projects/${projectId}/assets`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(asset),
+});
