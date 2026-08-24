@@ -9,6 +9,8 @@ from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIDispositionInput, AIRun, AIRunInput, AIModelConfig
 from app.ai_service import ModelRequest, MockModelService, UnavailableModelService, validate_output
 from app.asset_repository import AssetRepository
+from app.case_api import register_case_routes
+from app.case_repository import CaseGenerationRepository
 from app.design_repository import DesignRepository
 from app.design_api import register_design_routes
 from app.asset_schemas import AssetContentInput, AssetProvenanceInput, AssetProvenanceRecord, HashVerification
@@ -32,6 +34,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     design_repository = DesignRepository(resolved_database_path)
     ai_run_repository = AIRunRepository(resolved_database_path)
     template_repository = TemplateMappingRepository(resolved_database_path)
+    case_generation_repository = CaseGenerationRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
     @asynccontextmanager
@@ -49,6 +52,10 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
     )
     register_template_routes(app, repository, template_repository)
+    register_case_routes(
+        app, repository, requirement_repository, review_repository, design_repository, template_repository,
+        case_generation_repository, ai_run_repository,
+    )
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

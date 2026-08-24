@@ -205,6 +205,36 @@ export interface TemplateMappingVersion {
   confirmed_by: string | null;
 }
 
+export interface CandidateTestCase {
+  id: string;
+  title: string;
+  objective: string;
+  variant: string;
+  preconditions: string[];
+  steps: Array<{ order: number; action: string; input: string; expected: string }>;
+  overall_expectation: string;
+  evidence_requirements: string[];
+  requirement_ids: string[];
+  requirement_references: unknown[];
+  scope_item_id: string;
+  risk_item_id: string;
+  priority: string;
+  case_sheet_name: string;
+  automation_mapping: string | null;
+  unexpressed_fields: string[];
+  design_basis: Array<{ method: string; reason: string }>;
+}
+
+export interface CaseGeneration {
+  id: number;
+  ai_run_id: number;
+  ai_run_status: string;
+  is_mock: boolean;
+  status: "succeeded" | "empty" | "validation_failed" | "failed" | "needs_confirmation";
+  template_diagnostics: Array<{ code: string; message: string }>;
+  candidates: CandidateTestCase[];
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -380,6 +410,23 @@ export const validateTemplate = (
   `/api/projects/${projectId}/template-mappings/${mappingId}/validate`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ confirmer_name: confirmerName, mappings: mappings.map(toTemplateMapping) }),
+  },
+);
+
+export const generateCases = (
+  projectId: number,
+  designId: number,
+  templateMappingId: number,
+  acceptTemplateLimitations = false,
+): Promise<CaseGeneration> => request(
+  `/api/projects/${projectId}/test-designs/${designId}/case-generations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      template_mapping_id: templateMappingId,
+      accept_template_limitations: acceptTemplateLimitations,
+      variants: ["normal", "boundary", "invalid"],
+    }),
   },
 );
 
