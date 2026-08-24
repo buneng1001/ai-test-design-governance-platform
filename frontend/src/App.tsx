@@ -4,6 +4,7 @@ import { createProject, getProject, listProjects, Project, ProjectInput, updateP
 import { AssetProvenancePanel } from "./AssetProvenancePanel";
 import { AIRunPanel } from "./AIRunPanel";
 import { RequirementImportPanel } from "./RequirementImportPanel";
+import { RequirementReviewPanel } from "./RequirementReviewPanel";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
@@ -88,6 +89,8 @@ export function App() {
         <AssetProvenancePanel projectId={activeProject.id} />
         <AIRunPanel projectId={activeProject.id} />
         <RequirementImportPanel projectId={activeProject.id} />
+        <p className="muted">发布需求版本后，可在下方输入版本编号进入需求确认。</p>
+        <RequirementReviewPanel projectId={activeProject.id} />
       </main>
     );
   }

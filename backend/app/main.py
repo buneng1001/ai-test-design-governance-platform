@@ -3,12 +3,10 @@ from datetime import UTC, datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-
 from app.ai_repository import AIRunRepository
-from app.ai_schemas import AIDispositionInput, AIRun, AIRunInput
+from app.ai_schemas import AIAttempt, AIDispositionInput, AIRun, AIRunInput, AIModelConfig
 from app.ai_service import ModelRequest, MockModelService, UnavailableModelService, validate_output
 from app.asset_repository import AssetRepository
 from app.asset_schemas import (
@@ -21,23 +19,30 @@ from app.repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
 from app.requirement_schemas import RequirementPackage, RequirementPackageInput, RequirementVersion
 from app.requirement_service import build_requirement_package
+from app.review_repository import RequirementReviewRepository
+from app.review_schemas import (
+    AtomicRequirementUpdate,
+    FindingUpdate,
+    RequirementAnalysis,
+    RequirementConfirmationInput,
+    RequirementReviewFinding,
+    VisualInferenceUpdate,
+)
+from app.review_service import build_analysis_candidates, source_reference_exists
 from app.schemas import Project, ProjectInput
-
-
 def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
     asset_repository = AssetRepository(resolved_database_path)
     requirement_repository = RequirementRepository(resolved_database_path)
+    review_repository = RequirementReviewRepository(resolved_database_path)
     ai_run_repository = AIRunRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
-
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         repository.migrate()
         yield
-
     app = FastAPI(title="AI 测试设计与治理平台", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
@@ -45,27 +50,21 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
-
     @app.post("/api/projects", response_model=Project, status_code=status.HTTP_201_CREATED)
     def create_project(project_input: ProjectInput) -> Project:
         return repository.create(project_input)
-
     @app.get("/api/projects", response_model=list[Project])
     def list_projects() -> list[Project]:
         return repository.list()
-
     @app.get("/api/projects/{project_id}", response_model=Project)
     def get_project(project_id: int) -> Project:
         return require_project(repository.get(project_id))
-
     @app.put("/api/projects/{project_id}", response_model=Project)
     def update_project(project_id: int, project_input: ProjectInput) -> Project:
         return require_project(repository.update(project_id, project_input))
-
     @app.post(
         "/api/projects/{project_id}/assets",
         response_model=AssetProvenanceRecord,
@@ -74,12 +73,10 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     def create_asset(project_id: int, asset_input: AssetProvenanceInput) -> AssetProvenanceRecord:
         require_project(repository.get(project_id))
         return asset_repository.create(project_id, asset_input)
-
     @app.get("/api/projects/{project_id}/assets", response_model=list[AssetProvenanceRecord])
     def list_assets(project_id: int) -> list[AssetProvenanceRecord]:
         require_project(repository.get(project_id))
         return asset_repository.list_assets(project_id)
-
     @app.put("/api/projects/{project_id}/assets/{asset_id}", response_model=AssetProvenanceRecord)
     def revise_asset(
         project_id: int,
@@ -88,7 +85,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     ) -> AssetProvenanceRecord:
         require_project(repository.get(project_id))
         return require_asset(asset_repository.revise(project_id, asset_id, asset_input))
-
     @app.get(
         "/api/projects/{project_id}/assets/{asset_id}/history",
         response_model=list[AssetProvenanceRecord],
@@ -99,7 +95,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if history is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资产来源记录不存在")
         return history
-
     @app.post(
         "/api/projects/{project_id}/assets/{asset_id}/verify",
         response_model=HashVerification,
@@ -117,7 +112,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             expected_sha256=asset.sha256,
             actual_sha256=actual_sha256,
         )
-
     @app.get(
         "/api/projects/{project_id}/model-context-assets",
         response_model=list[AssetProvenanceRecord],
@@ -125,7 +119,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     def get_model_context_assets(project_id: int) -> list[AssetProvenanceRecord]:
         require_project(repository.get(project_id))
         return asset_repository.model_context_assets(project_id)
-
     @app.post(
         "/api/projects/{project_id}/requirement-packages",
         response_model=RequirementPackage,
@@ -138,7 +131,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         require_project(repository.get(project_id))
         package = build_requirement_package(project_id, package_input, asset_repository)
         return requirement_repository.create_package(package)
-
     @app.get(
         "/api/projects/{project_id}/requirement-packages/{package_id}",
         response_model=RequirementPackage,
@@ -149,7 +141,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if package is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="需求资料包不存在")
         return package
-
     @app.post(
         "/api/projects/{project_id}/requirement-packages/{package_id}/publish",
         response_model=RequirementVersion,
@@ -171,7 +162,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if version is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="需求资料包已经发布")
         return version
-
     @app.get(
         "/api/projects/{project_id}/requirement-versions",
         response_model=list[RequirementVersion],
@@ -179,7 +169,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     def list_requirement_versions(project_id: int) -> list[RequirementVersion]:
         require_project(repository.get(project_id))
         return requirement_repository.list_versions(project_id)
-
     @app.get(
         "/api/projects/{project_id}/requirement-versions/{version_id}",
         response_model=RequirementVersion,
@@ -190,7 +179,210 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if version is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="需求版本不存在")
         return version
-
+    @app.post(
+        "/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        response_model=RequirementAnalysis,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_requirement_review(project_id: int, version_id: int) -> RequirementAnalysis:
+        require_project(repository.get(project_id))
+        version = requirement_repository.get_version(project_id, version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="需求版本不存在")
+        existing = review_repository.latest_for_version(project_id, version_id)
+        if existing is not None:
+            return existing
+        atomic_requirements, findings, visual_inferences = build_analysis_candidates(version)
+        input_asset_versions = [
+            {"asset_id": material.asset_id, "revision": material.asset_revision}
+            for material in version.materials
+        ]
+        ai_run = ai_run_repository.create_run(
+            AIRun(
+                id=0,
+                project_id=project_id,
+                task_type="requirement_review",
+                model_parameters=AIModelConfig(),
+                prompt_version="requirement-review.v1",
+                input_asset_versions=input_asset_versions,
+                output={
+                    "contract_version": "ai-output.v1",
+                    "items": [
+                        {
+                            "candidate_id": item.candidate_id,
+                            "summary": item.statement,
+                            "source_asset_ids": [item.source_reference.asset_id],
+                        }
+                        for item in atomic_requirements
+                    ],
+                },
+                validation_status="passed",
+                validation_errors=[],
+                status="succeeded",
+                is_mock=True,
+                created_at=datetime.now(UTC),
+                attempts=[
+                    AIAttempt(
+                        attempt=1,
+                        started_at=datetime.now(UTC),
+                        elapsed_ms=0,
+                        status="succeeded",
+                    )
+                ],
+            )
+        )
+        analysis = RequirementAnalysis(
+            id=0,
+            project_id=project_id,
+            requirement_version_id=version_id,
+            atomic_requirements=atomic_requirements,
+            findings=findings,
+            visual_inferences=visual_inferences,
+            ai_run_id=ai_run.id,
+        )
+        return review_repository.create(analysis)
+    @app.get(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}",
+        response_model=RequirementAnalysis,
+    )
+    def get_requirement_review(project_id: int, analysis_id: int) -> RequirementAnalysis:
+        require_project(repository.get(project_id))
+        analysis = review_repository.get(project_id, analysis_id)
+        if analysis is None:
+            raise HTTPException(status_code=404, detail="需求评审不存在")
+        return analysis
+    @app.get("/api/projects/{project_id}/requirement-reviews/{analysis_id}/history")
+    def get_requirement_review_history(project_id: int, analysis_id: int) -> list[dict]:
+        require_project(repository.get(project_id))
+        history = review_repository.history(project_id, analysis_id)
+        if history is None:
+            raise HTTPException(status_code=404, detail="需求评审不存在")
+        return history
+    @app.patch(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/atomic-requirements/{candidate_id}",
+        response_model=RequirementAnalysis,
+    )
+    def update_atomic_requirement(
+        project_id: int,
+        analysis_id: int,
+        candidate_id: str,
+        update: AtomicRequirementUpdate,
+    ) -> RequirementAnalysis:
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        candidate = next(
+            (item for item in analysis.atomic_requirements if item.candidate_id == candidate_id), None
+        )
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="原子需求候选不存在")
+        if analysis.status == "confirmed":
+            raise HTTPException(status_code=409, detail="需求确认后不能修改原子需求")
+        now = datetime.now(UTC)
+        version = requirement_repository.get_version(project_id, analysis.requirement_version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="需求版本不存在")
+        if update.source_reference is not None and not source_reference_exists(version, update.source_reference):
+            raise HTTPException(status_code=422, detail="原子需求来源引用不存在")
+        if update.statement is not None:
+            candidate.statement = update.statement
+        if update.source_reference is not None:
+            candidate.source_reference = update.source_reference
+        if update.decision is not None:
+            candidate.decision = update.decision
+            if update.decision == "accepted" and candidate.stable_requirement_id is None:
+                candidate.stable_requirement_id = f"REQ-{candidate.candidate_id.removeprefix('candidate-')}"
+        if update.split_into:
+            candidate.decision = "rejected"
+            for index, statement in enumerate(update.split_into, start=1):
+                analysis.atomic_requirements.append(
+                    candidate.model_copy(
+                        update={
+                            "candidate_id": f"{candidate.candidate_id}-split-{index}",
+                            "stable_requirement_id": None,
+                            "statement": statement,
+                            "decision": "pending_confirmation",
+                            "created_at": now,
+                            "updated_at": now,
+                        }
+                    )
+                )
+        if update.merge_candidate_ids:
+            merge_ids = {candidate_id, *update.merge_candidate_ids}
+            merge_candidates = [
+                item for item in analysis.atomic_requirements if item.candidate_id in merge_ids
+            ]
+            if len(merge_candidates) != len(merge_ids):
+                raise HTTPException(status_code=422, detail="合并目标中包含不存在的原子需求候选")
+            candidate.statement = "；".join(item.statement for item in merge_candidates)
+            candidate.decision = "pending_confirmation"
+            candidate.stable_requirement_id = None
+            for item in merge_candidates:
+                if item.candidate_id != candidate_id:
+                    item.decision = "rejected"
+                    item.updated_at = now
+        candidate.updated_at = now
+        return review_repository.save(analysis, "atomic_requirement_updated")
+    @app.patch(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/findings/{finding_id}",
+        response_model=RequirementAnalysis,
+    )
+    def update_review_finding(
+        project_id: int,
+        analysis_id: int,
+        finding_id: str,
+        update: FindingUpdate,
+    ) -> RequirementAnalysis:
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        finding = next((item for item in analysis.findings if item.finding_id == finding_id), None)
+        if finding is None:
+            raise HTTPException(status_code=404, detail="需求评审发现不存在")
+        if analysis.status == "confirmed":
+            raise HTTPException(status_code=409, detail="需求确认后不能修改评审发现")
+        finding.status = update.status
+        if update.reason is not None:
+            finding.reason = update.reason
+        finding.updated_at = datetime.now(UTC)
+        return review_repository.save(analysis, "review_finding_updated")
+    @app.patch(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/visual-inferences/{inference_id}",
+        response_model=RequirementAnalysis,
+    )
+    def update_visual_inference(
+        project_id: int,
+        analysis_id: int,
+        inference_id: str,
+        update: VisualInferenceUpdate,
+    ) -> RequirementAnalysis:
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        inference = next((item for item in analysis.visual_inferences if item.inference_id == inference_id), None)
+        if inference is None:
+            raise HTTPException(status_code=404, detail="视觉推断不存在")
+        if analysis.status == "confirmed":
+            raise HTTPException(status_code=409, detail="需求确认后不能修改视觉推断")
+        inference.decision = update.decision
+        inference.updated_at = datetime.now(UTC)
+        return review_repository.save(analysis, "visual_inference_updated")
+    @app.post(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/confirm",
+        response_model=RequirementAnalysis,
+    )
+    def confirm_requirement_review(
+        project_id: int,
+        analysis_id: int,
+        confirmation: RequirementConfirmationInput,
+    ) -> RequirementAnalysis:
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        if analysis.status == "confirmed":
+            raise HTTPException(status_code=409, detail="需求确认已经完成")
+        if any(item.decision == "pending_confirmation" for item in analysis.atomic_requirements):
+            raise HTTPException(status_code=409, detail="仍有原子需求候选待确认")
+        if any(item.status == "pending_confirmation" for item in analysis.findings):
+            raise HTTPException(status_code=409, detail="仍有需求评审发现待处置")
+        if any(item.decision == "pending_confirmation" for item in analysis.visual_inferences):
+            raise HTTPException(status_code=409, detail="仍有视觉推断待确认")
+        analysis.status = "confirmed"
+        analysis.confirmed_by = confirmation.confirmer_name
+        analysis.confirmed_at = datetime.now(UTC)
+        return review_repository.save(analysis, "requirement_confirmed")
     @app.post("/api/projects/{project_id}/ai-runs", response_model=AIRun, status_code=status.HTTP_201_CREATED)
     def create_ai_run(project_id: int, run_input: AIRunInput) -> AIRun:
         require_project(repository.get(project_id))
@@ -202,7 +394,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             if not asset.can_enter_model_context:
                 raise HTTPException(status_code=422, detail="来源不明资产或评估真值不能进入模型上下文")
             input_asset_versions.append({"asset_id": asset.id, "revision": asset.revision})
-
         attempts = []
         final_output = None
         validation_errors: list[str] = []
@@ -248,7 +439,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 "status": "succeeded", "error_code": None, "retryable": False,
             })
             break
-
         run = AIRun(
             id=0, project_id=project_id, task_type=run_input.task_type, model_parameters=run_input.model_parameters,
             prompt_version=run_input.prompt_version, input_asset_versions=input_asset_versions,
@@ -257,12 +447,10 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             created_at=datetime.now(UTC), attempts=attempts,
         )
         return ai_run_repository.create_run(run)
-
     @app.get("/api/projects/{project_id}/ai-runs", response_model=list[AIRun])
     def list_ai_runs(project_id: int) -> list[AIRun]:
         require_project(repository.get(project_id))
         return ai_run_repository.list(project_id)
-
     @app.get("/api/projects/{project_id}/ai-runs/audit-export")
     def export_ai_audit(project_id: int) -> dict:
         require_project(repository.get(project_id))
@@ -271,7 +459,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             "project_id": project_id,
             "runs": [run.model_dump(mode="json") for run in ai_run_repository.list(project_id)],
         }
-
     @app.get("/api/projects/{project_id}/ai-runs/{run_id}", response_model=AIRun)
     def get_ai_run(project_id: int, run_id: int) -> AIRun:
         require_project(repository.get(project_id))
@@ -279,7 +466,6 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="AI 运行不存在")
         return run
-
     @app.post("/api/projects/{project_id}/ai-runs/{run_id}/dispositions", response_model=AIRun)
     def create_ai_disposition(
         project_id: int, run_id: int, disposition: AIDispositionInput
@@ -289,20 +475,24 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="AI 运行不存在")
         return run
-
     return app
-
-
 def require_project(project: Project | None) -> Project:
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="测试设计项目不存在")
     return project
-
-
 def require_asset(asset: AssetProvenanceRecord | None) -> AssetProvenanceRecord:
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资产来源记录不存在")
     return asset
-
-
+def require_review(
+    repository: ProjectRepository,
+    review_repository: RequirementReviewRepository,
+    project_id: int,
+    analysis_id: int,
+) -> RequirementAnalysis:
+    require_project(repository.get(project_id))
+    analysis = review_repository.get(project_id, analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="需求评审不存在")
+    return analysis
 app = create_app()
