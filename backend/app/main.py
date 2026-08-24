@@ -10,6 +10,8 @@ from app.ai_schemas import AIAttempt, AIDispositionInput, AIRun, AIRunInput, AIM
 from app.ai_service import ModelRequest, MockModelService, UnavailableModelService, validate_output
 from app.asset_repository import AssetRepository
 from app.case_api import register_case_routes
+from app.case_review_api import register_case_review_routes
+from app.case_review_repository import CaseReviewRepository
 from app.case_repository import CaseGenerationRepository
 from app.design_repository import DesignRepository
 from app.design_api import register_design_routes
@@ -35,6 +37,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     ai_run_repository = AIRunRepository(resolved_database_path)
     template_repository = TemplateMappingRepository(resolved_database_path)
     case_generation_repository = CaseGenerationRepository(resolved_database_path)
+    case_review_repository = CaseReviewRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
     @asynccontextmanager
@@ -55,6 +58,9 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     register_case_routes(
         app, repository, requirement_repository, review_repository, design_repository, template_repository,
         case_generation_repository, ai_run_repository,
+    )
+    register_case_review_routes(
+        app, repository, case_generation_repository, case_review_repository, ai_run_repository, requirement_repository,
     )
     @app.get("/api/health")
     def health() -> dict[str, str]:
