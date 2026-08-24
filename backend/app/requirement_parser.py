@@ -1,7 +1,5 @@
 import json
 from pathlib import Path
-from typing import Any
-
 import yaml
 
 from app.requirement_schemas import ParsedFragment, RequirementFormat, SourceReference
@@ -72,7 +70,7 @@ def _line_fragments(asset_id: int, filename: str, text: str, sha256: str) -> lis
 def _structured_fragments(
     asset_id: int,
     filename: str,
-    value: Any,
+    value: object,
     sha256: str,
     pointer: str = "",
     skipped_keys: set[str] | None = None,

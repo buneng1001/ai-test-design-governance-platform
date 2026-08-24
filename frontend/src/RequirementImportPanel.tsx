@@ -87,6 +87,14 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
         {draft.materials.map((material) => <article key={material.asset_id}>
           <strong>{material.filename}</strong>
           <span>{statusLabel(material.parse_status)} · {material.format} · {material.fragments.length} 个来源片段</span>
+          {material.fragments.length > 0 && <details>
+            <summary>查看解析结果与来源位置</summary>
+            <ul>
+              {material.fragments.map((fragment) => <li key={fragment.source_reference.reference_id}>
+                <code>{fragment.source_reference.locator}</code>：{fragment.text}
+              </li>)}
+            </ul>
+          </details>}
           {material.diagnostics.map((diagnostic) => <p className="error" key={diagnostic.code}>
             {diagnostic.message}
           </p>)}

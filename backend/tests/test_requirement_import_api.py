@@ -126,6 +126,7 @@ def test_partial_failure_and_unsafe_assets_return_explicit_diagnostics(client: T
         "asset_hash_mismatch",
     }
     assert all(item["message"] for item in package["diagnostics"])
+    assert package["materials"][3]["content_base64"] == ""
 
 
 def test_oversized_and_unreadable_files_are_diagnosed_without_silent_completion(
@@ -147,6 +148,7 @@ def test_oversized_and_unreadable_files_are_diagnosed_without_silent_completion(
         "file_too_large",
         "unreadable_content",
     }
+    assert response.json()["materials"][0]["content_base64"] == ""
 
 
 def test_partially_extractable_openapi_is_preserved_with_warning(client: TestClient) -> None:

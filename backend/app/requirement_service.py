@@ -5,6 +5,7 @@ from app.asset_repository import AssetRepository
 from app.requirement_parser import RequirementParseError, openapi_is_partial, parse_requirement
 from app.requirement_schemas import (
     ParseDiagnostic,
+    ParseStatus,
     RequirementFileInput,
     RequirementMaterial,
     RequirementPackage,
@@ -105,7 +106,7 @@ def _failed_material(
     file_input: RequirementFileInput,
     code: str,
     message: str,
-    status: str,
+    status: ParseStatus,
     asset_revision: int = 0,
     sha256: str = "",
 ) -> RequirementMaterial:
@@ -122,7 +123,7 @@ def _failed_material(
         media_type=file_input.media_type,
         format="unsupported",
         sha256=sha256,
-        content_base64=file_input.content_base64,
+        content_base64="" if status == "rejected" else file_input.content_base64,
         parse_status=status,
         fragments=[],
         diagnostics=[diagnostic],
