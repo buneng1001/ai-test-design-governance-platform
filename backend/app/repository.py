@@ -150,6 +150,15 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS case_generations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        design_id INTEGER NOT NULL REFERENCES test_designs(id),
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

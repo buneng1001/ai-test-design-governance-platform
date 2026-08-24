@@ -7,6 +7,7 @@ import { RequirementImportPanel } from "./RequirementImportPanel";
 import { RequirementReviewPanel } from "./RequirementReviewPanel";
 import { TestDesignPanel } from "./TestDesignPanel";
 import { TemplateMappingPanel } from "./TemplateMappingPanel";
+import { CaseGenerationPanel } from "./CaseGenerationPanel";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
@@ -95,6 +96,7 @@ export function App() {
         <RequirementReviewPanel projectId={activeProject.id} />
         <TestDesignPanel projectId={activeProject.id} />
         <TemplateMappingPanel projectId={activeProject.id} />
+        <CaseGenerationPanel projectId={activeProject.id} />
       </main>
     );
   }

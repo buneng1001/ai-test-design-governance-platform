@@ -4,7 +4,9 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
-AITaskType = Literal["requirement_review", "scope_analysis", "risk_analysis", "automation_assessment"]
+AITaskType = Literal[
+    "requirement_review", "scope_analysis", "risk_analysis", "automation_assessment", "case_generation"
+]
 MockScenario = Literal[
     "normal",
     "empty",
