@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { CaseGeneration, generateCases } from "./api";
+import { CaseReviewPanel } from "./CaseReviewPanel";
 
 export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const [designId, setDesignId] = useState(1);
@@ -43,6 +44,11 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
         <p>设计依据：{candidate.design_basis.map((basis) => basis.reason).join("；")}</p>
         {candidate.unexpressed_fields.length > 0 && <p role="note">模板未无损表达：{candidate.unexpressed_fields.join("、")}</p>}
       </article>)}
+      {generation.candidates.length > 0 && <CaseReviewPanel
+        projectId={projectId}
+        generationId={generation.id}
+        candidateIds={generation.candidates.map((candidate) => candidate.id)}
+      />}
     </div>}
   </section>;
 }

@@ -159,6 +159,22 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS case_review_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        generation_id INTEGER NOT NULL REFERENCES case_generations(id),
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS case_review_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id INTEGER NOT NULL REFERENCES case_review_batches(id),
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

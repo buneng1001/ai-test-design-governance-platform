@@ -5,7 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 AITaskType = Literal[
-    "requirement_review", "scope_analysis", "risk_analysis", "automation_assessment", "case_generation"
+    "requirement_review", "scope_analysis", "risk_analysis", "automation_assessment", "case_generation",
+    "case_review",
 ]
 MockScenario = Literal[
     "normal",

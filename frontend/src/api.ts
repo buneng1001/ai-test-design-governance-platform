@@ -235,6 +235,30 @@ export interface CaseGeneration {
   candidates: CandidateTestCase[];
 }
 
+export interface CaseReviewSuggestion {
+  id: string;
+  candidate_id: string;
+  role: "product_manager" | "test_manager" | "project_manager";
+  suggestion_type: string;
+  summary: string;
+  rationale: string;
+  source_references: unknown[];
+  limitations: string[];
+  disposition: "accepted" | "rejected" | "modified" | null;
+}
+
+export interface CaseReviewBatch {
+  id: number;
+  generation_id: number;
+  status: "in_progress" | "completed" | "confirmed";
+  reviewer_runs: Array<{ role: string; ai_run_id: number }>;
+  suggestions: CaseReviewSuggestion[];
+  groups: Array<{ id: string; summary: string; original_suggestion_ids: string[]; source_roles: string[] }>;
+  revisions: Array<{ id: string; candidate_id: string; revision: number; stable_case_id: string | null }>;
+  inclusion: Record<string, boolean>;
+  confirmed_by: string | null;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -427,6 +451,39 @@ export const generateCases = (
       accept_template_limitations: acceptTemplateLimitations,
       variants: ["normal", "boundary", "invalid"],
     }),
+  },
+);
+
+export const createCaseReviews = (
+  projectId: number, generationId: number,
+): Promise<CaseReviewBatch> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}/reviews`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+  },
+);
+
+export const disposeCaseReviewSuggestion = (
+  projectId: number, batchId: number, suggestionId: string, decision: "accepted" | "rejected" | "modified",
+  modifiedFields: Record<string, string> = {},
+): Promise<CaseReviewBatch> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/suggestions/${suggestionId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      decision,
+      reason: `测试工程师${decision === "accepted" ? "采纳" : decision === "rejected" ? "拒绝" : "修改并采纳"}该建议`,
+      modified_fields: modifiedFields,
+    }),
+  },
+);
+
+export const confirmCaseReviews = (
+  projectId: number, batchId: number, candidateIds: string[], confirmerName: string,
+): Promise<CaseReviewBatch> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmer_name: confirmerName, inclusion: Object.fromEntries(
+      candidateIds.map((candidateId) => [candidateId, true]),
+    ) }),
   },
 );
 
