@@ -118,6 +118,21 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS test_designs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        requirement_version_id INTEGER NOT NULL REFERENCES requirement_versions(id),
+        payload_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS test_design_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        design_id INTEGER NOT NULL REFERENCES test_designs(id),
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

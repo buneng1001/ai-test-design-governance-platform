@@ -9,25 +9,16 @@ from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIDispositionInput, AIRun, AIRunInput, AIModelConfig
 from app.ai_service import ModelRequest, MockModelService, UnavailableModelService, validate_output
 from app.asset_repository import AssetRepository
-from app.asset_schemas import (
-    AssetContentInput,
-    AssetProvenanceInput,
-    AssetProvenanceRecord,
-    HashVerification,
-)
+from app.design_repository import DesignRepository
+from app.design_api import register_design_routes
+from app.asset_schemas import AssetContentInput, AssetProvenanceInput, AssetProvenanceRecord, HashVerification
 from app.repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
 from app.requirement_schemas import RequirementPackage, RequirementPackageInput, RequirementVersion
 from app.requirement_service import build_requirement_package
 from app.review_repository import RequirementReviewRepository
-from app.review_schemas import (
-    AtomicRequirementUpdate,
-    FindingUpdate,
-    RequirementAnalysis,
-    RequirementConfirmationInput,
-    RequirementReviewFinding,
-    VisualInferenceUpdate,
-)
+from app.review_schemas import AtomicRequirementUpdate, FindingUpdate, RequirementAnalysis
+from app.review_schemas import RequirementConfirmationInput, RequirementReviewFinding, VisualInferenceUpdate
 from app.review_service import build_analysis_candidates, source_reference_exists
 from app.schemas import Project, ProjectInput
 def create_app(database_path: Path | None = None) -> FastAPI:
@@ -36,6 +27,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     asset_repository = AssetRepository(resolved_database_path)
     requirement_repository = RequirementRepository(resolved_database_path)
     review_repository = RequirementReviewRepository(resolved_database_path)
+    design_repository = DesignRepository(resolved_database_path)
     ai_run_repository = AIRunRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
@@ -49,6 +41,9 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+    register_design_routes(
+        app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
     )
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -383,6 +378,9 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         analysis.confirmed_by = confirmation.confirmer_name
         analysis.confirmed_at = datetime.now(UTC)
         return review_repository.save(analysis, "requirement_confirmed")
+    register_design_routes(
+        app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
+    )
     @app.post("/api/projects/{project_id}/ai-runs", response_model=AIRun, status_code=status.HTTP_201_CREATED)
     def create_ai_run(project_id: int, run_input: AIRunInput) -> AIRun:
         require_project(repository.get(project_id))
@@ -495,4 +493,5 @@ def require_review(
     if analysis is None:
         raise HTTPException(status_code=404, detail="需求评审不存在")
     return analysis
+
 app = create_app()

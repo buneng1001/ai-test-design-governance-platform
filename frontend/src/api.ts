@@ -143,6 +143,36 @@ export interface AIRun {
   disposition: { decision: string; reason: string } | null;
 }
 
+export interface TestDesign {
+  id: number;
+  requirement_version_id: number;
+  status: "draft" | "confirmed";
+  dimensions: Array<{ id: string; name: string; status: "active" | "inactive" }>;
+  scope_items: Array<{ id: string; title: string; primary_dimension_id: string }>;
+  risks: Array<{
+    scope_item_id: string;
+    final_score: number;
+    risk_level: string;
+    priority: string;
+    factors: Array<{ key: string; name: string; score: number; weight: number; source_references: unknown[] }>;
+  }>;
+  automation_candidates: Array<{
+    scope_item_id: string;
+    suggested_score: number;
+    decision: string;
+    suggestion_reason: string;
+    factors: {
+      regression_value: number;
+      determinism: number;
+      environment_control: number;
+      saving_benefit: number;
+      maintenance_cost: number;
+      manual_observation: number;
+    };
+  }>;
+  confirmed_by: string | null;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -260,3 +290,38 @@ export const confirmRequirementReview = (
   },
 );
 export const listAIRuns = (projectId: number): Promise<AIRun[]> => request(`/api/projects/${projectId}/ai-runs`);
+export const createTestDesign = (projectId: number, versionId: number): Promise<TestDesign> => request(
+  `/api/projects/${projectId}/requirement-versions/${versionId}/test-designs`,
+  { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) },
+);
+export const confirmTestDesign = (
+  projectId: number,
+  designId: number,
+  confirmerName: string,
+): Promise<TestDesign> => request(`/api/projects/${projectId}/test-designs/${designId}/confirm`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ confirmer_name: confirmerName }),
+});
+export const addTestDimension = (projectId: number, designId: number, name: string): Promise<TestDesign> => request(
+  `/api/projects/${projectId}/test-designs/${designId}/dimensions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  },
+);
+export const adjustTestRisk = (
+  projectId: number, designId: number, scopeItemId: string, factors: TestDesign["risks"][number]["factors"],
+): Promise<TestDesign> => request(`/api/projects/${projectId}/test-designs/${designId}/risks/${scopeItemId}`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ factors, adjustment_reason: "测试工程师在页面确认风险因子" }),
+});
+export const decideAutomation = (
+  projectId: number, designId: number, scopeItemId: string,
+  factors: TestDesign["automation_candidates"][number]["factors"], decision: string,
+): Promise<TestDesign> => request(`/api/projects/${projectId}/test-designs/${designId}/automation/${scopeItemId}`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ factors, decision, decision_reason: "测试工程师在页面确认自动化决定" }),
+});
