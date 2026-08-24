@@ -77,7 +77,15 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
       <p>先登记资产来源，再选择同名文件组成需求资料包；发布后会形成不可覆盖的需求版本。</p>
       <form className="project-form" onSubmit={inspect}>
         <label>需求资料包名称<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>需求资料文件<input type="file" multiple accept=".md,.txt,.json,.yaml,.yml" onChange={selectFiles} /></label>
+        <label>
+          需求资料文件
+          <input
+            type="file"
+            multiple
+            accept=".md,.txt,.json,.yaml,.yml,.docx,.pdf,.png,.jpg,.jpeg"
+            onChange={selectFiles}
+          />
+        </label>
         {files.length > 0 && <p>已选择：{files.map((file) => file.filename).join("、")}</p>}
         <button type="submit">查看解析结果</button>
       </form>
@@ -95,6 +103,11 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
               </li>)}
             </ul>
           </details>}
+          {material.visual_inferences.map((candidate) => (
+            <p key={candidate.source_reference.reference_id}>
+            视觉推断（待人工确认）：{candidate.description}；来源：{candidate.source_reference.locator}
+            </p>
+          ))}
           {material.diagnostics.map((diagnostic) => <p className="error" key={diagnostic.code}>
             {diagnostic.message}
           </p>)}
@@ -104,7 +117,12 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
         </button>
       </div>}
       <div className="version-list" aria-label="需求版本列表">
-        {versions.map((version) => <span key={version.id}>V{version.version} · {version.name}</span>)}
+        {versions.map((version) => <article key={version.id}>
+          <strong>V{version.version} · {version.name}</strong>
+          <span>{version.materials.map((material) =>
+            `${material.filename}：${statusLabel(material.parse_status)}（${material.format}）`
+          ).join("；")}</span>
+        </article>)}
       </div>
     </section>
   );

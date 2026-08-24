@@ -66,12 +66,17 @@ export interface RequirementMaterial {
   asset_revision: number;
   filename: string;
   media_type: string;
-  format: "markdown" | "text" | "json" | "yaml" | "openapi" | "unsupported";
+  format: "markdown" | "text" | "json" | "yaml" | "openapi" | "docx" | "pdf" | "png" | "jpg" | "unsupported";
   sha256: string;
   content_base64: string;
   parse_status: "complete" | "partial" | "failed" | "rejected";
   fragments: Array<{
     text: string;
+    source_reference: { reference_id: string; asset_id: number; filename: string; locator: string };
+  }>;
+  visual_inferences: Array<{
+    status: "pending_confirmation";
+    description: string;
     source_reference: { reference_id: string; asset_id: number; filename: string; locator: string };
   }>;
   diagnostics: ParseDiagnostic[];

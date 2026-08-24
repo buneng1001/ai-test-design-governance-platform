@@ -67,7 +67,7 @@ def build_material(
             asset.sha256,
         )
     try:
-        format_name, fragments = parse_requirement(asset.id, file_input.filename, content, asset.sha256)
+        parsed = parse_requirement(asset.id, file_input.filename, content, asset.sha256)
     except RequirementParseError as error:
         return _failed_material(
             file_input,
@@ -77,9 +77,9 @@ def build_material(
             asset.revision,
             asset.sha256,
         )
-    diagnostics = []
-    parse_status = "complete"
-    if format_name == "openapi" and openapi_is_partial(content):
+    diagnostics = parsed.diagnostics
+    parse_status = parsed.parse_status
+    if parsed.format == "openapi" and openapi_is_partial(content):
         parse_status = "partial"
         diagnostics = [ParseDiagnostic(
             asset_id=asset.id,
@@ -93,11 +93,12 @@ def build_material(
         asset_revision=asset.revision,
         filename=file_input.filename,
         media_type=file_input.media_type,
-        format=format_name,
+        format=parsed.format,
         sha256=asset.sha256,
         content_base64=file_input.content_base64,
         parse_status=parse_status,
-        fragments=fragments,
+        fragments=parsed.fragments,
+        visual_inferences=parsed.visual_inferences,
         diagnostics=diagnostics,
     )
 
@@ -126,5 +127,6 @@ def _failed_material(
         content_base64="" if status == "rejected" else file_input.content_base64,
         parse_status=status,
         fragments=[],
+        visual_inferences=[],
         diagnostics=[diagnostic],
     )
