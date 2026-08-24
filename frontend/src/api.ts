@@ -46,6 +46,59 @@ export interface AssetProvenanceRecord extends Omit<AssetProvenanceInput, "conte
   reason: string;
 }
 
+export interface RequirementFileInput {
+  asset_id: number;
+  filename: string;
+  media_type: string;
+  content_base64: string;
+}
+
+export interface ParseDiagnostic {
+  asset_id: number;
+  filename: string;
+  code: string;
+  severity: "warning" | "error";
+  message: string;
+}
+
+export interface RequirementMaterial {
+  asset_id: number;
+  asset_revision: number;
+  filename: string;
+  media_type: string;
+  format: "markdown" | "text" | "json" | "yaml" | "openapi" | "unsupported";
+  sha256: string;
+  content_base64: string;
+  parse_status: "complete" | "partial" | "failed" | "rejected";
+  fragments: Array<{
+    text: string;
+    source_reference: { reference_id: string; asset_id: number; filename: string; locator: string };
+  }>;
+  diagnostics: ParseDiagnostic[];
+}
+
+export interface RequirementPackage {
+  id: number;
+  project_id: number;
+  name: string;
+  status: "draft" | "published";
+  materials: RequirementMaterial[];
+  diagnostics: ParseDiagnostic[];
+  created_at: string;
+  published_version_id: number | null;
+}
+
+export interface RequirementVersion {
+  id: number;
+  project_id: number;
+  package_id: number;
+  version: number;
+  name: string;
+  materials: RequirementMaterial[];
+  diagnostics: ParseDiagnostic[];
+  created_at: string;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -103,3 +156,21 @@ export const createAsset = (
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(asset),
 });
+export const createRequirementPackage = (
+  projectId: number,
+  name: string,
+  files: RequirementFileInput[],
+): Promise<RequirementPackage> => request(`/api/projects/${projectId}/requirement-packages`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name, files }),
+});
+export const publishRequirementPackage = (
+  projectId: number,
+  packageId: number,
+): Promise<RequirementVersion> => request(
+  `/api/projects/${projectId}/requirement-packages/${packageId}/publish`,
+  { method: "POST" },
+);
+export const listRequirementVersions = (projectId: number): Promise<RequirementVersion[]> =>
+  request(`/api/projects/${projectId}/requirement-versions`);

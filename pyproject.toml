@@ -5,6 +5,7 @@ description = "本地 AI 测试设计与治理平台"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116,<1",
+    "PyYAML>=6,<7",
     "uvicorn[standard]>=0.35,<1",
 ]
 

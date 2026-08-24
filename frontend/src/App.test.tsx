@@ -24,7 +24,8 @@ test("测试工程师创建测试设计项目后进入项目工作台", async ()
   };
   vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify(createdProject), { status: 201 }));
+    .mockResolvedValueOnce(new Response(JSON.stringify(createdProject), { status: 201 }))
+    .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
 
   render(<App />);
 
