@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 PackageName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-RequirementFormat = Literal["markdown", "text", "json", "yaml", "openapi", "unsupported"]
+RequirementFormat = Literal[
+    "markdown", "text", "json", "yaml", "openapi", "docx", "pdf", "png", "jpg", "unsupported"
+]
 ParseStatus = Literal["complete", "partial", "failed", "rejected"]
 
 
@@ -37,6 +39,14 @@ class ParsedFragment(BaseModel):
     source_reference: SourceReference
 
 
+class VisualInferenceCandidate(BaseModel):
+    """图片只产生待确认线索，不直接成为需求事实。"""
+
+    status: Literal["pending_confirmation"] = "pending_confirmation"
+    description: str
+    source_reference: SourceReference
+
+
 class ParseDiagnostic(BaseModel):
     asset_id: int
     filename: str
@@ -55,6 +65,7 @@ class RequirementMaterial(BaseModel):
     content_base64: str
     parse_status: ParseStatus
     fragments: list[ParsedFragment]
+    visual_inferences: list[VisualInferenceCandidate] = Field(default_factory=list)
     diagnostics: list[ParseDiagnostic]
 
 
