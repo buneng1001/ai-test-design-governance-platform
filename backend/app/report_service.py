@@ -7,6 +7,7 @@ from app.case_review_repository import CaseReviewRepository
 from app.change_impact_repository import ChangeImpactRepository
 from app.coverage_service import build_coverage
 from app.design_repository import DesignRepository
+from app.evaluation_repository import EvaluationRepository
 from app.execution_batch_repository import ExecutionBatchRepository
 from app.execution_result_repository import ExecutionResultRepository
 from app.quality_repository import QualityRepository
@@ -34,6 +35,7 @@ class ReportService:
         quality_repository: QualityRepository,
         change_repository: ChangeImpactRepository,
         ai_repository: AIRunRepository,
+        evaluation_repository: EvaluationRepository,
     ) -> None:
         self.assets = asset_repository
         self.requirements = requirement_repository
@@ -48,6 +50,7 @@ class ReportService:
         self.quality = quality_repository
         self.changes = change_repository
         self.ai_runs = ai_repository
+        self.evaluations = evaluation_repository
 
     def build_test_design(self, project_id: int) -> ReportPayload:
         versions = self.requirements.list_versions(project_id)
@@ -137,6 +140,8 @@ class ReportService:
     def build_audit_package(self, project_id: int) -> ReportPayload:
         assets = self.assets.list_assets(project_id)
         runs = self.ai_runs.list(project_id)
+        evaluations = self.evaluations.list(project_id)
+        latest_evaluation = self.evaluations.latest(project_id)
         design_report = self.build_test_design(project_id)
         governance_report = self.build_execution_governance(project_id)
         dispositions = [item for run in runs for item in run.dispositions]
@@ -156,9 +161,21 @@ class ReportService:
                     ],
                 },
                 "ai_runs": [ai_summary(run) for run in runs],
+                "evaluations": [
+                    {
+                        "id": item.id,
+                        "truth_asset_id": item.truth_asset_id,
+                        "truth_sha256": item.truth_sha256,
+                        "input_sha256": item.input_sha256,
+                        "ai_run_ids": item.ai_run_ids,
+                        "metrics": item.metrics.model_dump(mode="json"),
+                        "created_at": item.created_at.isoformat(),
+                    }
+                    for item in evaluations
+                ],
                 "human_dispositions": dispositions,
             },
-            metrics={"ai_effectiveness": ai_effectiveness(runs)},
+            metrics={"ai_effectiveness": ai_effectiveness(runs, latest_evaluation)},
             evidence={
                 "source_references": design_report["evidence"]["source_references"],
                 "asset_provenance": [

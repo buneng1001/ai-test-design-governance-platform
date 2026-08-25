@@ -1,5 +1,7 @@
 from typing import TypeAlias
 
+from app.evaluation_schemas import EvaluationRun
+
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -41,7 +43,7 @@ def ai_summary(run: object) -> ReportPayload:
     }
 
 
-def ai_effectiveness(runs: list[object]) -> ReportPayload:
+def ai_effectiveness(runs: list[object], evaluation: EvaluationRun | None = None) -> ReportPayload:
     total = len(runs)
     passed = sum(run.validation_status == "passed" for run in runs)
     source_total = 0
@@ -54,7 +56,7 @@ def ai_effectiveness(runs: list[object]) -> ReportPayload:
             valid_sources += sum(asset_id in allowed_assets for asset_id in item.get("source_asset_ids", []))
     dispositions = [item for run in runs for item in run.dispositions]
     adopted = sum(item.get("decision") in {"accepted", "modified"} for item in dispositions)
-    return {
+    metrics: ReportPayload = {
         "structural_compliance_rate": {"numerator": passed, "denominator": total, "percentage": rate(passed, total)},
         "source_reference_validity_rate": {
             "numerator": valid_sources,
@@ -83,6 +85,17 @@ def ai_effectiveness(runs: list[object]) -> ReportPayload:
             "percentage": rate(adopted, len(dispositions)),
         },
     }
+    if evaluation is not None:
+        evaluated = evaluation.metrics.model_dump(mode="json")
+        metrics.update({
+            "truth_hit": evaluated["truth_hit"],
+            "key_omissions": evaluated["key_omissions"],
+            "unsupported_expansions": evaluated["unsupported_expansions"],
+            "distractor_hits": evaluated["distractor_hits"],
+            "evaluation_run_id": evaluation.id,
+            "evaluation_input_sha256": evaluation.input_sha256,
+        })
+    return metrics
 
 
 def version_summary(version: object) -> ReportPayload:
