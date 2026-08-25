@@ -7,6 +7,7 @@ import { RequirementImportPanel } from "./RequirementImportPanel";
 import { RequirementReviewPanel } from "./RequirementReviewPanel";
 import { TestDesignPanel } from "./TestDesignPanel";
 import { TemplateMappingPanel } from "./TemplateMappingPanel";
+import { TaskPublicationPanel } from "./TaskPublicationPanel";
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
 import "./styles.css";
 
@@ -97,6 +98,7 @@ export function App() {
         <TestDesignPanel projectId={activeProject.id} />
         <TemplateMappingPanel projectId={activeProject.id} />
         <CaseGenerationPanel projectId={activeProject.id} />
+        <TaskPublicationPanel projectId={activeProject.id} />
       </main>
     );
   }

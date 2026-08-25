@@ -27,6 +27,8 @@ from app.review_service import build_analysis_candidates, source_reference_exist
 from app.schemas import Project, ProjectInput
 from app.template_api import register_template_routes
 from app.template_repository import TemplateMappingRepository
+from app.task_api import register_task_routes
+from app.task_repository import TestTaskRepository
 def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -38,6 +40,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     template_repository = TemplateMappingRepository(resolved_database_path)
     case_generation_repository = CaseGenerationRepository(resolved_database_path)
     case_review_repository = CaseReviewRepository(resolved_database_path)
+    task_repository = TestTaskRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
     @asynccontextmanager
@@ -63,6 +66,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         app, repository, case_generation_repository, case_review_repository, ai_run_repository, requirement_repository,
         template_repository,
     )
+    register_task_routes(app, repository, case_review_repository, task_repository)
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

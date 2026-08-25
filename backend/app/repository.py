@@ -175,6 +175,18 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS test_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        batch_id INTEGER NOT NULL REFERENCES case_review_batches(id),
+        task_id TEXT NOT NULL,
+        task_version INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(task_id, task_version)
+    );
+    """,
 )
 
 

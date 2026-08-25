@@ -266,6 +266,32 @@ export interface CaseReviewBatch {
   confirmed_by: string | null;
 }
 
+export interface TestTask {
+  contract_version: "test-task.v1";
+  task_id: string;
+  task_version: number;
+  project_id: number;
+  case_review_batch_id: number;
+  execution_scope: "selected";
+  execution_target:
+    | "manual" | "test_execution_diagnostics" | "generic_automation" | "external_executor" | "unspecified";
+  cases: Array<{
+    stable_case_id: string;
+    case_revision_id: string;
+    case_revision: number;
+    title: string;
+    priority: "P0" | "P1" | "P2" | "P3";
+    preconditions: string[];
+    parameters: Record<string, string>;
+    steps: Array<Record<string, string | number>>;
+    expected_result: string;
+    verdict_method: "expected_result_match" | "manual_observation" | "adapter_defined";
+    evidence_requirements: string[];
+  }>;
+  published_by: string;
+  published_at: string;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -534,6 +560,20 @@ export const exportCaseFile = async (
   link.click();
   URL.revokeObjectURL(url);
 };
+
+export const publishTestTask = (
+  projectId: number,
+  batchId: number,
+  input: {
+    confirmer_name: string;
+    execution_target: TestTask["execution_target"];
+    stable_case_ids: string[];
+    target_extension: Record<string, string>;
+  },
+): Promise<TestTask> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/test-tasks`,
+  { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
+);
 
 const toTemplateMapping = (sheet: TemplateSheet) => ({
   sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,
