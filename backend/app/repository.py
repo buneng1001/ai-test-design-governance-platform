@@ -203,6 +203,42 @@ MIGRATIONS = (
         UNIQUE(project_id, stable_case_id, execution_sequence)
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS execution_result_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        batch_id INTEGER NOT NULL REFERENCES execution_batches(id),
+        source_type TEXT NOT NULL,
+        source_record_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        match_status TEXT NOT NULL,
+        stable_case_id TEXT,
+        case_revision_id TEXT,
+        execution_sequence INTEGER,
+        retest_of_result_id INTEGER REFERENCES execution_result_records(id),
+        created_at TEXT NOT NULL,
+        UNIQUE(batch_id, source_type, source_record_id)
+    );
+    CREATE TABLE IF NOT EXISTS execution_result_conflicts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        batch_id INTEGER NOT NULL REFERENCES execution_batches(id),
+        result_ids_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS execution_batch_conclusions (
+        batch_id INTEGER PRIMARY KEY REFERENCES execution_batches(id),
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    ALTER TABLE execution_result_records ADD COLUMN match_reason TEXT;
+    ALTER TABLE execution_result_records ADD COLUMN matched_by TEXT;
+    """,
 )
 
 

@@ -31,6 +31,8 @@ from app.task_api import register_task_routes
 from app.task_repository import TestTaskRepository
 from app.execution_batch_api import register_execution_batch_routes
 from app.execution_batch_repository import ExecutionBatchRepository
+from app.execution_result_api import register_execution_result_routes
+from app.execution_result_repository import ExecutionResultRepository
 def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -44,6 +46,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     case_review_repository = CaseReviewRepository(resolved_database_path)
     task_repository = TestTaskRepository(resolved_database_path)
     execution_batch_repository = ExecutionBatchRepository(resolved_database_path)
+    execution_result_repository = ExecutionResultRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
     @asynccontextmanager
@@ -74,6 +77,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         app, repository, task_repository, case_review_repository, case_generation_repository,
         design_repository, execution_batch_repository,
     )
+    register_execution_result_routes(app, repository, execution_batch_repository, execution_result_repository)
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

@@ -9,6 +9,7 @@ import { TestDesignPanel } from "./TestDesignPanel";
 import { TemplateMappingPanel } from "./TemplateMappingPanel";
 import { TaskPublicationPanel } from "./TaskPublicationPanel";
 import { ExecutionBatchPanel } from "./ExecutionBatchPanel";
+import { ExecutionResultPanel } from "./ExecutionResultPanel";
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
 import "./styles.css";
 
@@ -101,6 +102,7 @@ export function App() {
         <CaseGenerationPanel projectId={activeProject.id} />
         <TaskPublicationPanel projectId={activeProject.id} />
         <ExecutionBatchPanel projectId={activeProject.id} />
+        <ExecutionResultPanel projectId={activeProject.id} />
       </main>
     );
   }
