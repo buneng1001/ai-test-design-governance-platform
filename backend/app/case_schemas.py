@@ -8,6 +8,8 @@ from app.requirement_schemas import SourceReference
 
 
 CaseVariant = Literal["normal", "boundary", "equivalence", "invalid", "scenario"]
+CaseLifecycleStatus = Literal["draft", "effective", "closed", "deprecated", "superseded"]
+CaseParticipationStatus = Literal["included", "not_included", "pending_impact", "pending_retest"]
 
 
 class TestStep(BaseModel):
@@ -34,6 +36,7 @@ class CandidateTestCase(BaseModel):
     project_id: int
     generation_id: int
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    external_case_number: str | None = None
     objective: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
     variant: CaseVariant
     preconditions: list[str] = Field(min_length=1)

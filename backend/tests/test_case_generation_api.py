@@ -3,7 +3,10 @@ import base64
 from fastapi.testclient import TestClient
 
 
-def _setup(client: TestClient, template_field: str = "title") -> tuple[int, int, int]:
+def _setup(
+    client: TestClient, template_field: str = "title", template_filename: str = "用例.csv",
+    template_content: str | None = None,
+) -> tuple[int, int, int]:
     project = client.post(
         "/api/projects",
         json={"name": "候选用例项目", "test_object": "虚构智能采集设备", "description": "生成测试用例"},
@@ -16,7 +19,8 @@ def _setup(client: TestClient, template_field: str = "title") -> tuple[int, int,
     }).json()
     package = client.post(f"/api/projects/{project['id']}/requirement-packages", json={
         "name": "V1 需求资料包", "files": [{
-            "asset_id": asset["id"], "filename": "requirements.md", "media_type": "text/markdown", "content_base64": content,
+            "asset_id": asset["id"], "filename": "requirements.md", "media_type": "text/markdown",
+            "content_base64": content,
         }],
     }).json()
     version = client.post(f"/api/projects/{project['id']}/requirement-packages/{package['id']}/publish").json()
@@ -47,21 +51,32 @@ def _setup(client: TestClient, template_field: str = "title") -> tuple[int, int,
         "用例标题,测试步骤,预期结果,设计依据\n"
         if template_field == "design_basis" else "用例标题,测试步骤,预期结果\n"
     )
-    csv = base64.b64encode(headers.encode()).decode()
+    csv = template_content or base64.b64encode(headers.encode()).decode()
     mapping = client.post(
-        f"/api/projects/{project['id']}/template-mappings", json={"filename": "用例.csv", "content_base64": csv}
+        f"/api/projects/{project['id']}/template-mappings",
+        json={"filename": template_filename, "content_base64": csv},
     ).json()
     sheets = mapping["sheets"]
     field_mapping = {"用例标题": "title", "测试步骤": "steps", "预期结果": "overall_expectation"}
+    if template_filename.endswith(".xlsx"):
+        field_mapping = {"用例编号": "external_case_number", "用例标题": "title",
+                          "测试步骤": "steps", "预期结果": "overall_expectation"}
     if template_field == "design_basis":
         field_mapping["设计依据"] = template_field
     sheets[0].update({"role": "case", "participates": True, "title_row": 1, "field_mapping": field_mapping})
     client.post(
         f"/api/projects/{project['id']}/template-mappings/{mapping['id']}/confirm",
-        json={"confirmer_name": "测试工程师", "mappings": [{
-            "sheet_name": "CSV", "role": "case", "participates": True, "title_row": 1,
-            "field_mapping": sheets[0]["field_mapping"],
-        }]},
+        json={"confirmer_name": "测试工程师", "mappings": [
+            {
+                "sheet_name": sheets[0]["name"], "role": "case", "participates": True, "title_row": 1,
+                "field_mapping": sheets[0]["field_mapping"],
+            },
+            *[
+                {"sheet_name": sheet["name"], "role": "instruction", "participates": False,
+                 "title_row": sheet["title_row"], "field_mapping": {}}
+                for sheet in sheets[1:]
+            ],
+        ]},
     )
     return project["id"], design["id"], mapping["id"]
 
