@@ -319,6 +319,48 @@ export interface ExecutionBatch {
   created_at: string;
 }
 
+export type ExecutionResultStatus =
+  | "passed" | "execution_failed" | "blocked" | "not_executed" | "execution_error";
+
+export interface ExecutionResultRecord {
+  id: number;
+  batch_id: number;
+  source_type: "manual" | "test_execution_diagnostics" | "generic_automation";
+  source_record_id: string;
+  stable_case_id: string | null;
+  case_revision_id: string | null;
+  execution_sequence: number | null;
+  status: ExecutionResultStatus;
+  actual_result: string;
+  reason: string;
+  executor: string;
+  evidence_references: string[];
+  match_status: "matched" | "unresolved" | "rejected";
+  retest_of_result_id: number | null;
+}
+
+export interface ExecutionBatchResults {
+  batch_id: number;
+  records: ExecutionResultRecord[];
+  unresolved_records: ExecutionResultRecord[];
+  conflicts: Array<{
+    id: number;
+    result_ids: number[];
+    statuses: Record<string, ExecutionResultStatus>;
+    status: "open" | "resolved";
+    decision: ExecutionResultStatus | null;
+    rationale: string | null;
+    confirmed_by: string | null;
+  }>;
+  case_summaries: Array<{
+    stable_case_id: string;
+    initial_result: ExecutionResultRecord | null;
+    latest_result: ExecutionResultRecord | null;
+    history: ExecutionResultRecord[];
+  }>;
+  conclusion: { conclusion: ExecutionResultStatus; rationale: string; confirmer_name: string } | null;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -629,6 +671,52 @@ export const downloadManualExecutionFile = async (projectId: number, batchId: nu
   link.click();
   URL.revokeObjectURL(url);
 };
+
+export const importExecutionResults = (
+  projectId: number,
+  batchId: number,
+  sourceType: "manual" | "test_execution_diagnostics" | "generic_automation",
+  results: Array<Record<string, unknown>>,
+): Promise<ExecutionBatchResults> => request(
+  `/api/projects/${projectId}/execution-batches/${batchId}/results/import`,
+  {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_type: sourceType, results }),
+  },
+);
+
+export const resolveExecutionConflict = async (
+  projectId: number,
+  batchId: number,
+  conflictId: number,
+  decision: ExecutionResultStatus,
+  rationale: string,
+  confirmerName: string,
+): Promise<ExecutionBatchResults["conflicts"][number]> => {
+  await request<ExecutionBatchResults["conflicts"][number]>(
+    `/api/projects/${projectId}/execution-batches/${batchId}/conflicts/${conflictId}/resolve`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, rationale, confirmer_name: confirmerName }),
+    },
+  );
+  const summary = await getExecutionResults(projectId, batchId);
+  const conflict = summary.conflicts.find((item) => item.id === conflictId);
+  if (!conflict) throw new Error("结果冲突不存在");
+  return conflict;
+};
+
+export const getExecutionResults = (projectId: number, batchId: number): Promise<ExecutionBatchResults> => request(
+  `/api/projects/${projectId}/execution-batches/${batchId}/results`,
+);
+
+export const confirmExecutionConclusion = (
+  projectId: number, batchId: number, conclusion: ExecutionResultStatus, rationale: string, confirmerName: string,
+): Promise<ExecutionBatchResults> => request(
+  `/api/projects/${projectId}/execution-batches/${batchId}/conclusion`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conclusion, rationale, confirmer_name: confirmerName }),
+  },
+);
 
 const toTemplateMapping = (sheet: TemplateSheet) => ({
   sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,
