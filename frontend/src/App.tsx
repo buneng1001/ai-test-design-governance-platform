@@ -10,6 +10,7 @@ import { TemplateMappingPanel } from "./TemplateMappingPanel";
 import { TaskPublicationPanel } from "./TaskPublicationPanel";
 import { ExecutionBatchPanel } from "./ExecutionBatchPanel";
 import { ExecutionResultPanel } from "./ExecutionResultPanel";
+import { CoveragePanel } from "./CoveragePanel";
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
 import "./styles.css";
 
@@ -103,6 +104,7 @@ export function App() {
         <TaskPublicationPanel projectId={activeProject.id} />
         <ExecutionBatchPanel projectId={activeProject.id} />
         <ExecutionResultPanel projectId={activeProject.id} />
+        <CoveragePanel projectId={activeProject.id} />
       </main>
     );
   }

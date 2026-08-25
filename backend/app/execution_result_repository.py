@@ -79,6 +79,14 @@ class ExecutionResultRepository:
             ).fetchall()
         return [self._to_record(row) for row in rows]
 
+    def get(self, project_id: int, record_id: int) -> ExecutionResultRecord | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM execution_result_records WHERE project_id = ? AND id = ?",
+                (project_id, record_id),
+            ).fetchone()
+        return self._to_record(row) if row else None
+
     def update_match(
         self, batch_id: int, record_id: int, status: str, stable_case_id: str | None,
         case_revision_id: str | None, reason: str, matched_by: str,
