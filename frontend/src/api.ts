@@ -377,6 +377,41 @@ export interface CoverageSummary {
   metrics: Record<string, CoverageMetric>;
 }
 
+export interface ChangeImpactAnalysis {
+  id: number;
+  base_version_id: number;
+  target_version_id: number;
+  status: "pending_change_confirmation" | "confirmed";
+  changes: Array<{
+    id: string;
+    change_type: string;
+    summary: string;
+    base_source_reference: unknown | null;
+    target_source_reference: unknown | null;
+    status: "pending_confirmation" | "confirmed" | "rejected";
+  }>;
+  impacts: Array<{ kind: string; identifier: string; title: string; reason: string }>;
+  regression_candidates: RegressionCandidate[];
+  ai_supplements: RegressionCandidate[];
+}
+
+export interface RegressionCandidate {
+  stable_case_id: string;
+  title: string;
+  deterministic: boolean;
+  reasons: string[];
+  ai_supplement_reason: string | null;
+  selected: boolean | null;
+  decision_reason: string | null;
+}
+
+export interface RegressionSelection {
+  id: number;
+  analysis_id: number;
+  status: "pending_confirmation" | "confirmed";
+  candidates: RegressionCandidate[];
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -749,6 +784,36 @@ export const getCoverage = (
   if (executionBatchId) params.set("execution_batch_id", String(executionBatchId));
   return request(`/api/projects/${projectId}/coverage?${params.toString()}`);
 };
+
+export const createChangeImpact = (
+  projectId: number, baseVersionId: number, targetVersionId: number,
+): Promise<ChangeImpactAnalysis> => request(`/api/projects/${projectId}/change-impact-analyses`, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ base_version_id: baseVersionId, target_version_id: targetVersionId }),
+});
+
+export const confirmChangeImpact = (
+  projectId: number, analysisId: number, changes: ChangeImpactAnalysis["changes"],
+): Promise<ChangeImpactAnalysis> => request(`/api/projects/${projectId}/change-impact-analyses/${analysisId}/confirm`, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ confirmer_name: "测试工程师", decisions: Object.fromEntries(
+    changes.map((change) => [change.id, "confirmed"]),
+  ) }),
+});
+
+export const createRegressionSelection = (projectId: number, analysisId: number): Promise<RegressionSelection> =>
+  request(`/api/projects/${projectId}/change-impact-analyses/${analysisId}/regression-selection`, { method: "POST" });
+
+export const confirmRegressionSelection = (
+  projectId: number, selection: RegressionSelection,
+): Promise<RegressionSelection> => request(
+  `/api/projects/${projectId}/regression-selections/${selection.id}/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmer_name: "测试工程师", decisions: Object.fromEntries(
+      selection.candidates.map((candidate) => [candidate.stable_case_id, true]),
+    ) }),
+  },
+);
 
 const toTemplateMapping = (sheet: TemplateSheet) => ({
   sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,

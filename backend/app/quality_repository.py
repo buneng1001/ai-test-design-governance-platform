@@ -74,6 +74,13 @@ class QualityRepository:
             )
         return pattern
 
+    def list_patterns(self, project_id: int) -> list[DefectPatternCandidate]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM defect_patterns WHERE project_id = ? ORDER BY id", (project_id,)
+            ).fetchall()
+        return [DefectPatternCandidate.model_validate_json(row["payload_json"]) for row in rows]
+
     @staticmethod
     def _issue(row: sqlite3.Row, project_id: int) -> QualityIssueReference:
         payload = json.loads(row["payload_json"])
