@@ -42,6 +42,23 @@ def test_imports_all_statuses_and_is_idempotent(client) -> None:
     assert len(duplicate.json()["records"]) == 5
 
 
+def test_accepts_three_incremental_result_sources(client) -> None:
+    project_id, batch, case = _create_batch(client)
+    base_url = f"/api/projects/{project_id}/execution-batches/{batch['id']}/results/import"
+    imports = [
+        ("manual", _result("manual-increment-1", case, "passed")),
+        ("test_execution_diagnostics", _result("diagnostic-increment-1", case, "passed")),
+        ("generic_automation", _result("automation-increment-1", case, "passed")),
+    ]
+    responses = [client.post(base_url, json={"source_type": source, "results": [result]})
+                 for source, result in imports]
+    assert [response.status_code for response in responses] == [201, 201, 201]
+    records = responses[-1].json()["records"]
+    assert {record["source_type"] for record in records} == {
+        "manual", "test_execution_diagnostics", "generic_automation",
+    }
+
+
 def test_unresolved_result_can_be_manually_rejected(client) -> None:
     project_id, batch, case = _create_batch(client)
     response = client.post(
