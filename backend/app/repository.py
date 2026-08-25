@@ -187,6 +187,22 @@ MIGRATIONS = (
         UNIQUE(task_id, task_version)
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS execution_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        test_task_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS execution_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        stable_case_id TEXT NOT NULL,
+        execution_sequence INTEGER NOT NULL,
+        UNIQUE(project_id, stable_case_id, execution_sequence)
+    );
+    """,
 )
 
 

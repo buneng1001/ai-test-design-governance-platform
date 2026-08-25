@@ -16,6 +16,9 @@ class TestTaskCase(BaseModel):
     stable_case_id: str
     case_revision_id: str
     case_revision: int = Field(ge=1)
+    external_case_number: str | None = None
+    lifecycle_status: Literal["effective", "closed", "deprecated", "superseded"] = "effective"
+    participation_status: Literal["included", "not_included", "pending_impact", "pending_retest"] = "included"
     title: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     priority: Literal["P0", "P1", "P2", "P3"]
     preconditions: list[str] = Field(min_length=1)

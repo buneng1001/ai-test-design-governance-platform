@@ -279,6 +279,7 @@ export interface TestTask {
     stable_case_id: string;
     case_revision_id: string;
     case_revision: number;
+    external_case_number?: string | null;
     title: string;
     priority: "P0" | "P1" | "P2" | "P3";
     preconditions: string[];
@@ -290,6 +291,32 @@ export interface TestTask {
   }>;
   published_by: string;
   published_at: string;
+}
+
+export interface ExecutionBatch {
+  id: number;
+  project_id: number;
+  test_task_id: string;
+  test_task_version: number;
+  product_version: string;
+  requirement_version_id: number;
+  environment: string;
+  scope: string;
+  responsible_person: string;
+  execution_target: string;
+  cases: Array<{
+    stable_case_id: string;
+    case_revision_id: string;
+    case_revision: number;
+    external_case_number: string | null;
+    lifecycle_status: "effective" | "closed" | "deprecated" | "superseded";
+    participation_status: "included" | "not_included" | "pending_impact" | "pending_retest";
+    execution_sequence: number;
+    display_number: string;
+    title: string;
+  }>;
+  manual_file_format: "csv";
+  created_at: string;
 }
 
 interface ValidationError {
@@ -574,6 +601,34 @@ export const publishTestTask = (
   `/api/projects/${projectId}/case-review-batches/${batchId}/test-tasks`,
   { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
 );
+
+export const createExecutionBatch = (
+  projectId: number,
+  taskId: string,
+  input: {
+    product_version: string;
+    requirement_version_id: number;
+    environment: string;
+    scope: string;
+    responsible_person: string;
+    stable_case_ids: string[];
+  },
+): Promise<ExecutionBatch> => request(
+  `/api/projects/${projectId}/test-tasks/${taskId}/execution-batches`,
+  { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
+);
+
+export const downloadManualExecutionFile = async (projectId: number, batchId: number): Promise<void> => {
+  const response = await fetch(`/api/projects/${projectId}/execution-batches/${batchId}/manual-file`);
+  if (!response.ok) throw new Error(await response.text());
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1]
+    ?? `execution-batch-${batchId}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
 
 const toTemplateMapping = (sheet: TemplateSheet) => ({
   sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,
