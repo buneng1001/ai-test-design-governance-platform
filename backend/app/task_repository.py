@@ -49,3 +49,10 @@ class TestTaskRepository:
         with self.connect() as connection:
             row = connection.execute(query, parameters).fetchone()
         return TestTask.model_validate_json(row["payload_json"]) if row else None
+
+    def list_for_project(self, project_id: int) -> list[TestTask]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM test_tasks WHERE project_id = ? ORDER BY id", (project_id,)
+            ).fetchall()
+        return [TestTask.model_validate_json(row["payload_json"]) for row in rows]

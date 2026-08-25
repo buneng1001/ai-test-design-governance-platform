@@ -11,6 +11,7 @@ import { TaskPublicationPanel } from "./TaskPublicationPanel";
 import { ExecutionBatchPanel } from "./ExecutionBatchPanel";
 import { ExecutionResultPanel } from "./ExecutionResultPanel";
 import { CoveragePanel } from "./CoveragePanel";
+import { ChangeImpactPanel } from "./ChangeImpactPanel";
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
 import "./styles.css";
 
@@ -105,6 +106,7 @@ export function App() {
         <ExecutionBatchPanel projectId={activeProject.id} />
         <ExecutionResultPanel projectId={activeProject.id} />
         <CoveragePanel projectId={activeProject.id} />
+        <ChangeImpactPanel projectId={activeProject.id} />
       </main>
     );
   }

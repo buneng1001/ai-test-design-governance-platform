@@ -35,6 +35,8 @@ from app.execution_result_api import register_execution_result_routes
 from app.execution_result_repository import ExecutionResultRepository
 from app.quality_api import register_quality_routes
 from app.quality_repository import QualityRepository
+from app.change_impact_api import register_change_impact_routes
+from app.change_impact_repository import ChangeImpactRepository
 def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -50,6 +52,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     execution_batch_repository = ExecutionBatchRepository(resolved_database_path)
     execution_result_repository = ExecutionResultRepository(resolved_database_path)
     quality_repository = QualityRepository(resolved_database_path)
+    change_impact_repository = ChangeImpactRepository(resolved_database_path)
     model_service = MockModelService()
     unavailable_model_service = UnavailableModelService()
     @asynccontextmanager
@@ -85,6 +88,11 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         app, repository, requirement_repository, review_repository, design_repository, case_review_repository,
         case_generation_repository,
         execution_batch_repository, execution_result_repository, quality_repository, ai_run_repository,
+    )
+    register_change_impact_routes(
+        app, repository, requirement_repository, review_repository, design_repository, case_review_repository,
+        execution_batch_repository, execution_result_repository, quality_repository, task_repository,
+        ai_run_repository, change_impact_repository,
     )
     @app.get("/api/health")
     def health() -> dict[str, str]:
