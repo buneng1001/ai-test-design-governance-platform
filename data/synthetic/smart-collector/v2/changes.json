@@ -1,0 +1,89 @@
+{
+  "product": "澄明采集器",
+  "from_version": "V1",
+  "to_version": "V2",
+  "changes": [
+    {
+      "id": "CHG-V2-001",
+      "type": "addition",
+      "summary": "新增定时采集窗口",
+      "affected_requirements": []
+    },
+    {
+      "id": "CHG-V2-002",
+      "type": "modification",
+      "summary": "容量预警阈值由 15% 调整为 20%",
+      "affected_requirements": [
+        "REQ-V1-017"
+      ]
+    },
+    {
+      "id": "CHG-V2-003",
+      "type": "deletion",
+      "summary": "移除蓝牙发现入口",
+      "affected_requirements": [
+        "REQ-V1-022"
+      ]
+    },
+    {
+      "id": "CHG-V2-004",
+      "type": "split",
+      "summary": "将多通道时间基准拆为配置与输出两项",
+      "affected_requirements": [
+        "REQ-V1-031"
+      ]
+    },
+    {
+      "id": "CHG-V2-005",
+      "type": "merge",
+      "summary": "合并文件列表与下载权限规则",
+      "affected_requirements": [
+        "REQ-V1-019",
+        "REQ-V1-020"
+      ]
+    },
+    {
+      "id": "CHG-V2-006",
+      "type": "interface_change",
+      "summary": "状态接口增加 health 字段",
+      "affected_requirements": [
+        "REQ-V1-002",
+        "REQ-V1-024"
+      ]
+    },
+    {
+      "id": "CHG-V2-007",
+      "type": "modification",
+      "summary": "过温后增加自动冷却等待状态",
+      "affected_requirements": [
+        "REQ-V1-029"
+      ]
+    },
+    {
+      "id": "CHG-V2-008",
+      "type": "addition",
+      "summary": "新增断点续传导出能力",
+      "affected_requirements": [
+        "REQ-V1-030"
+      ]
+    },
+    {
+      "id": "CHG-V2-009",
+      "type": "deletion",
+      "summary": "取消低于当前版本的升级包提示页",
+      "affected_requirements": [
+        "REQ-V1-033"
+      ]
+    },
+    {
+      "id": "CHG-V2-010",
+      "type": "indirect_regression",
+      "summary": "新增审计事件筛选影响控制页面和结果导出",
+      "affected_requirements": [
+        "REQ-V1-024",
+        "REQ-V1-026",
+        "REQ-V1-036"
+      ]
+    }
+  ]
+}

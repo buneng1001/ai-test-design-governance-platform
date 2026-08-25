@@ -1,0 +1,41 @@
+{
+  "source_type": "manual",
+  "results": [
+    {
+      "source_record_id": "MAN-001",
+      "external_case_number": "TC-V1-001",
+      "status": "passed",
+      "actual_result": "状态符合预期",
+      "executor": "合成测试工程师"
+    },
+    {
+      "source_record_id": "MAN-002",
+      "external_case_number": "TC-V1-017",
+      "status": "execution_failed",
+      "actual_result": "容量预警未出现",
+      "reason": "合成环境故意低于阈值",
+      "executor": "合成测试工程师"
+    },
+    {
+      "source_record_id": "MAN-003",
+      "external_case_number": "TC-V1-028",
+      "status": "blocked",
+      "reason": "等待断网恢复条件确认",
+      "executor": "合成测试工程师"
+    },
+    {
+      "source_record_id": "MAN-004",
+      "external_case_number": "TC-V1-034",
+      "status": "not_executed",
+      "reason": "升级包样例未准备",
+      "executor": "合成测试工程师"
+    },
+    {
+      "source_record_id": "MAN-005",
+      "external_case_number": "TC-V1-036",
+      "status": "execution_error",
+      "reason": "测试记录上传中断",
+      "executor": "合成测试工程师"
+    }
+  ]
+}

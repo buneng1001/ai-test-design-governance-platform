@@ -1,0 +1,23 @@
+openapi: 3.1.0
+info:
+  title: 澄明采集器控制 API
+  version: V1
+paths:
+  /devices/{device_id}/state:
+    get:
+      summary: 查询设备状态
+      responses:
+        '200':
+          description: 当前状态
+  /devices/{device_id}/tasks:
+    post:
+      summary: 创建采集任务
+      responses:
+        '201':
+          description: 任务已创建
+  /devices/{device_id}/tasks/{task_id}/stop:
+    post:
+      summary: 停止采集任务
+      responses:
+        '202':
+          description: 正在停止

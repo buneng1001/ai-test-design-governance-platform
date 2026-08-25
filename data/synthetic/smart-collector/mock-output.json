@@ -1,0 +1,3 @@
+{ "contract_version": "ai-output.v1", "items": [
+  {"candidate_id": "MOCK-REQ-V1-001", "summary": "候选发现：初始化完成条件需要量化", "source_asset_ids": [1]}
+] }

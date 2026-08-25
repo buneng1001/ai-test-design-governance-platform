@@ -1,0 +1,279 @@
+{
+  "contract_version": "evaluation-truth.v1",
+  "requirement_version": "V1",
+  "review_findings": [
+    {
+      "id": "TRUTH-F-001",
+      "type": "缺少验收标准",
+      "source": "REQ-V1-001",
+      "key": "自检完成的时间上限未定义"
+    },
+    {
+      "id": "TRUTH-F-002",
+      "type": "冲突",
+      "source": "REQ-V1-014",
+      "key": "重复开始请求的错误语义需统一"
+    },
+    {
+      "id": "TRUTH-F-003",
+      "type": "不可测试",
+      "source": "REQ-V1-024",
+      "key": "页面状态一致性的时间点未定义"
+    },
+    {
+      "id": "TRUTH-F-004",
+      "type": "遗漏",
+      "source": "REQ-V1-028",
+      "key": "断网期间缓存上限和恢复策略未定义"
+    },
+    {
+      "id": "TRUTH-F-005",
+      "type": "约束或异常处理缺失",
+      "source": "REQ-V1-029",
+      "key": "过温恢复条件未定义"
+    },
+    {
+      "id": "TRUTH-F-006",
+      "type": "歧义",
+      "source": "REQ-V1-019",
+      "key": "文件列表的创建时间口径未定义"
+    },
+    {
+      "id": "TRUTH-F-007",
+      "type": "依赖未明确",
+      "source": "REQ-V1-021",
+      "key": "局域网发现依赖的网络范围未定义"
+    },
+    {
+      "id": "TRUTH-F-008",
+      "type": "遗漏",
+      "source": "REQ-V1-031",
+      "key": "跨通道时间差容许范围未定义"
+    },
+    {
+      "id": "TRUTH-F-009",
+      "type": "视觉推断待确认",
+      "source": "web-control.yaml",
+      "key": "页面是否允许批量删除需要确认"
+    },
+    {
+      "id": "TRUTH-F-010",
+      "type": "冲突",
+      "source": "collector-openapi.yaml",
+      "key": "停止接口 202 与文字完成语义存在差异"
+    },
+    {
+      "id": "TRUTH-F-011",
+      "type": "缺少验收标准",
+      "source": "REQ-V1-036",
+      "key": "控制接口可用性的响应时间未定义"
+    },
+    {
+      "id": "TRUTH-F-012",
+      "type": "其他",
+      "source": "errors.md",
+      "key": "错误码是否需要稳定的本地化键未定义"
+    },
+    {
+      "id": "TRUTH-F-013",
+      "type": "遗漏",
+      "source": "REQ-V1-035",
+      "key": "导出保护失败时缺少审计事件要求"
+    },
+    {
+      "id": "TRUTH-F-014",
+      "type": "歧义",
+      "source": "REQ-V1-013",
+      "key": "恢复默认是否覆盖用户保存的配置未定义"
+    }
+  ],
+  "key_scope": [
+    "设备状态迁移",
+    "参数边界",
+    "存储保护",
+    "多通道时间基准",
+    "控制页面一致性"
+  ],
+  "risks": [
+    {
+      "id": "TRUTH-R-001",
+      "source": "REQ-V1-001",
+      "risk": "自检完成条件不清会让设备过早接受控制请求"
+    },
+    {
+      "id": "TRUTH-R-002",
+      "source": "REQ-V1-004",
+      "risk": "关机边界不清会中断未封存的采集文件"
+    },
+    {
+      "id": "TRUTH-R-003",
+      "source": "REQ-V1-007",
+      "risk": "并发任务会覆盖当前任务状态和文件索引"
+    },
+    {
+      "id": "TRUTH-R-004",
+      "source": "REQ-V1-010",
+      "risk": "采样率边界错误会造成输出无法解析"
+    },
+    {
+      "id": "TRUTH-R-005",
+      "source": "REQ-V1-013",
+      "risk": "恢复默认可能误覆盖用户保存的设备配置"
+    },
+    {
+      "id": "TRUTH-R-006",
+      "source": "REQ-V1-016",
+      "risk": "异常无法恢复会让设备长期拒绝采集"
+    },
+    {
+      "id": "TRUTH-R-007",
+      "source": "REQ-V1-019",
+      "risk": "文件排序不稳定会导致人工误选历史文件"
+    },
+    {
+      "id": "TRUTH-R-008",
+      "source": "REQ-V1-022",
+      "risk": "蓝牙断开原因缺失会阻塞用户重新连接"
+    },
+    {
+      "id": "TRUTH-R-009",
+      "source": "REQ-V1-025",
+      "risk": "页面状态滞后会误导用户重复提交操作"
+    },
+    {
+      "id": "TRUTH-R-010",
+      "source": "REQ-V1-028",
+      "risk": "网络断开期间缓存不足会丢失采集数据"
+    },
+    {
+      "id": "TRUTH-R-011",
+      "source": "REQ-V1-031",
+      "risk": "多通道时间漂移会破坏跨文件关联"
+    },
+    {
+      "id": "TRUTH-R-012",
+      "source": "REQ-V1-034",
+      "risk": "升级失败回滚不完整会导致设备无法启动"
+    },
+    {
+      "id": "TRUTH-R-013",
+      "source": "REQ-V1-035",
+      "risk": "导出过滤遗漏会泄露网络或配对凭据"
+    },
+    {
+      "id": "TRUTH-R-014",
+      "source": "REQ-V1-026",
+      "risk": "操作编号缺失会让成功结果无法审计"
+    },
+    {
+      "id": "TRUTH-R-015",
+      "source": "REQ-V1-027",
+      "risk": "错误码含义不清会延长异常恢复时间"
+    },
+    {
+      "id": "TRUTH-R-016",
+      "source": "REQ-V1-030",
+      "risk": "文件元数据缺失会造成结果无法归属"
+    },
+    {
+      "id": "TRUTH-R-017",
+      "source": "REQ-V1-033",
+      "risk": "低版本升级包未拦截会破坏当前软件版本"
+    },
+    {
+      "id": "TRUTH-R-018",
+      "source": "REQ-V1-032",
+      "risk": "时间戳回退会导致同步解析器错误"
+    }
+  ],
+  "v2_impacts": [
+    {
+      "change_id": "CHG-V2-001",
+      "expected_assets": [
+        "TC-V1-005",
+        "TC-V1-006"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-002",
+      "expected_assets": [
+        "REQ-V1-017",
+        "TC-V1-017"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-003",
+      "expected_assets": [
+        "REQ-V1-022",
+        "TC-V1-022"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-004",
+      "expected_assets": [
+        "REQ-V1-031",
+        "TC-V1-031"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-005",
+      "expected_assets": [
+        "REQ-V1-019",
+        "REQ-V1-020"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-006",
+      "expected_assets": [
+        "REQ-V1-002",
+        "REQ-V1-024"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-007",
+      "expected_assets": [
+        "REQ-V1-029",
+        "TC-V1-029"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-008",
+      "expected_assets": [
+        "REQ-V1-030",
+        "TC-V1-030"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-009",
+      "expected_assets": [
+        "REQ-V1-033",
+        "TC-V1-034"
+      ]
+    },
+    {
+      "change_id": "CHG-V2-010",
+      "expected_assets": [
+        "REQ-V1-024",
+        "REQ-V1-026",
+        "REQ-V1-036"
+      ]
+    }
+  ],
+  "distractors": [
+    {
+      "id": "TRUTH-D-001",
+      "text": "设备外壳颜色应为青绿色",
+      "reason": "没有正常需求来源"
+    },
+    {
+      "id": "TRUTH-D-002",
+      "text": "支持云端账号多租户管理",
+      "reason": "超出本地单用户边界"
+    },
+    {
+      "id": "TRUTH-D-003",
+      "text": "自动生成完整 Pytest 脚本",
+      "reason": "属于后续路线图而非本 ticket"
+    }
+  ]
+}
