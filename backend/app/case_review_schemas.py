@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from typing_extensions import Annotated
 
-from app.case_schemas import CandidateTestCase
+from app.case_schemas import CandidateTestCase, CaseLifecycleStatus, CaseParticipationStatus
 from app.requirement_schemas import SourceReference
 
 
@@ -47,6 +47,10 @@ class CaseRevision(BaseModel):
     candidate_id: str
     revision: int = Field(ge=1)
     stable_case_id: str | None = None
+    external_case_number: str | None = None
+    lifecycle_status: CaseLifecycleStatus = "draft"
+    participation_status: CaseParticipationStatus = "not_included"
+    superseded_by_case_id: str | None = None
     candidate: CandidateTestCase
     review_notes: list[str] = Field(default_factory=list)
     created_at: datetime
@@ -77,6 +81,43 @@ class CaseConfirmationInput(BaseModel):
     inclusion: dict[str, bool]
 
 
+class CaseStatusChangeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lifecycle_status: CaseLifecycleStatus | None = None
+    participation_status: CaseParticipationStatus | None = None
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class CaseStatusChangeRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stable_case_id: str
+    previous_lifecycle_status: CaseLifecycleStatus
+    lifecycle_status: CaseLifecycleStatus
+    previous_participation_status: CaseParticipationStatus
+    participation_status: CaseParticipationStatus
+    reason: str
+    confirmer_name: str
+    changed_at: datetime
+
+
+class CaseReplacementInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate: CandidateTestCase
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class CaseExportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: Literal["all", "selected", "changed"] = "all"
+    stable_case_ids: list[str] = Field(default_factory=list)
+
+
 class ReviewerRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -97,6 +138,7 @@ class CaseReviewBatch(BaseModel):
     suggestions: list[ReviewSuggestion] = Field(default_factory=list)
     groups: list[ReviewGroup] = Field(default_factory=list)
     revisions: list[CaseRevision] = Field(default_factory=list)
+    status_changes: list[CaseStatusChangeRecord] = Field(default_factory=list)
     inclusion: dict[str, bool] = Field(default_factory=dict)
     confirmed_by: str | None = None
     created_at: datetime

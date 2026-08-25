@@ -1,7 +1,8 @@
 import { useState } from "react";
 
 import {
-  CaseReviewBatch, CaseReviewSuggestion, confirmCaseReviews, createCaseReviews, disposeCaseReviewSuggestion,
+  CaseReviewBatch, CaseReviewSuggestion, changeCaseStatus, confirmCaseReviews, createCaseReviews,
+  disposeCaseReviewSuggestion, exportCaseFile,
 } from "./api";
 
 const roleLabels: Record<string, string> = {
@@ -17,6 +18,8 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
 }) {
   const [batch, setBatch] = useState<CaseReviewBatch | null>(null);
   const [modifiedTitles, setModifiedTitles] = useState<Record<string, string>>({});
+  const [exportScope, setExportScope] = useState<"all" | "selected" | "changed">("all");
+  const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [error, setError] = useState("");
 
   const startReview = async () => {
@@ -53,6 +56,20 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
     }
   };
 
+  const manageCase = async (revision: CaseReviewBatch["revisions"][number]) => {
+    if (!revision.stable_case_id) return;
+    try {
+      setBatch(await changeCaseStatus(
+        projectId, batch!.id, revision.stable_case_id,
+        revision.lifecycle_status === "effective" ? "closed" : "effective",
+        revision.lifecycle_status === "effective" ? "not_included" : "included",
+      ));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "用例状态变更失败");
+    }
+  };
+
   return <section className="panel" aria-label="三角色 AI 评审与用例确认">
     <h2>三角色 AI 评审与用例确认</h2>
     {!batch && <button onClick={() => void startReview()}>开始三角色 AI 评审</button>}
@@ -85,6 +102,37 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
       <button disabled={batch.suggestions.some((item) => !item.disposition)} onClick={() => void confirm()}>
         完成用例确认
       </button>
+      {batch.status === "confirmed" && <>
+        {batch.revisions.filter((item) => item.stable_case_id).map((revision) => <article key={revision.id}>
+          <p role="status">稳定用例 ID：{revision.stable_case_id}；生命周期：{revision.lifecycle_status}；
+            当前测试参与状态：{revision.participation_status}</p>
+          <button onClick={() => void manageCase(revision)}>变更用例状态</button>
+        </article>)}
+        <label>用例导出范围
+          <select value={exportScope} onChange={(event) => setExportScope(
+            event.target.value as "all" | "selected" | "changed",
+          )}>
+            <option value="all">当前全部</option>
+            <option value="selected">人工勾选</option>
+            <option value="changed">新增或修改</option>
+          </select>
+        </label>
+        {exportScope === "selected" && batch.revisions.filter((item) => item.stable_case_id).map((revision) => (
+          <label key={`select-${revision.id}`}>
+            <input
+              type="checkbox"
+              checked={selectedCaseIds.includes(revision.stable_case_id ?? "")}
+              onChange={() => setSelectedCaseIds((current) => current.includes(revision.stable_case_id ?? "")
+                ? current.filter((id) => id !== revision.stable_case_id)
+                : [...current, revision.stable_case_id ?? ""])}
+            />
+            {revision.stable_case_id}
+          </label>
+        ))}
+        <button onClick={() => void exportCaseFile(projectId, batch.id, exportScope, selectedCaseIds)}>
+          下载用例文件
+        </button>
+      </>}
       {batch.status === "confirmed" && <p role="status">用例已确认，已记录确认人和用例纳入决定。</p>}
     </>}
   </section>;

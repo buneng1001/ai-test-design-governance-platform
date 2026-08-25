@@ -61,6 +61,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     )
     register_case_review_routes(
         app, repository, case_generation_repository, case_review_repository, ai_run_repository, requirement_repository,
+        template_repository,
     )
     @app.get("/api/health")
     def health() -> dict[str, str]:

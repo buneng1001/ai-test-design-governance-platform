@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI, HTTPException, status
+from fastapi.responses import Response
 
 from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIModelConfig, AIRun
@@ -8,17 +9,21 @@ from app.ai_service import ModelRequest, MockModelService, validate_output
 from app.case_repository import CaseGenerationRepository
 from app.case_review_repository import CaseReviewRepository
 from app.case_review_schemas import (
-    CaseConfirmationInput, CaseRevision, CaseReviewBatch, CaseReviewBatchInput, SuggestionDispositionInput,
+    CaseConfirmationInput, CaseExportInput, CaseReplacementInput, CaseRevision, CaseReviewBatch,
+    CaseReviewBatchInput, CaseStatusChangeInput, CaseStatusChangeRecord, SuggestionDispositionInput,
 )
 from app.case_review_service import ROLES, build_review_batch, create_revision
+from app.case_lifecycle_service import can_change_lifecycle, export_template, latest_revisions
 from app.design_service import stable_id
 from app.repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
+from app.template_repository import TemplateMappingRepository
 
 
 def register_case_review_routes(
     app: FastAPI, projects: ProjectRepository, generations: CaseGenerationRepository,
     reviews: CaseReviewRepository, ai_runs: AIRunRepository, requirements: RequirementRepository,
+    templates: TemplateMappingRepository,
 ) -> None:
     router = APIRouter()
 
@@ -134,15 +139,24 @@ def register_case_review_routes(
             if not candidate_revisions:
                 batch.revisions.append(CaseRevision(
                     id=stable_id("case-revision", f"{batch.id}:{candidate.id}:1"), candidate_id=candidate.id,
-                    revision=1, stable_case_id=stable_case_id, candidate=candidate,
+                    revision=1, stable_case_id=stable_case_id, external_case_number=candidate.external_case_number,
+                    lifecycle_status="effective",
+                    participation_status="included" if data.inclusion[candidate.id] else "not_included",
+                    candidate=candidate,
                     created_at=datetime.now(UTC),
                 ))
                 continue
             latest_revision = max(candidate_revisions, key=lambda item: item.revision)
+            for revision in candidate_revisions:
+                revision.stable_case_id = stable_case_id
+                revision.external_case_number = candidate.external_case_number
             batch.revisions.append(CaseRevision(
                 id=stable_id("case-revision", f"{batch.id}:{candidate.id}:{latest_revision.revision + 1}"),
                 candidate_id=candidate.id, revision=latest_revision.revision + 1,
-                stable_case_id=stable_case_id, candidate=latest_revision.candidate,
+                stable_case_id=stable_case_id, external_case_number=latest_revision.external_case_number,
+                lifecycle_status="effective",
+                participation_status="included" if data.inclusion[candidate.id] else "not_included",
+                candidate=latest_revision.candidate,
                 review_notes=["用例确认时分配稳定用例 ID"], created_at=datetime.now(UTC),
             ))
         batch.inclusion = data.inclusion
@@ -157,6 +171,95 @@ def register_case_review_routes(
         if history is None:
             raise HTTPException(status_code=404, detail="评审批次不存在")
         return history
+
+    @router.patch(
+        "/api/projects/{project_id}/case-review-batches/{batch_id}/cases/{stable_case_id}/status",
+        response_model=CaseReviewBatch,
+    )
+    def change_case_status(
+        project_id: int, batch_id: int, stable_case_id: str, data: CaseStatusChangeInput,
+    ) -> CaseReviewBatch:
+        _require_project(projects, project_id)
+        batch = reviews.get(project_id, batch_id)
+        if batch is None or batch.status != "confirmed":
+            raise HTTPException(status_code=409, detail="只有已确认用例才能治理状态")
+        current = next((item for item in latest_revisions(batch.revisions)
+                        if item.stable_case_id == stable_case_id), None)
+        if current is None:
+            raise HTTPException(status_code=404, detail="稳定用例 ID 不存在")
+        if data.lifecycle_status is None and data.participation_status is None:
+            raise HTTPException(status_code=422, detail="至少提供一项状态变更")
+        if data.lifecycle_status and not can_change_lifecycle(current.lifecycle_status, data.lifecycle_status):
+            raise HTTPException(status_code=409, detail="不允许的用例生命周期迁移")
+        previous_lifecycle = current.lifecycle_status
+        previous_participation = current.participation_status
+        if data.lifecycle_status:
+            current.lifecycle_status = data.lifecycle_status
+        if data.participation_status:
+            current.participation_status = data.participation_status
+        batch.status_changes.append(CaseStatusChangeRecord(
+            stable_case_id=stable_case_id,
+            previous_lifecycle_status=previous_lifecycle,
+            lifecycle_status=current.lifecycle_status,
+            previous_participation_status=previous_participation,
+            participation_status=current.participation_status,
+            reason=data.reason, confirmer_name=data.confirmer_name, changed_at=datetime.now(UTC),
+        ))
+        return reviews.save(batch, "case_status_changed")
+
+    @router.post(
+        "/api/projects/{project_id}/case-review-batches/{batch_id}/cases/{stable_case_id}/replace",
+        response_model=CaseReviewBatch,
+    )
+    def replace_case(
+        project_id: int, batch_id: int, stable_case_id: str, data: CaseReplacementInput,
+    ) -> CaseReviewBatch:
+        _require_project(projects, project_id)
+        batch = reviews.get(project_id, batch_id)
+        if batch is None or batch.status != "confirmed":
+            raise HTTPException(status_code=409, detail="只有已确认用例才能创建被替代关系")
+        previous = next((item for item in latest_revisions(batch.revisions)
+                         if item.stable_case_id == stable_case_id), None)
+        if previous is None or previous.lifecycle_status in {"deprecated", "superseded"}:
+            raise HTTPException(status_code=409, detail="原用例不存在或已经结束生命周期")
+        previous_lifecycle = previous.lifecycle_status
+        previous_participation = previous.participation_status
+        replacement_id = stable_id("case", f"{batch.id}:{data.candidate.id}:replacement")
+        previous.lifecycle_status = "superseded"
+        previous.superseded_by_case_id = replacement_id
+        batch.status_changes.append(CaseStatusChangeRecord(
+            stable_case_id=stable_case_id, previous_lifecycle_status=previous_lifecycle,
+            lifecycle_status="superseded", previous_participation_status=previous_participation,
+            participation_status=previous_participation, reason=data.reason,
+            confirmer_name=data.confirmer_name, changed_at=datetime.now(UTC),
+        ))
+        batch.revisions.append(CaseRevision(
+            id=stable_id("case-revision", f"{batch.id}:{data.candidate.id}:replacement"),
+            candidate_id=data.candidate.id, revision=1, stable_case_id=replacement_id,
+            external_case_number=data.candidate.external_case_number, lifecycle_status="effective",
+            participation_status="included", candidate=data.candidate, review_notes=[data.reason],
+            created_at=datetime.now(UTC),
+        ))
+        return reviews.save(batch, "case_replaced")
+
+    @router.post("/api/projects/{project_id}/case-review-batches/{batch_id}/export")
+    def export_cases(project_id: int, batch_id: int, data: CaseExportInput) -> Response:
+        _require_project(projects, project_id)
+        batch = reviews.get(project_id, batch_id)
+        if batch is None or batch.status != "confirmed":
+            raise HTTPException(status_code=409, detail="只有已确认用例才能下载用例文件")
+        generation = generations.get(project_id, batch.generation_id)
+        raw = templates.raw(project_id, generation.template_mapping_id) if generation else None
+        mapping = templates.get(project_id, generation.template_mapping_id) if generation else None
+        if mapping is None or raw is None or mapping.status != "confirmed":
+            raise HTTPException(status_code=409, detail="模板映射未确认")
+        content, media_type, extension = export_template(
+            mapping, raw["content_base64"], batch.revisions, data.scope, data.stable_case_ids,
+        )
+        return Response(
+            content=content, media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="test-cases.{extension}"'},
+        )
 
     app.include_router(router)
 

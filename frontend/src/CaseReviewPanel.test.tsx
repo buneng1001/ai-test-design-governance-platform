@@ -33,8 +33,16 @@ test("三个独立评审完成后可逐条处置并确认用例", async () => {
           stable_case_id: null }],
         inclusion: {}, confirmed_by: null }), { status: 200 });
     }
+    if (url.includes("/status")) {
+      return new Response(JSON.stringify({ id: 1, generation_id: 1, status: "confirmed", reviewer_runs: [],
+        suggestions, groups: [], revisions: [{ id: "r1", candidate_id: "candidate-1", revision: 1,
+          stable_case_id: "case-1", lifecycle_status: "closed", participation_status: "not_included" }],
+        inclusion: { "candidate-1": true }, confirmed_by: "测试工程师" }), { status: 200 });
+    }
     return new Response(JSON.stringify({ id: 1, generation_id: 1, status: "confirmed", reviewer_runs: [],
-      suggestions: suggestions.map((item) => ({ ...item, disposition: "accepted" })), groups: [], revisions: [],
+      suggestions: suggestions.map((item) => ({ ...item, disposition: "accepted" })), groups: [],
+      revisions: [{ id: "r1", candidate_id: "candidate-1", revision: 1, stable_case_id: "case-1",
+        lifecycle_status: "effective", participation_status: "included" }],
       inclusion: { "candidate-1": true }, confirmed_by: "测试工程师" }), { status: 200 });
   });
 
@@ -45,4 +53,7 @@ test("三个独立评审完成后可逐条处置并确认用例", async () => {
   await user.click(screen.getAllByRole("button", { name: "采纳" })[0]);
   await user.click(screen.getByRole("button", { name: "完成用例确认" }));
   expect(await screen.findByText(/用例已确认/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "下载用例文件" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "变更用例状态" }));
+  expect(await screen.findByText(/生命周期：closed/)).toBeInTheDocument();
 });

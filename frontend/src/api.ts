@@ -254,7 +254,14 @@ export interface CaseReviewBatch {
   reviewer_runs: Array<{ role: string; ai_run_id: number }>;
   suggestions: CaseReviewSuggestion[];
   groups: Array<{ id: string; summary: string; original_suggestion_ids: string[]; source_roles: string[] }>;
-  revisions: Array<{ id: string; candidate_id: string; revision: number; stable_case_id: string | null }>;
+  revisions: Array<{
+    id: string;
+    candidate_id: string;
+    revision: number;
+    stable_case_id: string | null;
+    lifecycle_status: "draft" | "effective" | "closed" | "deprecated" | "superseded";
+    participation_status: "included" | "not_included" | "pending_impact" | "pending_retest";
+  }>;
   inclusion: Record<string, boolean>;
   confirmed_by: string | null;
 }
@@ -486,6 +493,47 @@ export const confirmCaseReviews = (
     ) }),
   },
 );
+
+export const changeCaseStatus = (
+  projectId: number,
+  batchId: number,
+  stableCaseId: string,
+  lifecycleStatus: CaseReviewBatch["revisions"][number]["lifecycle_status"],
+  participationStatus: CaseReviewBatch["revisions"][number]["participation_status"],
+): Promise<CaseReviewBatch> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/cases/${stableCaseId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      lifecycle_status: lifecycleStatus,
+      participation_status: participationStatus,
+      reason: "测试工程师更新用例状态",
+      confirmer_name: "测试工程师",
+    }),
+  },
+);
+
+export const exportCaseFile = async (
+  projectId: number,
+  batchId: number,
+  scope: "all" | "selected" | "changed" = "all",
+  stableCaseIds: string[] = [],
+): Promise<void> => {
+  const response = await fetch(`/api/projects/${projectId}/case-review-batches/${batchId}/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope, stable_case_ids: stableCaseIds }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const disposition = response.headers.get("content-disposition");
+  link.download = disposition?.match(/filename="([^"]+)"/)?.[1] ?? "test-cases.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+};
 
 const toTemplateMapping = (sheet: TemplateSheet) => ({
   sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,
