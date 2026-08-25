@@ -1,0 +1,16 @@
+product: 澄明采集器
+requirement_version: V1
+page: 本地控制台
+panels:
+  - device_status
+  - collection_task
+  - storage_warning
+actions:
+  - discover
+  - connect
+  - configure
+  - start_collection
+  - stop_collection
+feedback:
+  success_fields: [operation_id, state]
+  error_fields: [code, message, suggested_action]

@@ -1,0 +1,35 @@
+{
+  "source_type": "generic_automation",
+  "results": [
+    {
+      "source_record_id": "AUTO-001",
+      "external_case_number": "TC-V1-001",
+      "status": "passed",
+      "actual_result": "state=standby",
+      "executor": "合成自动化执行器",
+      "evidence_references": [
+        "synthetic://evidence/AUTO-001.log"
+      ]
+    },
+    {
+      "source_record_id": "AUTO-002",
+      "external_case_number": "TC-V1-017",
+      "status": "passed",
+      "actual_result": "warning_percent=15",
+      "executor": "合成自动化执行器",
+      "evidence_references": [
+        "synthetic://evidence/AUTO-002.json"
+      ]
+    },
+    {
+      "source_record_id": "AUTO-003",
+      "external_case_number": "TC-V1-031",
+      "status": "passed",
+      "actual_result": "timestamp_order=monotonic",
+      "executor": "合成自动化执行器",
+      "evidence_references": [
+        "synthetic://evidence/AUTO-003.json"
+      ]
+    }
+  ]
+}

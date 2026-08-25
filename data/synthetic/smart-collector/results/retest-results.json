@@ -1,0 +1,25 @@
+{
+  "source_type": "test_execution_diagnostics",
+  "results": [
+    {
+      "source_record_id": "RETEST-001",
+      "external_case_number": "TC-V1-017",
+      "status": "passed",
+      "actual_result": "修复后容量预警出现",
+      "reason": "失败后的复测",
+      "executor": "合成执行诊断器",
+      "retest_of_result_id": 2,
+      "evidence_references": [
+        "synthetic://evidence/RETEST-001.log"
+      ]
+    },
+    {
+      "source_record_id": "RETEST-002",
+      "external_case_number": "TC-V1-031",
+      "status": "execution_failed",
+      "actual_result": "人工与自动化时间精度结论冲突",
+      "reason": "用于演示结果冲突治理",
+      "executor": "合成执行诊断器"
+    }
+  ]
+}
