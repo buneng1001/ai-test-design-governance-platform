@@ -62,3 +62,11 @@ class ExecutionBatchRepository:
                 (batch_id, project_id),
             ).fetchone()
         return ExecutionBatch.model_validate_json(row["payload_json"]) if row else None
+
+    def list(self, project_id: int) -> list[ExecutionBatch]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM execution_batches WHERE project_id = ? ORDER BY id DESC",
+                (project_id,),
+            ).fetchall()
+        return [ExecutionBatch.model_validate_json(row["payload_json"]) for row in rows]

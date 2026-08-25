@@ -13,6 +13,7 @@ import { ExecutionResultPanel } from "./ExecutionResultPanel";
 import { CoveragePanel } from "./CoveragePanel";
 import { ChangeImpactPanel } from "./ChangeImpactPanel";
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
+import { ReportsPanel } from "./ReportsPanel";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
@@ -107,6 +108,7 @@ export function App() {
         <ExecutionResultPanel projectId={activeProject.id} />
         <CoveragePanel projectId={activeProject.id} />
         <ChangeImpactPanel projectId={activeProject.id} />
+        <ReportsPanel projectId={activeProject.id} />
       </main>
     );
   }

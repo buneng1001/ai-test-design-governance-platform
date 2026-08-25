@@ -412,6 +412,16 @@ export interface RegressionSelection {
   candidates: RegressionCandidate[];
 }
 
+export interface ReportDocument {
+  contract_version: string;
+  report_type: "test_design" | "execution_governance" | "audit_package";
+  project_id: number;
+  generated_at: string;
+  summary: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -814,6 +824,9 @@ export const confirmRegressionSelection = (
     ) }),
   },
 );
+
+export const getAuditPackage = (projectId: number): Promise<ReportDocument> =>
+  request(`/api/projects/${projectId}/reports/audit-package`);
 
 const toTemplateMapping = (sheet: TemplateSheet) => ({
   sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,

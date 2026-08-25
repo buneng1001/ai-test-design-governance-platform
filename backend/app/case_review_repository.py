@@ -66,6 +66,14 @@ class CaseReviewRepository:
             ).fetchone()
         return CaseReviewBatch.model_validate_json(row["payload_json"]) if row else None
 
+    def list_batches(self, project_id: int) -> list[CaseReviewBatch]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM case_review_batches WHERE project_id = ? ORDER BY id DESC",
+                (project_id,),
+            ).fetchall()
+        return [CaseReviewBatch.model_validate_json(row["payload_json"]) for row in rows]
+
     def history(self, project_id: int, batch_id: int) -> list[dict] | None:
         with self.connect() as connection:
             exists = connection.execute(
