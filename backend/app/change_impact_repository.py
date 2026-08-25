@@ -44,6 +44,14 @@ class ChangeImpactRepository:
             ).fetchone()
         return ChangeImpactAnalysis.model_validate_json(row["payload_json"]) if row else None
 
+    def list_analyses(self, project_id: int) -> list[ChangeImpactAnalysis]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM change_impact_analyses WHERE project_id = ? ORDER BY id DESC",
+                (project_id,),
+            ).fetchall()
+        return [ChangeImpactAnalysis.model_validate_json(row["payload_json"]) for row in rows]
+
     def save_analysis(self, analysis: ChangeImpactAnalysis, event: str) -> ChangeImpactAnalysis:
         with self.connect() as connection:
             connection.execute("UPDATE change_impact_analyses SET payload_json = ? WHERE id = ? AND project_id = ?",
@@ -71,6 +79,14 @@ class ChangeImpactRepository:
             row = connection.execute("SELECT payload_json FROM regression_selections WHERE project_id = ? AND id = ?",
                                      (project_id, selection_id)).fetchone()
         return RegressionSelection.model_validate_json(row["payload_json"]) if row else None
+
+    def list_selections(self, project_id: int) -> list[RegressionSelection]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM regression_selections WHERE project_id = ? ORDER BY id DESC",
+                (project_id,),
+            ).fetchall()
+        return [RegressionSelection.model_validate_json(row["payload_json"]) for row in rows]
 
     def save_selection(self, selection: RegressionSelection) -> RegressionSelection:
         with self.connect() as connection:

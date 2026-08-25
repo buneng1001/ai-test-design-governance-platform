@@ -61,6 +61,9 @@ button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; backgro
 .run-list { display: grid; gap: 12px; }
 .run-list article { display: grid; gap: 4px; padding: 14px; border-left: 3px solid #7a9b88; }
 .run-list span { color: #526057; }
+.report-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.button-link { padding: 11px 18px; border-radius: 9px; color: #fff; background: #255b43; font-weight: 700; }
+.muted { color: #657169; }
 
 @media (max-width: 640px) {
   .page-header { align-items: stretch; flex-direction: column; }
