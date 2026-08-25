@@ -1,6 +1,6 @@
 [project]
 name = "ai-test-design-governance-platform"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "本地 AI 测试设计与治理平台"
 requires-python = ">=3.12"
 dependencies = [
