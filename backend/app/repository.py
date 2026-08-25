@@ -239,6 +239,20 @@ MIGRATIONS = (
     ALTER TABLE execution_result_records ADD COLUMN match_reason TEXT;
     ALTER TABLE execution_result_records ADD COLUMN matched_by TEXT;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS quality_issue_references (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS defect_patterns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

@@ -361,6 +361,22 @@ export interface ExecutionBatchResults {
   conclusion: { conclusion: ExecutionResultStatus; rationale: string; confirmer_name: string } | null;
 }
 
+export interface CoverageMetric {
+  label: string;
+  numerator: number;
+  denominator: number;
+  percentage: number;
+  covered_items: string[];
+  uncovered_items: string[];
+  high_risk_gaps: string[];
+  quality_issues: Array<{ id: number; phenomenon: string; severity: string }>;
+  execution_evidence: Array<{ id: number; stable_case_id: string | null; evidence_references: string[] }>;
+}
+
+export interface CoverageSummary {
+  metrics: Record<string, CoverageMetric>;
+}
+
 interface ValidationError {
   loc?: unknown[];
   type?: string;
@@ -717,6 +733,22 @@ export const confirmExecutionConclusion = (
     body: JSON.stringify({ conclusion, rationale, confirmer_name: confirmerName }),
   },
 );
+
+export const getCoverage = (
+  projectId: number,
+  requirementVersionId: number,
+  designId: number,
+  caseReviewBatchId: number,
+  executionBatchId?: number,
+): Promise<CoverageSummary> => {
+  const params = new URLSearchParams({
+    requirement_version_id: String(requirementVersionId),
+    design_id: String(designId),
+    case_review_batch_id: String(caseReviewBatchId),
+  });
+  if (executionBatchId) params.set("execution_batch_id", String(executionBatchId));
+  return request(`/api/projects/${projectId}/coverage?${params.toString()}`);
+};
 
 const toTemplateMapping = (sheet: TemplateSheet) => ({
   sheet_name: sheet.name, role: sheet.role, participates: sheet.participates,
