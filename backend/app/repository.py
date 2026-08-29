@@ -277,6 +277,20 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_evaluation_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        truth_asset_id INTEGER NOT NULL REFERENCES assets(id),
+        truth_sha256 TEXT NOT NULL,
+        ai_run_ids_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    ALTER TABLE asset_provenance_revisions ADD COLUMN content_base64 TEXT NOT NULL DEFAULT '';
+    """,
 )
 
 

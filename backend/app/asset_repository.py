@@ -110,6 +110,17 @@ class AssetRepository:
     def model_context_assets(self, project_id: int) -> list[AssetProvenanceRecord]:
         return [record for record in self.list_assets(project_id) if record.can_enter_model_context]
 
+    def content(self, project_id: int, asset_id: int) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT content_base64 FROM asset_provenance_revisions "
+                "JOIN assets ON assets.id = asset_provenance_revisions.asset_id "
+                "WHERE assets.project_id = ? AND assets.id = ? "
+                "ORDER BY revision DESC LIMIT 1",
+                (project_id, asset_id),
+            ).fetchone()
+        return row["content_base64"] if row and row["content_base64"] else None
+
     @staticmethod
     def hash_content(content_base64: str) -> str:
         return hashlib.sha256(base64.b64decode(content_base64, validate=True)).hexdigest()
@@ -126,8 +137,8 @@ class AssetRepository:
             """
             INSERT INTO asset_provenance_revisions(
                 asset_id, revision, name, asset_type, provenance_kind, source, usage_permission,
-                model_permission, requirement_version, purpose, sha256, change_reason, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                model_permission, requirement_version, purpose, sha256, change_reason, content_base64, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset_id,
@@ -142,6 +153,7 @@ class AssetRepository:
                 asset_input.purpose,
                 self.hash_content(asset_input.content_base64),
                 asset_input.change_reason,
+                asset_input.content_base64,
                 created_at,
             ),
         )
