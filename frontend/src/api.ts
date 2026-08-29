@@ -121,6 +121,18 @@ export interface RequirementAnalysis {
   id: number;
   requirement_version_id: number;
   status: "draft" | "confirmed";
+  is_mock: boolean;
+  requirements: Array<{
+    requirement_id: string;
+    name: string;
+    statement: string;
+    requirement_type: string;
+    module: string;
+    source_references: Array<{ filename: string; locator: string; reference_id: string }>;
+    analysis_note: string;
+  }>;
+  test_items: Array<{ test_item_id: string; name: string; module: string; requirement_ids: string[] }>;
+  acceptance_criteria: Array<{ criterion_id: string; statement: string; requirement_id: string }>;
   atomic_requirements: Array<{
     candidate_id: string;
     stable_requirement_id: string | null;
@@ -544,8 +556,13 @@ export const publishRequirementPackage = (
 );
 export const listRequirementVersions = (projectId: number): Promise<RequirementVersion[]> =>
   request(`/api/projects/${projectId}/requirement-versions`);
-export const createRequirementReview = (projectId: number, versionId: number): Promise<RequirementAnalysis> =>
-  request(`/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review`, { method: "POST" });
+export const createRequirementReview = (
+  projectId: number, versionId: number, mode: "mock" | "real" = "mock",
+): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review`, {
+    method: "POST", headers: sessionHeaders(), body: JSON.stringify({ mode }),
+  },
+);
 export const updateAtomicRequirement = (
   projectId: number,
   analysisId: number,

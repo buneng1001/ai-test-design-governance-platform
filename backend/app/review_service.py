@@ -2,7 +2,10 @@ import hashlib
 from datetime import UTC, datetime
 
 from app.requirement_schemas import RequirementVersion, SourceReference
-from app.review_schemas import AtomicRequirement, RequirementReviewFinding, VisualInference
+from app.review_schemas import (
+    AcceptanceCriterion, AnalyzedRequirement, AnalyzedTestItem, AtomicRequirement,
+    RequirementReviewFinding, StructuredAnalysisOutput, VisualInference,
+)
 
 
 def build_analysis_candidates(version: RequirementVersion) -> tuple[
@@ -73,6 +76,64 @@ def source_reference_exists(version: RequirementVersion, reference: SourceRefere
         for material in version.materials
         for inference in material.visual_inferences
     )
+
+
+def semantic_output_to_analysis(
+    version: RequirementVersion,
+    output: StructuredAnalysisOutput,
+) -> tuple[list[AnalyzedRequirement], list[AnalyzedTestItem], list[AcceptanceCriterion],
+           list[AtomicRequirement], list[RequirementReviewFinding]]:
+    """校验来源后将模型契约转换为内部评审模型；无效来源不会进入分析结果。"""
+
+    references = {
+        reference.reference_id
+        for material in version.materials
+        for fragment in material.fragments
+        for reference in [fragment.source_reference]
+    }
+    references.update(
+        inference.source_reference.reference_id
+        for material in version.materials for inference in material.visual_inferences
+    )
+    all_references = [
+        reference
+        for material in version.materials
+        for fragment in material.fragments
+        for reference in [fragment.source_reference]
+    ]
+    all_references.extend(
+        inference.source_reference for material in version.materials for inference in material.visual_inferences
+    )
+    reference_map = {reference.reference_id: reference for reference in all_references}
+    for item in [*output.requirements, *output.test_items, *output.acceptance_criteria]:
+        if any(reference.reference_id not in references for reference in item.source_references):
+            raise ValueError("模型输出包含不属于当前需求版本的来源引用")
+    for finding in output.findings:
+        if finding.source_reference.reference_id not in references:
+            raise ValueError("模型发现包含不属于当前需求版本的来源引用")
+    now = datetime.now(UTC)
+    atomics = []
+    for requirement in output.requirements:
+        source = requirement.source_references[0]
+        atomics.append(AtomicRequirement(
+            candidate_id=requirement.requirement_id, statement=requirement.statement,
+            source_reference=reference_map[source.reference_id], created_at=now, updated_at=now,
+        ))
+    findings = [RequirementReviewFinding(
+        finding_id=item.finding_id, finding_type=item.finding_type, summary=item.summary, reason=item.reason,
+        source_reference=reference_map[item.source_reference.reference_id] if item.source_reference else None,
+        inference_marker=item.inference_marker, created_at=now, updated_at=now,
+    ) for item in output.findings]
+    requirements = [requirement.model_copy(update={
+        "source_references": [reference_map[item.reference_id] for item in requirement.source_references],
+    }) for requirement in output.requirements]
+    test_items = [item.model_copy(update={
+        "source_references": [reference_map[reference.reference_id] for reference in item.source_references],
+    }) for item in output.test_items]
+    criteria = [item.model_copy(update={
+        "source_references": [reference_map[reference.reference_id] for reference in item.source_references],
+    }) for item in output.acceptance_criteria]
+    return requirements, test_items, criteria, atomics, findings
 
 
 def _identifier(prefix: str, source_id: str) -> str:

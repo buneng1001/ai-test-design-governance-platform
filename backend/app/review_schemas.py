@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.requirement_schemas import SourceReference
+from app.ai_schemas import MockScenario
 
 
 ReviewFindingType = Literal[
@@ -25,6 +26,7 @@ ReviewFindingStatus = Literal[
     "resolved",
     "risk_accepted",
 ]
+RequirementType = Literal["functional", "interface", "data", "quality", "constraint", "workflow", "other"]
 CandidateDecision = Literal["pending_confirmation", "accepted", "rejected"]
 VisualDecision = Literal["pending_confirmation", "accepted", "rejected"]
 
@@ -48,7 +50,7 @@ class RequirementReviewFinding(BaseModel):
     finding_type: ReviewFindingType
     summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
-    source_reference: SourceReference | None = None
+    source_reference: SourceReference
     inference_marker: str | None = None
     status: ReviewFindingStatus = "pending_confirmation"
     created_at: datetime
@@ -66,6 +68,62 @@ class VisualInference(BaseModel):
     updated_at: datetime
 
 
+class AnalyzedRequirement(BaseModel):
+    """模型归并后的需求，保留来源以便回到原始资料复核。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_id: str
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    statement: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    requirement_type: RequirementType
+    module: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    source_references: list[SourceReference] = Field(min_length=1, max_length=20)
+    analysis_note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+
+
+class AnalyzedTestItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    test_item_id: str
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    module: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    requirement_ids: list[str] = Field(min_length=1, max_length=20)
+    source_references: list[SourceReference] = Field(min_length=1, max_length=20)
+
+
+class AcceptanceCriterion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    criterion_id: str
+    statement: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    requirement_id: str
+    source_references: list[SourceReference] = Field(min_length=1, max_length=20)
+
+
+class AnalysisFindingOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    finding_id: str
+    finding_type: ReviewFindingType
+    summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+    source_reference: SourceReference | None = None
+    inference_marker: str | None = None
+
+
+class StructuredAnalysisOutput(BaseModel):
+    """需求分析模型的稳定输出契约；所有语义结果均需有来源引用。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["requirement-analysis.v1"]
+    requirements: list[AnalyzedRequirement] = Field(max_length=100)
+    test_items: list[AnalyzedTestItem] = Field(max_length=200)
+    acceptance_criteria: list[AcceptanceCriterion] = Field(max_length=200)
+    findings: list[AnalysisFindingOutput] = Field(max_length=200)
+
+
 class RequirementAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -76,7 +134,11 @@ class RequirementAnalysis(BaseModel):
     atomic_requirements: list[AtomicRequirement] = Field(default_factory=list)
     findings: list[RequirementReviewFinding] = Field(default_factory=list)
     visual_inferences: list[VisualInference] = Field(default_factory=list)
+    requirements: list[AnalyzedRequirement] = Field(default_factory=list)
+    test_items: list[AnalyzedTestItem] = Field(default_factory=list)
+    acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
     ai_run_id: int | None = None
+    is_mock: bool = True
     confirmed_by: str | None = None
     confirmed_at: datetime | None = None
 
@@ -110,3 +172,11 @@ class RequirementConfirmationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class RequirementAnalysisInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["mock", "real"] = "mock"
+    scenario: MockScenario = "normal"
+    max_retries: int = Field(default=2, ge=0, le=2)

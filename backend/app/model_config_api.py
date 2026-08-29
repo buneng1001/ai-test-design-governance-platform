@@ -12,9 +12,11 @@ from app.model_config_schemas import (
 )
 
 
+_SESSION_CONFIGS: dict[str, SessionModelConfigInput] = {}
+
+
 def register_model_config_routes(app: FastAPI) -> None:
     router = APIRouter()
-    session_configs: dict[str, SessionModelConfigStatus] = {}
 
     @router.get("/api/model-providers", response_model=list[ProviderOption])
     def list_model_providers() -> list[ProviderOption]:
@@ -32,7 +34,7 @@ def register_model_config_routes(app: FastAPI) -> None:
 
     @router.get("/api/ai-session-config", response_model=SessionModelConfigStatus | None)
     def get_session_config(x_session_id: str | None = Header(default=None)) -> SessionModelConfigStatus | None:
-        config = session_configs.get(x_session_id or "")
+        config = _SESSION_CONFIGS.get(x_session_id or "")
         return _status(config)
 
     @router.put("/api/ai-session-config", response_model=SessionModelConfigStatus)
@@ -41,9 +43,8 @@ def register_model_config_routes(app: FastAPI) -> None:
         x_session_id: str | None = Header(default=None),
     ) -> SessionModelConfigStatus:
         session_id = _require_session_id(x_session_id)
-        result = to_session_config_status(config)
-        session_configs[session_id] = result
-        return result
+        _SESSION_CONFIGS[session_id] = config
+        return to_session_config_status(config)
 
     @router.post("/api/ai-session-config/test", response_model=ConnectionTestResult)
     def test_session_config(
@@ -79,7 +80,7 @@ def register_model_config_routes(app: FastAPI) -> None:
 
     @router.delete("/api/ai-session-config", status_code=status.HTTP_204_NO_CONTENT)
     def clear_session_config(x_session_id: str | None = Header(default=None)) -> None:
-        session_configs.pop(_require_session_id(x_session_id), None)
+        _SESSION_CONFIGS.pop(_require_session_id(x_session_id), None)
 
     app.include_router(router)
 
@@ -99,7 +100,13 @@ def to_session_config_status(config: SessionModelConfigInput) -> SessionModelCon
     )
 
 
-def _status(config: SessionModelConfigStatus | None) -> SessionModelConfigStatus | None:
+def get_session_model_config(session_id: str | None) -> SessionModelConfigInput | None:
+    """供模型调用读取内存中的会话配置；API Key 不进入数据库或响应。"""
+
+    return _SESSION_CONFIGS.get(session_id or "")
+
+
+def _status(config: SessionModelConfigInput | None) -> SessionModelConfigStatus | None:
     if config is None:
         return None
-    return config
+    return to_session_config_status(config)

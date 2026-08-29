@@ -119,6 +119,27 @@ def test_visual_inference_cannot_be_confirmed_as_fact_without_decision(client: T
     assert all(item["decision"] != "accepted" for item in analysis["atomic_requirements"])
 
 
+def test_structured_analysis_contains_semantic_items_and_traceable_sources(client: TestClient) -> None:
+    project_id, version_id = setup_version(client)
+    response = client.post(f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review")
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["requirements"][0]["module"]
+    assert analysis["test_items"][0]["requirement_ids"]
+    assert analysis["acceptance_criteria"][0]["source_references"]
+    assert analysis["ai_run_id"]
+
+
+def test_real_analysis_requires_a_session_model_configuration(client: TestClient) -> None:
+    project_id, version_id = setup_version(client)
+    response = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        json={"mode": "real"},
+    )
+    assert response.status_code == 422
+    assert "未配置真实模型" in response.json()["detail"]
+
+
 def test_candidate_edit_rejects_unknown_source_reference_and_supports_split(client: TestClient) -> None:
     project_id, version_id = setup_version(client)
     analysis = client.post(
