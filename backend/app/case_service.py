@@ -43,16 +43,31 @@ def build_candidates(
     mapping: TemplateMappingVersion,
     variants: list[CaseVariant],
     limitations: list[dict],
+    selected_requirement_ids: list[str] | None = None,
+    excluded_modules: set[str] | None = None,
+    included_modules: set[str] | None = None,
 ) -> list[CandidateTestCase]:
     case_sheet = next(sheet for sheet in mapping.sheets if sheet.role == "case" and sheet.participates)
+    selected = set(selected_requirement_ids) if selected_requirement_ids is not None else None
+    excluded = excluded_modules or set()
     requirements = {
-        item.stable_requirement_id: item for item in review.atomic_requirements if item.decision == "accepted"
+        item.stable_requirement_id: item for item in review.atomic_requirements
+        if item.decision == "accepted" and (
+            selected is None or item.candidate_id in selected or item.stable_requirement_id in selected
+        )
     }
+    requirement_modules = {item.requirement_id: item.module for item in review.requirements}
     risks = {item.scope_item_id: item for item in design.risks}
     automations = {item.scope_item_id: item for item in design.automation_candidates}
     candidates: list[CandidateTestCase] = []
     for scope in design.scope_items:
         linked = [requirements[item] for item in scope.requirement_ids if item in requirements]
+        if any(requirement_modules.get(item.candidate_id) in excluded for item in linked):
+            linked = []
+        if included_modules and not any(
+            requirement_modules.get(item.candidate_id) in included_modules for item in linked
+        ):
+            linked = []
         risk = risks.get(scope.id)
         if not linked or risk is None:
             continue

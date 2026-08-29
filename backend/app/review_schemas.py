@@ -29,6 +29,7 @@ ReviewFindingStatus = Literal[
 RequirementType = Literal["functional", "interface", "data", "quality", "constraint", "workflow", "other"]
 CandidateDecision = Literal["pending_confirmation", "accepted", "rejected"]
 VisualDecision = Literal["pending_confirmation", "accepted", "rejected"]
+ConflictDecision = Literal["unresolved", "srs_preferred", "implementation_preferred", "both_retained", "awaiting_external_confirmation"]
 
 
 class AtomicRequirement(BaseModel):
@@ -82,6 +83,24 @@ class AnalyzedRequirement(BaseModel):
     analysis_note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 
 
+class RequirementConflict(BaseModel):
+    """同一能力的多份资料不一致时，供人工裁决的独立冲突记录。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conflict_id: str
+    topic: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    srs_text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    srs_source: SourceReference
+    implementation_text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    implementation_source: SourceReference
+    affected_modules: list[Annotated[str, StringConstraints(min_length=1, max_length=200)]] = Field(min_length=1)
+    affected_test_items: list[str] = Field(default_factory=list)
+    decision: ConflictDecision = "unresolved"
+    decided_by: str | None = None
+    decision_note: str | None = None
+
+
 class AnalyzedTestItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -122,6 +141,7 @@ class StructuredAnalysisOutput(BaseModel):
     test_items: list[AnalyzedTestItem] = Field(max_length=200)
     acceptance_criteria: list[AcceptanceCriterion] = Field(max_length=200)
     findings: list[AnalysisFindingOutput] = Field(max_length=200)
+    conflicts: list[RequirementConflict] = Field(default_factory=list, max_length=100)
 
 
 class RequirementAnalysis(BaseModel):
@@ -135,6 +155,8 @@ class RequirementAnalysis(BaseModel):
     findings: list[RequirementReviewFinding] = Field(default_factory=list)
     visual_inferences: list[VisualInference] = Field(default_factory=list)
     requirements: list[AnalyzedRequirement] = Field(default_factory=list)
+    conflicts: list[RequirementConflict] = Field(default_factory=list)
+    selected_requirement_ids: list[str] = Field(default_factory=list)
     test_items: list[AnalyzedTestItem] = Field(default_factory=list)
     acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
     ai_run_id: int | None = None
@@ -172,6 +194,20 @@ class RequirementConfirmationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class RequirementSelectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selected_requirement_ids: list[str] = Field(max_length=100)
+
+
+class RequirementConflictDecisionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: ConflictDecision
+    confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    decision_note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)] | None = None
 
 
 class RequirementAnalysisInput(BaseModel):

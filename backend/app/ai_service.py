@@ -142,6 +142,7 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
     criteria = []
     test_items = []
     findings = []
+    conflicts = []
     for index, item in enumerate(request.input_context, start=1):
         source = item["source_reference"]
         source_reference = source if isinstance(source, dict) else {}
@@ -170,8 +171,25 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
                 "reason": "Mock 识别到约束性表述，但不会替测试工程师补写验收标准。",
                 "source_reference": source_reference,
             })
+    if (
+        len(request.input_context) >= 2
+        and request.input_context[0]["text"] != request.input_context[1]["text"]
+        and request.input_context[0]["source_reference"]["filename"]
+        != request.input_context[1]["source_reference"]["filename"]
+    ):
+        first, second = request.input_context[:2]
+        conflict_id = "CONFLICT-" + hashlib.sha256(
+            f"{first['text']}\n{second['text']}".encode("utf-8")
+        ).hexdigest()[:12]
+        conflicts.append({
+            "conflict_id": conflict_id, "topic": "同一能力的资料描述不一致",
+            "srs_text": str(first["text"]), "srs_source": first["source_reference"],
+            "implementation_text": str(second["text"]), "implementation_source": second["source_reference"],
+            "affected_modules": ["未分类模块"], "affected_test_items": ["TEST-ITEM-1"],
+        })
     return {"contract_version": "requirement-analysis.v1", "requirements": requirements,
-            "test_items": test_items, "acceptance_criteria": criteria, "findings": findings}
+            "test_items": test_items, "acceptance_criteria": criteria, "findings": findings,
+            "conflicts": conflicts}
 
 
 def _requirement_prompt(request: ModelRequest) -> str:

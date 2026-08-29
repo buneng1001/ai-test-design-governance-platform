@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from app.requirement_schemas import RequirementVersion, SourceReference
 from app.review_schemas import (
     AcceptanceCriterion, AnalyzedRequirement, AnalyzedTestItem, AtomicRequirement,
-    RequirementReviewFinding, StructuredAnalysisOutput, VisualInference,
+    RequirementReviewFinding, RequirementConflict, StructuredAnalysisOutput, VisualInference,
 )
 
 
@@ -82,7 +82,7 @@ def semantic_output_to_analysis(
     version: RequirementVersion,
     output: StructuredAnalysisOutput,
 ) -> tuple[list[AnalyzedRequirement], list[AnalyzedTestItem], list[AcceptanceCriterion],
-           list[AtomicRequirement], list[RequirementReviewFinding]]:
+           list[AtomicRequirement], list[RequirementReviewFinding], list[RequirementConflict]]:
     """校验来源后将模型契约转换为内部评审模型；无效来源不会进入分析结果。"""
 
     references = {
@@ -133,7 +133,12 @@ def semantic_output_to_analysis(
     criteria = [item.model_copy(update={
         "source_references": [reference_map[reference.reference_id] for reference in item.source_references],
     }) for item in output.acceptance_criteria]
-    return requirements, test_items, criteria, atomics, findings
+    for conflict in output.conflicts:
+        if not source_reference_exists(version, conflict.srs_source):
+            raise ValueError("冲突 SRS 原文包含不属于当前需求版本的来源引用")
+        if not source_reference_exists(version, conflict.implementation_source):
+            raise ValueError("冲突实现规格原文包含不属于当前需求版本的来源引用")
+    return requirements, test_items, criteria, atomics, findings, output.conflicts
 
 
 def _identifier(prefix: str, source_id: str) -> str:

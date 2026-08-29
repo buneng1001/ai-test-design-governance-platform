@@ -131,6 +131,16 @@ export interface RequirementAnalysis {
     source_references: Array<{ filename: string; locator: string; reference_id: string }>;
     analysis_note: string;
   }>;
+  selected_requirement_ids: string[];
+  conflicts: Array<{
+    conflict_id: string; topic: string; srs_text: string;
+    srs_source: { filename: string; locator: string; reference_id: string };
+    implementation_text: string;
+    implementation_source: { filename: string; locator: string; reference_id: string };
+    affected_modules: string[]; affected_test_items: string[];
+    decision: "unresolved" | "srs_preferred" | "implementation_preferred" | "both_retained" | "awaiting_external_confirmation";
+    decided_by: string | null; decision_note: string | null;
+  }>;
   test_items: Array<{ test_item_id: string; name: string; module: string; requirement_ids: string[] }>;
   acceptance_criteria: Array<{ criterion_id: string; statement: string; requirement_id: string }>;
   atomic_requirements: Array<{
@@ -146,7 +156,7 @@ export interface RequirementAnalysis {
     summary: string;
     reason: string;
     status: string;
-    source_reference: { locator: string; filename: string } | null;
+    source_reference: { locator: string; filename: string; reference_id?: string } | null;
   }>;
   visual_inferences: Array<{
     inference_id: string;
@@ -602,6 +612,23 @@ export const confirmRequirementReview = (
     body: JSON.stringify({ confirmer_name: confirmerName }),
   },
 );
+export const updateRequirementSelection = (
+  projectId: number, analysisId: number, selectedRequirementIds: string[],
+): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/selection`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected_requirement_ids: selectedRequirementIds }),
+  },
+);
+export const decideRequirementConflict = (
+  projectId: number, analysisId: number, conflictId: string,
+  decision: RequirementAnalysis["conflicts"][number]["decision"], confirmerName: string,
+): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/conflicts/${conflictId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, confirmer_name: confirmerName }),
+  },
+);
 export const listAIRuns = (projectId: number): Promise<AIRun[]> => request(`/api/projects/${projectId}/ai-runs`);
 export const createTestDesign = (projectId: number, versionId: number): Promise<TestDesign> => request(
   `/api/projects/${projectId}/requirement-versions/${versionId}/test-designs`,
@@ -669,6 +696,8 @@ export const generateCases = (
   designId: number,
   templateMappingId: number,
   acceptTemplateLimitations = false,
+  strictConflicts = false,
+  modules: string[] = [],
 ): Promise<CaseGeneration> => request(
   `/api/projects/${projectId}/test-designs/${designId}/case-generations`, {
     method: "POST",
@@ -677,6 +706,8 @@ export const generateCases = (
       template_mapping_id: templateMappingId,
       accept_template_limitations: acceptTemplateLimitations,
       variants: ["normal", "boundary", "invalid"],
+      strict_conflicts: strictConflicts,
+      modules,
     }),
   },
 );

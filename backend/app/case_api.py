@@ -38,6 +38,25 @@ def register_case_routes(
         mapping = templates.get(project_id, data.template_mapping_id)
         if version is None or review is None or review.status != "confirmed":
             raise HTTPException(status_code=409, detail="需求确认后才能生成候选测试用例")
+        # 未解决冲突默认只排除受影响模块；严格模式才阻止整批生成。
+        unresolved = [
+            item for item in review.conflicts
+            if item.decision in {"unresolved", "awaiting_external_confirmation"}
+        ]
+        blocked_modules = sorted({module for item in unresolved for module in item.affected_modules})
+        if data.strict_conflicts and unresolved:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "unresolved_requirement_conflicts", "modules": blocked_modules},
+            )
+        requested_modules = set(data.modules)
+        affected = sorted(requested_modules.intersection(blocked_modules)) if requested_modules else blocked_modules
+        if affected:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "unresolved_requirement_conflicts", "modules": affected},
+            )
+        excluded_modules = set(blocked_modules) if not data.strict_conflicts else set()
         if mapping is None or mapping.status != "confirmed":
             raise HTTPException(status_code=409, detail="模板映射确认后才能生成候选测试用例")
         limitations = template_limitations(mapping)
@@ -70,6 +89,8 @@ def register_case_routes(
         if generation.status != "empty":
             generation.candidates = build_candidates(
                 0, project_id, design, review, version, mapping, data.variants, limitations,
+                review.selected_requirement_ids, excluded_modules,
+                set(data.modules),
             )
         return generations.create(generation)
 

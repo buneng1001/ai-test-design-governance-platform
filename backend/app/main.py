@@ -25,7 +25,10 @@ from app.requirement_schemas import RequirementPackage, RequirementPackageInput,
 from app.requirement_service import build_requirement_package
 from app.review_repository import RequirementReviewRepository
 from app.review_schemas import AtomicRequirementUpdate, FindingUpdate, RequirementAnalysis, RequirementAnalysisInput
-from app.review_schemas import RequirementConfirmationInput, RequirementReviewFinding, VisualInferenceUpdate
+from app.review_schemas import (
+    RequirementConfirmationInput, RequirementConflict, RequirementConflictDecisionInput, RequirementReviewFinding,
+    RequirementSelectionInput, VisualInferenceUpdate,
+)
 from app.review_service import build_analysis_candidates, semantic_output_to_analysis, source_reference_exists
 from app.schemas import Project, ProjectInput
 from app.template_api import register_template_routes
@@ -320,7 +323,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if output is None:
             raise HTTPException(status_code=502 if run_status == "failed" else 422,
                                 detail=validation_errors or "模型分析失败")
-        requirements, test_items, criteria, atomic_requirements, findings = semantic_output_to_analysis(version, output)
+        requirements, test_items, criteria, atomic_requirements, findings, conflicts = semantic_output_to_analysis(version, output)
         _, _, visual_inferences = build_analysis_candidates(version)
         ai_run = ai_run_repository.create_run(
             AIRun(
@@ -345,6 +348,8 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             findings=findings,
             visual_inferences=visual_inferences,
             requirements=requirements,
+            conflicts=conflicts,
+            selected_requirement_ids=[item.requirement_id for item in requirements],
             test_items=test_items,
             acceptance_criteria=criteria,
             is_mock=analysis_input.mode == "mock",
@@ -471,6 +476,45 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         inference.decision = update.decision
         inference.updated_at = datetime.now(UTC)
         return review_repository.save(analysis, "visual_inference_updated")
+    @app.patch(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/selection",
+        response_model=RequirementAnalysis,
+    )
+    def update_requirement_selection(
+        project_id: int, analysis_id: int, selection: RequirementSelectionInput,
+    ) -> RequirementAnalysis:
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        if analysis.status == "confirmed":
+            raise HTTPException(status_code=409, detail="需求确认后不能修改需求表选择")
+        known_ids = {item.requirement_id for item in analysis.requirements}
+        if any(item not in known_ids for item in selection.selected_requirement_ids):
+            raise HTTPException(status_code=422, detail="需求表包含未知需求")
+        analysis.selected_requirement_ids = list(dict.fromkeys(selection.selected_requirement_ids))
+        return review_repository.save(analysis, "requirement_selection_updated")
+    @app.get(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/conflicts",
+        response_model=list[RequirementConflict],
+    )
+    def list_requirement_conflicts(project_id: int, analysis_id: int):
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        return analysis.conflicts
+    @app.patch(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/conflicts/{conflict_id}",
+        response_model=RequirementAnalysis,
+    )
+    def decide_requirement_conflict(
+        project_id: int, analysis_id: int, conflict_id: str, decision: RequirementConflictDecisionInput,
+    ) -> RequirementAnalysis:
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        if analysis.status == "confirmed":
+            raise HTTPException(status_code=409, detail="需求确认后不能修改冲突处理")
+        conflict = next((item for item in analysis.conflicts if item.conflict_id == conflict_id), None)
+        if conflict is None:
+            raise HTTPException(status_code=404, detail="需求冲突不存在")
+        conflict.decision = decision.decision
+        conflict.decided_by = decision.confirmer_name
+        conflict.decision_note = decision.decision_note
+        return review_repository.save(analysis, "requirement_conflict_decided")
     @app.post(
         "/api/projects/{project_id}/requirement-reviews/{analysis_id}/confirm",
         response_model=RequirementAnalysis,
@@ -489,6 +533,17 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="仍有需求评审发现待处置")
         if any(item.decision == "pending_confirmation" for item in analysis.visual_inferences):
             raise HTTPException(status_code=409, detail="仍有视觉推断待确认")
+        unresolved_modules = {
+            module for item in analysis.conflicts
+            if item.decision in {"unresolved", "awaiting_external_confirmation"}
+            for module in item.affected_modules
+        }
+        selected_modules = {
+            item.module for item in analysis.requirements
+            if item.requirement_id in analysis.selected_requirement_ids
+        }
+        if unresolved_modules.intersection(selected_modules):
+            raise HTTPException(status_code=409, detail="请先处理已选择需求所属模块的冲突")
         analysis.status = "confirmed"
         analysis.confirmed_by = confirmation.confirmer_name
         analysis.confirmed_at = datetime.now(UTC)

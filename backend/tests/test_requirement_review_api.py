@@ -164,3 +164,45 @@ def test_candidate_edit_rejects_unknown_source_reference_and_supports_split(clie
     )
     assert split.status_code == 200
     assert len(split.json()["atomic_requirements"]) == len(analysis["atomic_requirements"]) + 2
+
+
+def test_requirement_table_selection_and_conflict_decision_are_independent_views(client: TestClient) -> None:
+    content_a = encoded("SRS: 设备必须保存状态。\n".encode())
+    content_b = encoded("Implementation: 设备只保存最近状态。\n".encode())
+    project = client.post("/api/projects", json={
+        "name": "冲突治理项目", "test_object": "虚构设备", "software_version": "v1",
+    }).json()
+    assets = []
+    for filename, content in (("SRS.md", content_a), ("implementation.md", content_b)):
+        assets.append(client.post(f"/api/projects/{project['id']}/assets", json={
+            "name": filename, "asset_type": "requirement_material", "provenance_kind": "original_synthetic",
+            "source": "测试工程师从零创作", "usage_permission": "project_owned", "model_permission": "allowed",
+            "requirement_version": "V1", "purpose": "冲突测试", "content_base64": content,
+            "change_reason": "首次登记",
+        }).json())
+    package = client.post(f"/api/projects/{project['id']}/requirement-packages", json={
+        "files": [{"asset_id": asset["id"], "filename": asset["name"], "media_type": "text/markdown",
+                   "content_base64": content} for asset, content in zip(assets, (content_a, content_b), strict=True)],
+    }).json()
+    version = client.post(f"/api/projects/{project['id']}/requirement-packages/{package['id']}/publish").json()
+    analysis = client.post(
+        f"/api/projects/{project['id']}/requirement-versions/{version['id']}/requirement-review"
+    ).json()
+    assert analysis["selected_requirement_ids"] == [item["requirement_id"] for item in analysis["requirements"]]
+    selected = client.patch(
+        f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/selection",
+        json={"selected_requirement_ids": [analysis["requirements"][0]["requirement_id"]]},
+    )
+    assert selected.status_code == 200
+    conflicts = client.get(
+        f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/conflicts"
+    )
+    assert conflicts.status_code == 200
+    conflict = conflicts.json()[0]
+    assert conflict["srs_source"]["filename"] == "SRS.md"
+    resolved = client.patch(
+        f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/conflicts/{conflict['conflict_id']}",
+        json={"decision": "srs_preferred", "confirmer_name": "测试工程师"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["conflicts"][0]["decision"] == "srs_preferred"

@@ -8,10 +8,15 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const [mappingId, setMappingId] = useState(1);
   const [generation, setGeneration] = useState<CaseGeneration | null>(null);
   const [error, setError] = useState("");
+  const [strictConflicts, setStrictConflicts] = useState(false);
+  const [modules, setModules] = useState("");
 
   const generate = async () => {
     try {
-      setGeneration(await generateCases(projectId, designId, mappingId));
+      setGeneration(await generateCases(
+        projectId, designId, mappingId, false, strictConflicts,
+        modules.split(",").map((item) => item.trim()).filter(Boolean),
+      ));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "候选测试用例生成失败");
@@ -27,6 +32,8 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
       <input type="number" min="1" value={mappingId} onChange={(event) => setMappingId(Number(event.target.value))} />
     </label>
     <button onClick={() => void generate()}>生成候选测试用例</button>
+    <label><input type="checkbox" checked={strictConflicts} onChange={(event) => setStrictConflicts(event.target.checked)} /> 整批严格模式</label>
+    <label>局部生成模块（逗号分隔）<input value={modules} onChange={(event) => setModules(event.target.value)} /></label>
     {error && <p role="alert" className="error">{error}</p>}
     {generation && <div>
       <p role="status">

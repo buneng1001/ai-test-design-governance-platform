@@ -68,6 +68,8 @@ class CaseGenerationInput(BaseModel):
         default_factory=lambda: ["normal", "boundary", "invalid"], min_length=1, max_length=5
     )
     accept_template_limitations: bool = False
+    strict_conflicts: bool = False
+    modules: list[str] = Field(default_factory=list, max_length=100)
 
 
 class CaseGeneration(BaseModel):
