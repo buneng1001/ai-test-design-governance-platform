@@ -3,11 +3,14 @@ from datetime import UTC, datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIDispositionInput, AIRun, AIRunInput, AIModelConfig
-from app.ai_service import ModelRequest, MockModelService, UnavailableModelService, validate_output
+from app.ai_service import (
+    ModelRequest, MockModelService, OpenAICompatibleModelService, UnavailableModelService,
+    validate_output, validate_requirement_analysis_output,
+)
 from app.asset_repository import AssetRepository
 from app.case_api import register_case_routes
 from app.case_review_api import register_case_review_routes
@@ -21,9 +24,9 @@ from app.requirement_repository import RequirementRepository
 from app.requirement_schemas import RequirementPackage, RequirementPackageInput, RequirementVersion
 from app.requirement_service import build_requirement_package
 from app.review_repository import RequirementReviewRepository
-from app.review_schemas import AtomicRequirementUpdate, FindingUpdate, RequirementAnalysis
+from app.review_schemas import AtomicRequirementUpdate, FindingUpdate, RequirementAnalysis, RequirementAnalysisInput
 from app.review_schemas import RequirementConfirmationInput, RequirementReviewFinding, VisualInferenceUpdate
-from app.review_service import build_analysis_candidates, source_reference_exists
+from app.review_service import build_analysis_candidates, semantic_output_to_analysis, source_reference_exists
 from app.schemas import Project, ProjectInput
 from app.template_api import register_template_routes
 from app.template_repository import TemplateMappingRepository
@@ -41,7 +44,7 @@ from app.report_api import register_report_routes
 from app.report_service import ReportService
 from app.evaluation_api import register_evaluation_routes
 from app.evaluation_repository import EvaluationRepository
-from app.model_config_api import register_model_config_routes
+from app.model_config_api import get_session_model_config, register_model_config_routes
 def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -66,6 +69,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         change_impact_repository, ai_run_repository, evaluation_repository,
     )
     model_service = MockModelService()
+    real_model_service = OpenAICompatibleModelService()
     unavailable_model_service = UnavailableModelService()
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -245,7 +249,10 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         response_model=RequirementAnalysis,
         status_code=status.HTTP_201_CREATED,
     )
-    def create_requirement_review(project_id: int, version_id: int) -> RequirementAnalysis:
+    def create_requirement_review(
+        project_id: int, version_id: int, analysis_input: RequirementAnalysisInput | None = None,
+        x_session_id: str | None = Header(default=None),
+    ) -> RequirementAnalysis:
         require_project(repository.get(project_id))
         version = requirement_repository.get_version(project_id, version_id)
         if version is None:
@@ -253,43 +260,81 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         existing = review_repository.latest_for_version(project_id, version_id)
         if existing is not None:
             return existing
-        atomic_requirements, findings, visual_inferences = build_analysis_candidates(version)
+        analysis_input = analysis_input or RequirementAnalysisInput()
         input_asset_versions = [
             {"asset_id": material.asset_id, "revision": material.asset_revision}
             for material in version.materials
         ]
+        context = tuple(
+            {"text": fragment.text, "source_reference": fragment.source_reference.model_dump(mode="json")}
+            for material in version.materials for fragment in material.fragments
+        )
+        session_config = get_session_model_config(x_session_id) if analysis_input.mode == "real" else None
+        if analysis_input.mode == "real" and session_config is None:
+            raise HTTPException(status_code=422, detail="未配置真实模型；请先保存当前会话模型配置")
+        model_parameters = AIModelConfig(
+            provider=session_config.provider if session_config else "mock",
+            model=session_config.model if session_config else "deterministic-v1",
+        )
+        request = ModelRequest(
+            task_type="requirement_review", prompt_version="requirement-analysis.v1",
+            model_parameters=model_parameters, input_asset_versions=tuple(input_asset_versions),
+            scenario=analysis_input.scenario, input_context=context,
+            base_url=session_config.base_url if session_config else "",
+            api_key=session_config.api_key if session_config else "",
+        )
+        selected_model_service = real_model_service if analysis_input.mode == "real" else model_service
+        attempts: list[AIAttempt] = []
+        output = None
+        validation_errors: list[str] = []
+        run_status = "failed"
+        validation_status = "not_run"
+        for attempt_number in range(1, analysis_input.max_retries + 2):
+            started_at = datetime.now(UTC)
+            response = selected_model_service.complete(request)
+            elapsed_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
+            if response.error_code:
+                attempts.append(AIAttempt(
+                    attempt=attempt_number, started_at=started_at, elapsed_ms=elapsed_ms,
+                    status="failed", error_code=response.error_code, retryable=response.retryable,
+                ))
+                if not response.retryable or attempt_number == analysis_input.max_retries + 1:
+                    break
+                continue
+            output, validation_errors = validate_requirement_analysis_output(response.raw_output)
+            if validation_errors:
+                attempts.append(AIAttempt(
+                    attempt=attempt_number, started_at=started_at, elapsed_ms=elapsed_ms,
+                    status="validation_failed", error_code="schema_invalid", retryable=False,
+                ))
+                validation_status = "failed"
+                run_status = "validation_failed"
+                break
+            validation_status = "passed"
+            run_status = "succeeded"
+            attempts.append(AIAttempt(
+                attempt=attempt_number, started_at=started_at, elapsed_ms=elapsed_ms,
+                status="succeeded", error_code=None, retryable=False,
+            ))
+            break
+        if output is None:
+            raise HTTPException(status_code=502 if run_status == "failed" else 422,
+                                detail=validation_errors or "模型分析失败")
+        requirements, test_items, criteria, atomic_requirements, findings = semantic_output_to_analysis(version, output)
+        _, _, visual_inferences = build_analysis_candidates(version)
         ai_run = ai_run_repository.create_run(
             AIRun(
                 id=0,
                 project_id=project_id,
                 task_type="requirement_review",
-                model_parameters=AIModelConfig(),
-                prompt_version="requirement-review.v1",
+                model_parameters=model_parameters,
+                prompt_version="requirement-analysis.v1",
                 input_asset_versions=input_asset_versions,
-                output={
-                    "contract_version": "ai-output.v1",
-                    "items": [
-                        {
-                            "candidate_id": item.candidate_id,
-                            "summary": item.statement,
-                            "source_asset_ids": [item.source_reference.asset_id],
-                        }
-                        for item in atomic_requirements
-                    ],
-                },
-                validation_status="passed",
-                validation_errors=[],
-                status="succeeded",
-                is_mock=True,
+                output=output.model_dump(mode="json"), validation_status=validation_status,
+                validation_errors=validation_errors, status=run_status,
+                is_mock=analysis_input.mode == "mock",
                 created_at=datetime.now(UTC),
-                attempts=[
-                    AIAttempt(
-                        attempt=1,
-                        started_at=datetime.now(UTC),
-                        elapsed_ms=0,
-                        status="succeeded",
-                    )
-                ],
+                attempts=attempts,
             )
         )
         analysis = RequirementAnalysis(
@@ -299,6 +344,10 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             atomic_requirements=atomic_requirements,
             findings=findings,
             visual_inferences=visual_inferences,
+            requirements=requirements,
+            test_items=test_items,
+            acceptance_criteria=criteria,
+            is_mock=analysis_input.mode == "mock",
             ai_run_id=ai_run.id,
         )
         return review_repository.create(analysis)

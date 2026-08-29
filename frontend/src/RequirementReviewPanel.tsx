@@ -15,12 +15,13 @@ export function RequirementReviewPanel({ projectId }: { projectId: number }) {
   const [version, setVersion] = useState(1);
   const [confirmerName, setConfirmerName] = useState("测试工程师");
   const [error, setError] = useState("");
+  const [mode, setMode] = useState<"mock" | "real">("mock");
 
   const runReview = async () => {
     try {
       const versions = await listRequirementVersions(projectId);
       if (versions.length === 0) throw new Error("请先发布需求版本");
-      setAnalysis(await createRequirementReview(projectId, version));
+      setAnalysis(await createRequirementReview(projectId, version, mode));
       setError("");
     } catch (reason) {
       setError(message(reason));
@@ -33,6 +34,10 @@ export function RequirementReviewPanel({ projectId }: { projectId: number }) {
     });
   };
 
+  const requirements = analysis?.requirements ?? [];
+  const testItems = analysis?.test_items ?? [];
+  const acceptanceCriteria = analysis?.acceptance_criteria ?? [];
+
   return (
     <section className="panel">
       <h2>需求评审与确认</h2>
@@ -40,12 +45,30 @@ export function RequirementReviewPanel({ projectId }: { projectId: number }) {
         <label>需求版本
           <input type="number" min="1" value={version} onChange={(event) => setVersion(Number(event.target.value))} />
         </label>
+        <label>分析方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
+          <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
+        </select></label>
         <button onClick={() => void runReview()}>运行原子需求与需求评审</button>
       </>}
       {error && <p role="alert" className="error">{error}</p>}
       {analysis && <>
-        <p>状态：{analysis.status === "confirmed" ? "需求已确认" : "等待测试工程师处理"}</p>
+        <p>状态：{analysis.status === "confirmed" ? "需求已确认" : "等待测试工程师处理"} · 已生成语义分析结果 ·
+          {analysis.is_mock ? " Mock AI" : " 真实模型"}</p>
         <div className="requirement-summary">
+          <h3>按模块归并的需求表</h3>
+          {requirements.length === 0 && <p className="muted">模型没有返回需求候选，请检查输入或模型输出。</p>}
+          {groupByModule(requirements).map(([module, moduleRequirements]) => <article key={module}>
+            <strong>{module}</strong>
+            <table><thead><tr><th>名称</th><th>类型</th><th>需求</th><th>来源</th></tr></thead>
+              <tbody>{moduleRequirements.map((item) => <tr key={item.requirement_id}>
+                <td>{item.name}</td><td>{item.requirement_type}</td><td>{item.statement}<br />
+                  <small>{item.analysis_note}</small><br />
+                  <small>{analysis.findings.length > 0 ? "问题标记：有待处理发现" : "问题标记：无"}</small></td>
+                <td>{item.source_references.map((source) => `${source.filename} ${source.locator}`).join("；")}</td>
+              </tr>)}</tbody>
+            </table>
+          </article>)}
+          <p>测试项：{testItems.length} · 验收条件：{acceptanceCriteria.length}</p>
           <h3>原子需求候选</h3>
           {analysis.atomic_requirements.map((candidate) => <article key={candidate.candidate_id}>
             <span>{candidate.statement}</span>
@@ -101,3 +124,10 @@ export function RequirementReviewPanel({ projectId }: { projectId: number }) {
 }
 
 const message = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";
+
+const groupByModule = (requirements: RequirementAnalysis["requirements"]): Array<[
+  string, RequirementAnalysis["requirements"]
+]> => Object.entries(requirements.reduce<Record<string, RequirementAnalysis["requirements"]>>(
+  (groups, requirement) => ({ ...groups, [requirement.module]: [...(groups[requirement.module] ?? []), requirement] }),
+  {},
+));
