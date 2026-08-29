@@ -10,6 +10,7 @@ def create_project(client: TestClient) -> int:
         json={
             "name": "资产护栏测试项目",
             "test_object": "虚构智能采集设备",
+            "software_version": "v1.0.0",
             "description": "只验证资产来源记录。",
             "settings": {"requirement_language": "zh-CN"},
         },

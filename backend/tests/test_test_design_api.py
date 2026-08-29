@@ -10,6 +10,7 @@ def _setup_confirmed_version(client: TestClient) -> tuple[int, int]:
         json={
             "name": "测试设计项目",
             "test_object": "虚构智能采集设备",
+            "software_version": "v1.0.0",
             "description": "维度、风险和自动化设计",
             "settings": {"requirement_language": "zh-CN"},
         },

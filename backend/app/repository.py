@@ -291,6 +291,15 @@ MIGRATIONS = (
     """
     ALTER TABLE asset_provenance_revisions ADD COLUMN content_base64 TEXT NOT NULL DEFAULT '';
     """,
+    """
+    ALTER TABLE projects ADD COLUMN software_version TEXT NOT NULL DEFAULT '未填写';
+    """,
+    """
+    ALTER TABLE asset_provenance_revisions ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;
+    """,
+    """
+    ALTER TABLE asset_provenance_revisions ADD COLUMN media_type TEXT NOT NULL DEFAULT 'application/octet-stream';
+    """,
 )
 
 
@@ -329,12 +338,15 @@ class ProjectRepository:
         with self.connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO projects(name, test_object, description, settings_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO projects(
+                    name, test_object, software_version, description, settings_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     project_input.name,
                     project_input.test_object,
+                    project_input.software_version,
                     project_input.description,
                     project_input.settings.model_dump_json(),
                     now,
@@ -363,12 +375,13 @@ class ProjectRepository:
             cursor = connection.execute(
                 """
                 UPDATE projects
-                SET name = ?, test_object = ?, description = ?, settings_json = ?, updated_at = ?
+                SET name = ?, test_object = ?, software_version = ?, description = ?, settings_json = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     project_input.name,
                     project_input.test_object,
+                    project_input.software_version,
                     project_input.description,
                     project_input.settings.model_dump_json(),
                     self._now(),
@@ -389,6 +402,7 @@ class ProjectRepository:
             id=row["id"],
             name=row["name"],
             test_object=row["test_object"],
+            software_version=row["software_version"],
             description=row["description"],
             settings=ProjectSettings.model_validate(json.loads(row["settings_json"])),
             created_at=row["created_at"],

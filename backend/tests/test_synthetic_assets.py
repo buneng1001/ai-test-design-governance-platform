@@ -64,7 +64,7 @@ def test_result_inputs_are_contract_valid_and_cover_governance_scenarios() -> No
 
 def test_evaluation_truth_is_rejected_at_ai_api_boundary(client: TestClient) -> None:
     project = client.post("/api/projects", json={
-        "name": "合成真值隔离测试", "test_object": "澄明采集器", "description": "隔离",
+        "name": "合成真值隔离测试", "test_object": "澄明采集器", "software_version": "v1.0.0", "description": "隔离",
         "settings": {"requirement_language": "zh-CN"},
     }).json()
     truth_bytes = (ASSET_ROOT / "evaluation-truth/evaluation-truth.json").read_bytes()

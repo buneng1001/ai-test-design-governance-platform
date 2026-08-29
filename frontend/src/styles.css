@@ -37,6 +37,12 @@ button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; backgro
 .project-form button { justify-self: start; }
 .link-button { padding-left: 0; color: #37644f; background: transparent; }
 .error { color: #a32525; }
+.success { color: #187044; }
+.required-mark { color: #c52222; font-style: normal; margin-right: 4px; }
+.asset-checklist { display: grid; gap: 8px; }
+.asset-checklist label { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px;
+  font-weight: 400; }
+.asset-checklist input { width: auto; }
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

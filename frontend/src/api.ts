@@ -5,6 +5,7 @@ export interface ProjectSettings {
 export interface ProjectInput {
   name: string;
   test_object: string;
+  software_version: string;
   description: string;
   settings: ProjectSettings;
 }
@@ -15,8 +16,18 @@ export interface Project extends ProjectInput {
   updated_at: string;
 }
 
+export type ModelProviderId = "deepseek" | "siliconflow" | "kimi" | "glm" | "custom";
+export interface ModelProviderOption { id: ModelProviderId; name: string; base_url: string; models: string[]; }
+export interface SessionModelConfig { provider: ModelProviderId; model: string; base_url: string; api_key: string; }
+export interface SessionModelConfigStatus extends Omit<SessionModelConfig, "api_key"> { api_key_configured: boolean; }
+export const readStoredSessionModelConfig = (): SessionModelConfig | null => {
+  const saved = sessionStorage.getItem("ai-test-design-model-config");
+  return saved ? JSON.parse(saved) as SessionModelConfig : null;
+};
+
 export interface AssetProvenanceInput {
   name: string;
+  media_type?: string;
   asset_type:
     | "requirement_material"
     | "case_template"
@@ -39,11 +50,13 @@ export interface AssetProvenanceRecord extends Omit<AssetProvenanceInput, "conte
   project_id: number;
   revision: number;
   sha256: string;
+  size_bytes: number;
   created_at: string;
   boundary: "original_synthetic" | "public_authorized" | "prohibited" | "unknown";
   can_enter_requirement_package: boolean;
   can_enter_model_context: boolean;
   reason: string;
+  media_type: string;
 }
 
 export interface RequirementFileInput {
@@ -469,6 +482,40 @@ export const updateProject = (projectId: number, project: ProjectInput): Promise
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(project),
   });
+const sessionId = (): string => {
+  const key = "ai-test-design-session-id";
+  const existing = sessionStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  sessionStorage.setItem(key, created);
+  return created;
+};
+const sessionHeaders = (): HeadersInit => ({ "X-Session-ID": sessionId() });
+export const listModelProviders = (): Promise<ModelProviderOption[]> => request("/api/model-providers");
+export const getSessionModelConfig = async (): Promise<SessionModelConfigStatus | null> => {
+  const config = readStoredSessionModelConfig();
+  if (config) {
+    return { provider: config.provider, model: config.model, base_url: config.base_url, api_key_configured: true };
+  }
+  return request("/api/ai-session-config", { headers: sessionHeaders() });
+};
+export const saveSessionModelConfig = async (config: SessionModelConfig): Promise<SessionModelConfigStatus> => {
+  const saved = await request<SessionModelConfigStatus>("/api/ai-session-config", {
+    method: "PUT", headers: { ...sessionHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(config),
+  });
+  sessionStorage.setItem("ai-test-design-model-config", JSON.stringify(config));
+  return saved;
+};
+export const testSessionModelConfig = (config: SessionModelConfig): Promise<{
+  success: boolean; message: string; provider: ModelProviderId; model: string;
+}> => request("/api/ai-session-config/test", {
+  method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(config),
+});
+export const clearSessionModelConfig = async (): Promise<void> => {
+  const response = await fetch("/api/ai-session-config", { method: "DELETE", headers: sessionHeaders() });
+  if (!response.ok) throw new Error("清除模型配置失败");
+  sessionStorage.removeItem("ai-test-design-model-config");
+};
 export const listAssets = (projectId: number): Promise<AssetProvenanceRecord[]> =>
   request(`/api/projects/${projectId}/assets`);
 export const createAsset = (

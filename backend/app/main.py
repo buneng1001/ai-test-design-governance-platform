@@ -41,6 +41,7 @@ from app.report_api import register_report_routes
 from app.report_service import ReportService
 from app.evaluation_api import register_evaluation_routes
 from app.evaluation_repository import EvaluationRepository
+from app.model_config_api import register_model_config_routes
 def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -109,6 +110,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     register_evaluation_routes(
         app, repository, asset_repository, ai_run_repository, evaluation_repository
     )
+    register_model_config_routes(app)
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

@@ -9,7 +9,7 @@ def _project(client: TestClient) -> int:
     response = client.post(
         "/api/projects",
         json={
-            "name": "模板映射项目", "test_object": "虚构智能采集设备", "description": "模板边界",
+            "name": "模板映射项目", "test_object": "虚构智能采集设备", "software_version": "v1.0.0", "description": "模板边界",
             "settings": {"requirement_language": "zh-CN"},
         },
     )

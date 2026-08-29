@@ -24,6 +24,7 @@ class AssetProvenanceInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: NonEmptyText
+    media_type: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)] = "application/octet-stream"
     asset_type: AssetType
     provenance_kind: ProvenanceKind
     source: Annotated[str, Field(max_length=2000)]
@@ -56,6 +57,7 @@ class AssetProvenanceRecord(BaseModel):
     project_id: int
     revision: int
     name: str
+    media_type: str
     asset_type: AssetType
     provenance_kind: ProvenanceKind
     source: str
@@ -64,6 +66,7 @@ class AssetProvenanceRecord(BaseModel):
     requirement_version: str
     purpose: str
     sha256: str
+    size_bytes: int
     change_reason: str
     created_at: datetime
     boundary: Boundary

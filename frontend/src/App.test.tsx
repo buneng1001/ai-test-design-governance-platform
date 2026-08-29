@@ -17,6 +17,7 @@ test("测试工程师创建测试设计项目后进入项目工作台", async ()
     id: 1,
     name: "智能采集设备测试设计",
     test_object: "虚构智能采集设备",
+    software_version: "v1.0.0",
     description: "验证通用采集能力",
     settings: { requirement_language: "zh-CN" },
     created_at: "2026-08-24T00:00:00Z",
@@ -33,6 +34,7 @@ test("测试工程师创建测试设计项目后进入项目工作台", async ()
   await user.click(screen.getByRole("button", { name: "创建测试设计项目" }));
   await user.type(screen.getByLabelText("项目名称"), createdProject.name);
   await user.type(screen.getByLabelText("测试对象"), createdProject.test_object);
+  await user.type(screen.getByLabelText("软件版本"), createdProject.software_version);
   await user.type(screen.getByLabelText("项目描述"), createdProject.description);
   await user.click(screen.getByRole("button", { name: "创建并进入工作台" }));
 

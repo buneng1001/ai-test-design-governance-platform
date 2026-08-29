@@ -14,11 +14,13 @@ import { CoveragePanel } from "./CoveragePanel";
 import { ChangeImpactPanel } from "./ChangeImpactPanel";
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
 import { ReportsPanel } from "./ReportsPanel";
+import { ModelConfigPanel } from "./ModelConfigPanel";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
   name: "",
   test_object: "",
+  software_version: "",
   description: "",
   settings: { requirement_language: "zh-CN" },
 };
@@ -30,6 +32,7 @@ export function App() {
   const [projectInput, setProjectInput] = useState<ProjectInput>(emptyProject);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [error, setError] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -76,6 +79,7 @@ export function App() {
       setActiveProject(updated);
       setProjectInput(toInput(updated));
       setError("");
+      setSaveStatus(`✓ 已保存 · ${new Date().toLocaleTimeString()}`);
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -90,12 +94,15 @@ export function App() {
         <p className="eyebrow">项目工作台</p>
         <h1>{activeProject.name}</h1>
         <p className="object-name">测试对象：{activeProject.test_object}</p>
+        <p className="object-name">软件版本：{activeProject.software_version}</p>
         <section className="panel">
           <h2>项目信息</h2>
           <ProjectForm input={projectInput} setInput={setProjectInput} submitLabel="保存修改" onSubmit={submitUpdate} />
           {error && <p role="alert" className="error">{error}</p>}
+          {saveStatus && <p role="status" className="success">{saveStatus}</p>}
         </section>
         <AssetProvenancePanel projectId={activeProject.id} />
+        <ModelConfigPanel />
         <AIRunPanel projectId={activeProject.id} />
         <RequirementImportPanel projectId={activeProject.id} />
         <p className="muted">发布需求版本后，可在下方输入版本编号进入需求确认。</p>
@@ -172,15 +179,23 @@ function ProjectForm({ input, setInput, submitLabel, onSubmit }: ProjectFormProp
     <form onSubmit={onSubmit} className="project-form">
       <label>
         项目名称
-        <input value={input.name} maxLength={100} onChange={(event) => setField("name", event.target.value)} />
+        <span><i className="required-mark">*</i><input aria-label="项目名称" value={input.name} maxLength={100}
+          required onChange={(event) => setField("name", event.target.value)} /></span>
       </label>
       <label>
         测试对象
-        <input
+        <span><i className="required-mark">*</i><input aria-label="测试对象"
           value={input.test_object}
           maxLength={200}
+          required
           onChange={(event) => setField("test_object", event.target.value)}
-        />
+        /></span>
+      </label>
+      <label>
+        软件版本
+        <span><i className="required-mark">*</i><input aria-label="软件版本" value={input.software_version}
+          maxLength={100} required
+          onChange={(event) => setField("software_version", event.target.value)} /></span>
       </label>
       <label>
         项目描述
@@ -210,16 +225,17 @@ const parseProjectId = (path: string): number | null => {
   return match ? Number(match[1]) : null;
 };
 
-const toInput = ({ name, test_object, description, settings }: Project): ProjectInput => ({
+const toInput = ({ name, test_object, software_version, description, settings }: Project): ProjectInput => ({
   name,
   test_object,
+  software_version,
   description,
   settings,
 });
 
 const validate = (input: ProjectInput, setError: (message: string) => void): boolean => {
-  if (!input.name.trim() || !input.test_object.trim()) {
-    setError("请填写项目名称和测试对象");
+  if (!input.name.trim() || !input.test_object.trim() || !input.software_version.trim()) {
+    setError("请填写项目名称、测试对象和软件版本");
     return false;
   }
   setError("");

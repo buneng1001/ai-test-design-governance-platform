@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 def create_project(client: TestClient) -> int:
     response = client.post(
         "/api/projects",
-        json={"name": "AI 运行审计项目", "test_object": "虚构智能采集设备", "description": "Mock 验证"},
+        json={"name": "AI 运行审计项目", "test_object": "虚构智能采集设备", "software_version": "v1.0.0", "description": "Mock 验证"},
     )
     assert response.status_code == 201
     return response.json()["id"]

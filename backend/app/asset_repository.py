@@ -136,14 +136,16 @@ class AssetRepository:
         connection.execute(
             """
             INSERT INTO asset_provenance_revisions(
-                asset_id, revision, name, asset_type, provenance_kind, source, usage_permission,
-                model_permission, requirement_version, purpose, sha256, change_reason, content_base64, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                asset_id, revision, name, media_type, asset_type, provenance_kind, source, usage_permission,
+                model_permission, requirement_version, purpose, sha256, size_bytes,
+                change_reason, content_base64, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset_id,
                 revision,
                 asset_input.name,
+                asset_input.media_type,
                 asset_input.asset_type,
                 asset_input.provenance_kind,
                 asset_input.source,
@@ -152,6 +154,7 @@ class AssetRepository:
                 asset_input.requirement_version,
                 asset_input.purpose,
                 self.hash_content(asset_input.content_base64),
+                len(base64.b64decode(asset_input.content_base64, validate=True)),
                 asset_input.change_reason,
                 asset_input.content_base64,
                 created_at,
@@ -170,6 +173,7 @@ class AssetRepository:
             project_id=row["project_id"],
             revision=row["revision"],
             name=row["name"],
+            media_type=row["media_type"],
             asset_type=row["asset_type"],
             provenance_kind=row["provenance_kind"],
             source=row["source"],
@@ -178,6 +182,7 @@ class AssetRepository:
             requirement_version=row["requirement_version"],
             purpose=row["purpose"],
             sha256=row["sha256"],
+            size_bytes=row["size_bytes"],
             change_reason=row["change_reason"],
             created_at=row["created_at"],
             boundary=boundary,

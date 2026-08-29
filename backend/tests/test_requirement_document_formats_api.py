@@ -13,7 +13,7 @@ def encoded(content: bytes) -> str:
 def create_project(client: TestClient) -> int:
     response = client.post(
         "/api/projects",
-        json={"name": "文档格式导入项目", "test_object": "虚构智能采集设备", "description": "验证文档与截图。"},
+        json={"name": "文档格式导入项目", "test_object": "虚构智能采集设备", "software_version": "v1.0.0", "description": "验证文档与截图。"},
     )
     assert response.status_code == 201
     return response.json()["id"]

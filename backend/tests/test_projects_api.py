@@ -7,6 +7,7 @@ def create_project(client: TestClient, name: str = "智能采集设备测试设�
         json={
             "name": name,
             "test_object": "虚构智能采集设备",
+            "software_version": "v1.0.0",
             "description": "验证通用采集与异常恢复能力。",
             "settings": {"requirement_language": "zh-CN"},
         },
@@ -43,6 +44,7 @@ def test_engineer_can_edit_a_test_design_project(client: TestClient) -> None:
         json={
             "name": "智能采集设备 V1 测试设计",
             "test_object": "虚构智能采集设备 V1",
+            "software_version": "v1.0.1",
             "description": "更新后的项目边界。",
             "settings": {"requirement_language": "en-US"},
         },
@@ -59,6 +61,7 @@ def test_invalid_project_input_returns_clear_validation_errors(client: TestClien
         json={
             "name": "   ",
             "test_object": "",
+            "software_version": "",
             "description": "",
             "settings": {"requirement_language": "unsupported"},
         },
@@ -66,7 +69,7 @@ def test_invalid_project_input_returns_clear_validation_errors(client: TestClien
 
     assert response.status_code == 422
     fields = {error["loc"][-1] for error in response.json()["detail"]}
-    assert fields == {"name", "test_object", "requirement_language"}
+    assert fields == {"name", "test_object", "software_version", "requirement_language"}
 
 
 def test_missing_project_returns_not_found(client: TestClient) -> None:
@@ -76,6 +79,7 @@ def test_missing_project_returns_not_found(client: TestClient) -> None:
         json={
             "name": "不存在的项目",
             "test_object": "虚构对象",
+            "software_version": "v1.0.0",
             "description": "",
             "settings": {"requirement_language": "zh-CN"},
         },

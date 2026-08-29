@@ -9,7 +9,7 @@ def _setup(
 ) -> tuple[int, int, int]:
     project = client.post(
         "/api/projects",
-        json={"name": "候选用例项目", "test_object": "虚构智能采集设备", "description": "生成测试用例"},
+        json={"name": "候选用例项目", "test_object": "虚构智能采集设备", "software_version": "v1.0.0", "description": "生成测试用例"},
     ).json()
     content = base64.b64encode("设备必须保存状态。\n".encode()).decode()
     asset = client.post(f"/api/projects/{project['id']}/assets", json={

@@ -17,13 +17,13 @@ class RequirementFileInput(BaseModel):
     asset_id: int = Field(gt=0)
     filename: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     media_type: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-    content_base64: str
+    content_base64: str = ""
 
 
 class RequirementPackageInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: PackageName
+    name: PackageName = "当前任务"
     files: Annotated[list[RequirementFileInput], Field(min_length=1, max_length=20)]
 
 

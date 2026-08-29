@@ -24,30 +24,28 @@ const initialInput: AssetProvenanceInput = {
 export function AssetProvenancePanel({ projectId }: { projectId: number }) {
   const [assets, setAssets] = useState<AssetProvenanceRecord[]>([]);
   const [input, setInput] = useState(initialInput);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     void listAssets(projectId).then(setAssets).catch((reason: unknown) => setError(message(reason)));
   }, [projectId]);
 
-  const selectFile = async (file: File | undefined) => {
-    if (!file) return;
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = "";
-    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-    setInput({ ...input, name: file.name, content_base64: btoa(binary) });
-  };
+  const selectFiles = (files: FileList | null) => setSelectedFiles(Array.from(files ?? []));
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!input.name || !input.source || !input.purpose || !input.content_base64) {
-      setError("请选择资产并填写来源、用途");
+    if (selectedFiles.length === 0 || !input.source || !input.purpose) {
+      setError("请选择至少一个文件并填写来源、用途");
       return;
     }
     try {
-      const created = await createAsset(projectId, input);
-      setAssets([...assets, created]);
+      const created = await Promise.all(selectedFiles.map(async (file) => createAsset(projectId, {
+        ...input, name: file.name, media_type: file.type || "application/octet-stream", content_base64: await toBase64(file),
+      })));
+      setAssets([...assets, ...created]);
       setInput(initialInput);
+      setSelectedFiles([]);
       setError("");
     } catch (reason) {
       setError(message(reason));
@@ -59,7 +57,8 @@ export function AssetProvenancePanel({ projectId }: { projectId: number }) {
       <h2>资产来源记录</h2>
       <p>资产必须先登记来源、权限和内容哈希，来源不明资产不会进入需求资料包或模型上下文。</p>
       <form className="project-form" onSubmit={submit}>
-        <label>资产文件<input type="file" onChange={(event) => void selectFile(event.target.files?.[0])} /></label>
+        <label>资产文件<input type="file" multiple onChange={(event) => selectFiles(event.target.files)} /></label>
+        {selectedFiles.length > 0 && <p>待登记：{selectedFiles.map((file) => file.name).join("、")}</p>}
         <label>资产类型<select value={input.asset_type} onChange={(event) => setInput({
           ...input,
           asset_type: event.target.value as AssetProvenanceInput["asset_type"],
@@ -112,6 +111,7 @@ export function AssetProvenancePanel({ projectId }: { projectId: number }) {
         {assets.map((asset) => <article className="project-card" key={asset.id}>
           <strong>{asset.name}</strong>
           <span>{boundaryLabel(asset.boundary)} · 修订 {asset.revision}</span>
+          <span>大小：{asset.size_bytes} 字节</span>
           <span>{asset.reason}</span>
           <span>SHA-256：{asset.sha256}</span>
         </article>)}
@@ -128,3 +128,10 @@ const boundaryLabel = (boundary: AssetProvenanceRecord["boundary"]): string => (
 })[boundary];
 
 const message = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";
+
+const toBase64 = async (file: File): Promise<string> => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
+};

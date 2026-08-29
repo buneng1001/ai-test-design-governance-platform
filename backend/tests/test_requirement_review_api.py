@@ -14,6 +14,7 @@ def setup_version(client: TestClient) -> tuple[int, int]:
         json={
             "name": "需求评审项目",
             "test_object": "虚构智能采集设备",
+            "software_version": "v1.0.0",
             "description": "需求确认闭环",
             "settings": {"requirement_language": "zh-CN"},
         },

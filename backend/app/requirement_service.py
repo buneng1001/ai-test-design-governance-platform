@@ -43,11 +43,13 @@ def build_material(
         return _failed_material(file_input, "asset_not_found", "资产来源记录不存在", "rejected")
     if not asset.can_enter_requirement_package:
         return _failed_material(file_input, "asset_not_allowed", asset.reason, "rejected", asset.revision, asset.sha256)
+    content_base64 = file_input.content_base64 or (asset_repository.content(project_id, asset.id) or "")
+    file_input = file_input.model_copy(update={"content_base64": content_base64})
     try:
-        content = base64.b64decode(file_input.content_base64, validate=True)
+        content = base64.b64decode(content_base64, validate=True)
     except ValueError:
         return _failed_material(file_input, "unreadable_content", "文件内容不是有效的 Base64", "failed")
-    actual_sha256 = asset_repository.hash_content(file_input.content_base64)
+    actual_sha256 = asset_repository.hash_content(content_base64)
     if actual_sha256 != asset.sha256:
         return _failed_material(
             file_input,

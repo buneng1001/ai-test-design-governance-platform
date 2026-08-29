@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import {
   createRequirementPackage,
@@ -12,7 +12,8 @@ import {
 
 
 export function RequirementImportPanel({ projectId }: { projectId: number }) {
-  const [name, setName] = useState("");
+  const [assets, setAssets] = useState<Awaited<ReturnType<typeof listAssets>>>([]);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<number[]>([]);
   const [files, setFiles] = useState<RequirementFileInput[]>([]);
   const [draft, setDraft] = useState<RequirementPackage | null>(null);
   const [versions, setVersions] = useState<RequirementVersion[]>([]);
@@ -22,37 +23,20 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
     void listRequirementVersions(projectId).then(setVersions).catch((reason: unknown) => setError(message(reason)));
   }, [projectId]);
 
-  const selectFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(event.target.files ?? []);
-    if (selected.length === 0) return;
-    try {
-      const assets = await listAssets(projectId);
-      const inputs = await Promise.all(selected.map(async (file) => {
-        const asset = assets.find((candidate) => candidate.name === file.name);
-        if (!asset) throw new Error(`${file.name} 尚未登记资产来源`);
-        return {
-          asset_id: asset.id,
-          filename: file.name,
-          media_type: file.type || "application/octet-stream",
-          content_base64: await toBase64(file),
-        };
-      }));
-      setFiles(inputs);
-      setError("");
-    } catch (reason) {
-      setFiles([]);
-      setError(message(reason));
-    }
-  };
+  useEffect(() => {
+    void listAssets(projectId).then(setAssets).catch((reason: unknown) => setError(message(reason)));
+  }, [projectId]);
 
   const inspect = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || files.length === 0) {
-      setError("请填写资料包名称并选择已登记来源的需求资料");
+    if (selectedAssetIds.length === 0) {
+      setError("请选择当前任务使用的已登记需求资料");
       return;
     }
     try {
-      setDraft(await createRequirementPackage(projectId, name, files));
+      const fileInputs = buildFileInputs(selectedAssetIds, assets);
+      setFiles(fileInputs);
+      setDraft(await createRequirementPackage(projectId, "当前任务", fileInputs));
       setError("");
     } catch (reason) {
       setError(message(reason));
@@ -76,15 +60,14 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
       <h2>导入需求资料</h2>
       <p>先登记资产来源，再选择同名文件组成需求资料包；发布后会形成不可覆盖的需求版本。</p>
       <form className="project-form" onSubmit={inspect}>
-        <label>需求资料包名称<input value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label>
-          需求资料文件
-          <input
-            type="file"
-            multiple
-            accept=".md,.txt,.json,.yaml,.yml,.docx,.pdf,.png,.jpg,.jpeg"
-            onChange={selectFiles}
-          />
+          当前任务使用的文件
+          <span className="asset-checklist">{assets
+            .filter((asset) => asset.asset_type === "requirement_material" && asset.can_enter_requirement_package)
+            .map((asset) => <label key={asset.id}><input type="checkbox" checked={selectedAssetIds.includes(asset.id)}
+              onChange={(event) => setSelectedAssetIds(event.target.checked
+                ? [...selectedAssetIds, asset.id]
+                : selectedAssetIds.filter((id) => id !== asset.id))} />{asset.name}</label>)}</span>
         </label>
         {files.length > 0 && <p>已选择：{files.map((file) => file.filename).join("、")}</p>}
         <button type="submit">查看解析结果</button>
@@ -128,18 +111,19 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
   );
 }
 
-const toBase64 = async (file: File): Promise<string> => {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return btoa(binary);
-};
-
 const statusLabel = (status: RequirementPackage["materials"][number]["parse_status"]): string => ({
   complete: "解析完整",
   partial: "部分解析",
   failed: "解析失败",
   rejected: "已拒绝",
 })[status];
+
+const buildFileInputs = (assetIds: number[], assets: Awaited<ReturnType<typeof listAssets>>): RequirementFileInput[] =>
+  assetIds.map((assetId) => {
+    const asset = assets.find((item) => item.id === assetId);
+    return {
+          asset_id: assetId, filename: asset?.name ?? "需求资料", media_type: asset?.media_type ?? "application/octet-stream", content_base64: "",
+    };
+  });
 
 const message = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";

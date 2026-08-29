@@ -13,6 +13,7 @@ def create_project(client: TestClient) -> int:
         json={
             "name": "结构化需求导入项目",
             "test_object": "虚构智能采集设备",
+            "software_version": "v1.0.0",
             "description": "验证需求资料导入。",
             "settings": {"requirement_language": "zh-CN"},
         },
