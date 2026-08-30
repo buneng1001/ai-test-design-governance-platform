@@ -1,3 +1,4 @@
+import csv
 import io
 import zipfile
 
@@ -147,3 +148,52 @@ def test_case_export_round_trips_xlsx_sheets(client) -> None:
             sheet[0] for sheet in _xlsx_sheets(archive)
         }
     assert stable_case_id
+
+
+def test_case_edit_keeps_original_and_writes_continuous_step_lines(client) -> None:
+    project_id, generation_id = _create_generation(client)
+    batch = client.post(f"/api/projects/{project_id}/case-generations/{generation_id}/reviews", json={}).json()
+    candidate_id = batch["suggestions"][0]["candidate_id"]
+    edited = client.patch(
+        f"/api/projects/{project_id}/case-review-batches/{batch['id']}/cases/{candidate_id}",
+        json={
+            "title": "人工确认后的标题", "priority": "P0", "input": "人工输入",
+            "reason": "补充边界输入",
+        },
+    )
+    assert edited.status_code == 200
+    revision = edited.json()["revisions"][-1]
+    assert revision["manual_modified"] is True
+    assert revision["candidate"]["title"] == "人工确认后的标题"
+    assert revision["candidate"]["steps"][0]["input"] == "人工输入"
+    assert revision["original_candidate"]["title"] != revision["candidate"]["title"]
+    assert revision["edit_history"][0]["reason"] == "补充边界输入"
+
+
+def test_standard_template_export_drops_parent_and_keeps_16_columns(client) -> None:
+    headers = "用例编号,测试用例标题,优先级,预置条件,输入,操作步骤,预期结果,测试类型,模块,测试项,"
+    headers += "测试结果,测试记录,测试前备注信息,计划执行时间,附件,软件版本,父记录\n"
+    project_id, generation_id = _create_generation(
+        client, template_content=__import__("base64").b64encode(headers.encode()).decode(),
+    )
+    batch = client.post(f"/api/projects/{project_id}/case-generations/{generation_id}/reviews", json={}).json()
+    for suggestion in batch["suggestions"]:
+        client.patch(
+            f"/api/projects/{project_id}/case-review-batches/{batch['id']}/suggestions/{suggestion['id']}",
+            json={"decision": "accepted", "reason": "确认"},
+        )
+    confirmed = client.post(
+        f"/api/projects/{project_id}/case-review-batches/{batch['id']}/confirm",
+        json={"confirmer_name": "测试工程师", "inclusion": {batch["suggestions"][0]["candidate_id"]: True}},
+    )
+    assert confirmed.status_code == 200
+    exported = client.post(
+        f"/api/projects/{project_id}/case-review-batches/{batch['id']}/export", json={"scope": "all"},
+    )
+    assert exported.status_code == 200
+    rows = list(csv.reader(io.StringIO(exported.content.decode("utf-8-sig"))))
+    assert rows[0] == headers.rstrip("\n").split(",")[:-1]
+    assert len(rows[1]) == 16
+    assert "\n2. " in rows[1][5]
+    assert "\n\n" not in rows[1][5]
+    assert rows[1][15] == "v1.0.0"

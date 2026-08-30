@@ -258,6 +258,12 @@ export interface CandidateTestCase {
   automation_mapping: string | null;
   unexpressed_fields: string[];
   design_basis: Array<{ method: string; reason: string }>;
+  input?: string;
+  test_type?: string;
+  module?: string;
+  test_item?: string;
+  pre_test_notes?: string;
+  software_version?: string;
 }
 
 export interface CaseGeneration {
@@ -296,6 +302,10 @@ export interface CaseReviewBatch {
     stable_case_id: string | null;
     lifecycle_status: "draft" | "effective" | "closed" | "deprecated" | "superseded";
     participation_status: "included" | "not_included" | "pending_impact" | "pending_retest";
+    candidate?: CandidateTestCase;
+    original_candidate?: CandidateTestCase | null;
+    manual_modified?: boolean;
+    edit_history?: Array<{ reason: string; title: string }>;
   }>;
   inclusion: Record<string, boolean>;
   confirmed_by: string | null;
@@ -736,11 +746,12 @@ export const disposeCaseReviewSuggestion = (
 
 export const confirmCaseReviews = (
   projectId: number, batchId: number, candidateIds: string[], confirmerName: string,
+  excludedCandidateIds: string[] = [],
 ): Promise<CaseReviewBatch> => request(
   `/api/projects/${projectId}/case-review-batches/${batchId}/confirm`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ confirmer_name: confirmerName, inclusion: Object.fromEntries(
-      candidateIds.map((candidateId) => [candidateId, true]),
+      candidateIds.map((candidateId) => [candidateId, !excludedCandidateIds.includes(candidateId)]),
     ) }),
   },
 );
@@ -759,6 +770,28 @@ export const changeCaseStatus = (
       lifecycle_status: lifecycleStatus,
       participation_status: participationStatus,
       reason: "测试工程师更新用例状态",
+      confirmer_name: "测试工程师",
+    }),
+  },
+);
+
+export const editCase = (
+  projectId: number, batchId: number, caseId: string, fields: Record<string, unknown>,
+): Promise<CaseReviewBatch> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/cases/${caseId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  },
+);
+
+export const changeCaseStatuses = (
+  projectId: number, batchId: number, stableCaseIds: string[], participationStatus: "included" | "not_included",
+): Promise<CaseReviewBatch> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/cases/bulk-status`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      stable_case_ids: stableCaseIds, participation_status: participationStatus,
+      reason: participationStatus === "included" ? "恢复纳入本次用例集" : "移除出本次用例集",
       confirmer_name: "测试工程师",
     }),
   },

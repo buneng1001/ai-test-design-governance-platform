@@ -87,10 +87,12 @@ def register_case_routes(
             template_diagnostics=limitations, candidates=[], created_at=datetime.now(UTC),
         )
         if generation.status != "empty":
+            project = projects.get(project_id)
             generation.candidates = build_candidates(
                 0, project_id, design, review, version, mapping, data.variants, limitations,
                 review.selected_requirement_ids, excluded_modules,
                 set(data.modules),
+                project.software_version if project else "",
             )
         return generations.create(generation)
 

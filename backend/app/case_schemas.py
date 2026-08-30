@@ -53,6 +53,17 @@ class CandidateTestCase(BaseModel):
     unexpressed_fields: list[str] = Field(default_factory=list)
     design_basis: list[CaseDesignBasis] = Field(min_length=1)
     created_at: datetime
+    # 模板中的执行阶段字段和项目上下文，生成阶段只填设计字段。
+    test_type: str = "功能"
+    input: str = ""
+    module: str = ""
+    test_item: str = ""
+    test_result: str = ""
+    test_record: str = ""
+    pre_test_notes: str = ""
+    planned_execution_time: str = ""
+    attachment: str = ""
+    software_version: str = ""
 
 
 class CaseGenerationInput(BaseModel):

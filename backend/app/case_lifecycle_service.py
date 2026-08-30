@@ -5,8 +5,9 @@ import zipfile
 from xml.sax.saxutils import escape
 
 from app.case_review_schemas import CaseRevision
-from app.template_service import _xlsx_rows, _xlsx_sheets
+from app.template_service import STANDARD_FIELD_NAMES, _xlsx_rows, _xlsx_sheets
 from app.template_schemas import TemplateMappingVersion, TemplateSheet
+
 
 LIFECYCLE_TRANSITIONS = {
     "draft": {"effective", "deprecated"},
@@ -71,7 +72,8 @@ def _export_rows(sheet: TemplateSheet, revisions: list[CaseRevision]) -> list[li
     revisions = [item for item in revisions if item.candidate.case_sheet_name == sheet.name]
     headers = [column.name for column in sheet.columns]
     rows = [headers]
-    reverse = {field: name for name, field in sheet.field_mapping.items()}
+    field_by_header = {name: field for name, field in sheet.field_mapping.items()}
+    field_by_header.update({name: field for name, field in STANDARD_FIELD_NAMES.items() if name in headers})
     for revision in revisions:
         candidate = revision.candidate
         values = {
@@ -79,13 +81,23 @@ def _export_rows(sheet: TemplateSheet, revisions: list[CaseRevision]) -> list[li
             "title": candidate.title,
             "objective": candidate.objective,
             "preconditions": "；".join(candidate.preconditions),
-            "steps": "；".join(f"{step.order}. {step.action}：{step.input}" for step in candidate.steps),
-            "step_expectations": "；".join(f"{step.order}. {step.expected}" for step in candidate.steps),
+            "steps": "\n".join(f"{step.order}. {step.action}：{step.input}" for step in candidate.steps),
+            "step_expectations": "\n".join(f"{step.order}. {step.expected}" for step in candidate.steps),
             "overall_expectation": candidate.overall_expectation,
             "evidence_requirements": "；".join(candidate.evidence_requirements),
             "priority": candidate.priority,
+            "input": candidate.input,
+            "test_type": candidate.test_type,
+            "module": candidate.module,
+            "test_item": candidate.test_item,
+            "test_result": candidate.test_result,
+            "test_record": candidate.test_record,
+            "pre_test_notes": candidate.pre_test_notes,
+            "planned_execution_time": candidate.planned_execution_time,
+            "attachment": candidate.attachment,
+            "software_version": candidate.software_version,
         }
-        rows.append([values.get(reverse.get(header, ""), "") for header in headers])
+        rows.append([values.get(field_by_header.get(header, ""), "") for header in headers])
     return rows
 
 

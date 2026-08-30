@@ -9,8 +9,9 @@ from app.ai_service import ModelRequest, MockModelService, validate_output
 from app.case_repository import CaseGenerationRepository
 from app.case_review_repository import CaseReviewRepository
 from app.case_review_schemas import (
-    CaseConfirmationInput, CaseExportInput, CaseReplacementInput, CaseRevision, CaseReviewBatch,
-    CaseReviewBatchInput, CaseStatusChangeInput, CaseStatusChangeRecord, SuggestionDispositionInput,
+    CaseBatchStatusInput, CaseConfirmationInput, CaseEditInput, CaseExportInput, CaseReplacementInput,
+    CaseRevision, CaseReviewBatch, CaseReviewBatchInput, CaseStatusChangeInput, CaseStatusChangeRecord,
+    SuggestionDispositionInput,
 )
 from app.case_review_service import ROLES, build_review_batch, create_revision
 from app.case_lifecycle_service import can_change_lifecycle, export_template, latest_revisions
@@ -132,8 +133,6 @@ def register_case_review_routes(
         generation = generations.get(project_id, batch.generation_id)
         assert generation is not None
         for candidate in generation.candidates:
-            if not data.inclusion.get(candidate.id):
-                continue
             stable_case_id = stable_id("case", candidate.id)
             candidate_revisions = [item for item in batch.revisions if item.candidate_id == candidate.id]
             if not candidate_revisions:
@@ -173,6 +172,52 @@ def register_case_review_routes(
         return history
 
     @router.patch(
+        "/api/projects/{project_id}/case-review-batches/{batch_id}/cases/{case_id}",
+        response_model=CaseReviewBatch,
+    )
+    def edit_case(project_id: int, batch_id: int, case_id: str, data: CaseEditInput) -> CaseReviewBatch:
+        """保存人工修订，并保留原始 AI 候选。"""
+        _require_project(projects, project_id)
+        batch = reviews.get(project_id, batch_id)
+        if batch is None:
+            raise HTTPException(status_code=404, detail="评审批次不存在")
+        generation = generations.get(project_id, batch.generation_id)
+        if generation is None:
+            raise HTTPException(status_code=404, detail="候选测试用例生成记录不存在")
+        previous = next(
+            (item for item in latest_revisions(batch.revisions)
+             if item.stable_case_id == case_id or item.candidate_id == case_id), None,
+        )
+        source = previous.candidate if previous else next(
+            (item for item in generation.candidates if item.id == case_id), None,
+        )
+        if source is None:
+            raise HTTPException(status_code=404, detail="用例不存在")
+        if data.restore_original:
+            if previous is None or previous.original_candidate is None:
+                raise HTTPException(status_code=409, detail="用例没有可恢复的原始 AI 结果")
+            source = previous.original_candidate
+            updates = {}
+        else:
+            updates = data.model_dump(exclude_none=True, exclude={"reason", "restore_original"})
+        if "input" in updates and "steps" not in updates:
+            updates["steps"] = [step.model_copy(update={"input": updates["input"]}) for step in source.steps]
+        edited = source.__class__.model_validate({**source.model_dump(), **updates})
+        next_revision = (previous.revision + 1) if previous else 1
+        batch.revisions.append(CaseRevision(
+            id=stable_id("case-revision", f"{batch.id}:{source.id}:{next_revision}"), candidate_id=source.id,
+            revision=next_revision, stable_case_id=previous.stable_case_id if previous else None,
+            external_case_number=source.external_case_number,
+            lifecycle_status=previous.lifecycle_status if previous else "draft",
+            participation_status=previous.participation_status if previous else "not_included",
+            candidate=edited, original_candidate=previous.original_candidate if previous else source,
+            manual_modified=True, edit_history=(previous.edit_history if previous else []) + [{
+                "reason": data.reason, "title": edited.title,
+            }], created_at=datetime.now(UTC),
+        ))
+        return reviews.save(batch, "case_manually_edited")
+
+    @router.patch(
         "/api/projects/{project_id}/case-review-batches/{batch_id}/cases/{stable_case_id}/status",
         response_model=CaseReviewBatch,
     )
@@ -206,6 +251,33 @@ def register_case_review_routes(
             reason=data.reason, confirmer_name=data.confirmer_name, changed_at=datetime.now(UTC),
         ))
         return reviews.save(batch, "case_status_changed")
+
+    @router.patch(
+        "/api/projects/{project_id}/case-review-batches/{batch_id}/cases/bulk-status",
+        response_model=CaseReviewBatch,
+    )
+    def change_case_statuses(
+        project_id: int, batch_id: int, data: CaseBatchStatusInput,
+    ) -> CaseReviewBatch:
+        _require_project(projects, project_id)
+        batch = reviews.get(project_id, batch_id)
+        if batch is None or batch.status != "confirmed":
+            raise HTTPException(status_code=409, detail="只有已确认用例才能批量治理状态")
+        current_by_id = {item.stable_case_id: item for item in latest_revisions(batch.revisions)}
+        missing = sorted(set(data.stable_case_ids) - set(current_by_id))
+        if missing:
+            raise HTTPException(status_code=404, detail={"code": "case_not_found", "ids": missing})
+        for stable_case_id in data.stable_case_ids:
+            current = current_by_id[stable_case_id]
+            previous = current.participation_status
+            current.participation_status = data.participation_status
+            batch.status_changes.append(CaseStatusChangeRecord(
+                stable_case_id=stable_case_id, previous_lifecycle_status=current.lifecycle_status,
+                lifecycle_status=current.lifecycle_status, previous_participation_status=previous,
+                participation_status=current.participation_status, reason=data.reason,
+                confirmer_name=data.confirmer_name, changed_at=datetime.now(UTC),
+            ))
+        return reviews.save(batch, "case_statuses_batch_changed")
 
     @router.post(
         "/api/projects/{project_id}/case-review-batches/{batch_id}/cases/{stable_case_id}/replace",

@@ -70,6 +70,12 @@ button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; backgro
 .report-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .button-link { padding: 11px 18px; border-radius: 9px; color: #fff; background: #255b43; font-weight: 700; }
 .muted { color: #657169; }
+.case-table-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 20px 0 12px; }
+.case-table-toolbar label { display: grid; gap: 6px; min-width: 180px; }
+.case-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.case-table th, .case-table td { padding: 10px; border-bottom: 1px solid #d8dfd9; text-align: left; vertical-align: top; }
+.case-table td { white-space: pre-line; }
+.case-table input[type="checkbox"] { width: auto; }
 
 @media (max-width: 640px) {
   .page-header { align-items: stretch; flex-direction: column; }

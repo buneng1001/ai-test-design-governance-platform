@@ -22,6 +22,16 @@ FIELD_ALIASES = {
     "逐步预期": "step_expectations", "步骤预期": "step_expectations",
     "预期结果": "overall_expectation", "整体预期": "overall_expectation", "expected_result": "overall_expectation",
     "优先级": "priority", "priority": "priority", "证据要求": "evidence_requirements",
+    "输入": "input", "测试类型": "test_type", "模块": "module", "测试项": "test_item",
+    "测试结果": "test_result", "测试记录": "test_record", "测试前备注信息": "pre_test_notes",
+    "计划执行时间": "planned_execution_time", "附件": "attachment", "软件版本": "software_version",
+}
+STANDARD_FIELD_NAMES = {
+    "用例编号": "external_case_number", "测试用例标题": "title", "优先级": "priority", "预置条件": "preconditions",
+    "输入": "input", "操作步骤": "steps", "预期结果": "step_expectations", "测试类型": "test_type",
+    "模块": "module", "测试项": "test_item", "测试结果": "test_result", "测试记录": "test_record",
+    "测试前备注信息": "pre_test_notes", "计划执行时间": "planned_execution_time", "附件": "attachment",
+    "软件版本": "software_version",
 }
 
 
@@ -116,7 +126,7 @@ def _inspect_sheet(name: str, index: int, rows: list[list[str]]) -> TemplateShee
                 if len(row) > index and row[index].strip()
             ],
         )
-        for index, value in enumerate(headers) if value.strip()
+        for index, value in enumerate(headers) if value.strip() and value.strip() != "父记录"
     ]
     role = _suggest_role(name, [column.name for column in columns])
     return TemplateSheet(

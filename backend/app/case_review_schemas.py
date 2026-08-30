@@ -53,6 +53,9 @@ class CaseRevision(BaseModel):
     superseded_by_case_id: str | None = None
     candidate: CandidateTestCase
     review_notes: list[str] = Field(default_factory=list)
+    original_candidate: CandidateTestCase | None = None
+    manual_modified: bool = False
+    edit_history: list[dict[str, str]] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -88,6 +91,33 @@ class CaseStatusChangeInput(BaseModel):
     participation_status: CaseParticipationStatus | None = None
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
     confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class CaseBatchStatusInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stable_case_ids: list[str] = Field(min_length=1)
+    participation_status: CaseParticipationStatus
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class CaseEditInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    priority: Literal["P0", "P1", "P2", "P3"] | None = None
+    preconditions: list[str] | None = None
+    input: str | None = None
+    steps: list[dict[str, str | int]] | None = None
+    overall_expectation: str | None = None
+    test_type: str | None = None
+    module: str | None = None
+    test_item: str | None = None
+    pre_test_notes: str | None = None
+    software_version: str | None = None
+    restore_original: bool = False
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)] = "人工编辑用例"
 
 
 class CaseStatusChangeRecord(BaseModel):

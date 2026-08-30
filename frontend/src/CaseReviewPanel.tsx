@@ -1,8 +1,8 @@
 import { useState } from "react";
 
 import {
-  CaseReviewBatch, CaseReviewSuggestion, changeCaseStatus, confirmCaseReviews, createCaseReviews,
-  disposeCaseReviewSuggestion, exportCaseFile,
+  CandidateTestCase, CaseReviewBatch, CaseReviewSuggestion, changeCaseStatus, confirmCaseReviews,
+  createCaseReviews, disposeCaseReviewSuggestion, editCase, exportCaseFile,
 } from "./api";
 
 const roleLabels: Record<string, string> = {
@@ -11,10 +11,13 @@ const roleLabels: Record<string, string> = {
   project_manager: "项目经理评审员",
 };
 
-export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
+export function CaseReviewPanel({ projectId, generationId, candidateIds, excludedCandidateIds = [], candidates = [], editedIds = [] }: {
   projectId: number;
   generationId: number;
   candidateIds: string[];
+  excludedCandidateIds?: string[];
+  candidates?: CandidateTestCase[];
+  editedIds?: string[];
 }) {
   const [batch, setBatch] = useState<CaseReviewBatch | null>(null);
   const [modifiedTitles, setModifiedTitles] = useState<Record<string, string>>({});
@@ -24,7 +27,17 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
 
   const startReview = async () => {
     try {
-      setBatch(await createCaseReviews(projectId, generationId));
+      let created = await createCaseReviews(projectId, generationId);
+      for (const candidate of candidates.filter((item) => editedIds.includes(item.id))) {
+        created = await editCase(projectId, created.id, candidate.id, {
+          title: candidate.title, priority: candidate.priority, preconditions: candidate.preconditions,
+          input: candidate.input, steps: candidate.steps, overall_expectation: candidate.overall_expectation,
+          test_type: candidate.test_type, module: candidate.module, test_item: candidate.test_item,
+          pre_test_notes: candidate.pre_test_notes, software_version: candidate.software_version,
+          reason: "生成预览中的人工修改",
+        });
+      }
+      setBatch(created);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "三角色 AI 评审启动失败");
@@ -49,7 +62,9 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
   const confirm = async () => {
     if (!batch) return;
     try {
-      setBatch(await confirmCaseReviews(projectId, batch.id, candidateIds, "测试工程师"));
+      setBatch(await confirmCaseReviews(
+        projectId, batch.id, candidateIds, "测试工程师", excludedCandidateIds,
+      ));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "用例确认失败");
@@ -106,7 +121,13 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds }: {
         {batch.revisions.filter((item) => item.stable_case_id).map((revision) => <article key={revision.id}>
           <p role="status">稳定用例 ID：{revision.stable_case_id}；生命周期：{revision.lifecycle_status}；
             当前测试参与状态：{revision.participation_status}</p>
-          <button onClick={() => void manageCase(revision)}>变更用例状态</button>
+            <button onClick={() => void manageCase(revision)}>变更用例状态</button>
+            {revision.manual_modified && revision.original_candidate && <button onClick={() => void editCase(
+              projectId, batch.id, revision.stable_case_id ?? revision.candidate_id,
+              { restore_original: true },
+            ).then(setBatch).catch((reason) => setError(reason instanceof Error ? reason.message : "恢复原始结果失败"))}>
+              恢复原始 AI 结果
+            </button>}
         </article>)}
         <label>用例导出范围
           <select value={exportScope} onChange={(event) => setExportScope(

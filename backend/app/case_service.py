@@ -46,6 +46,7 @@ def build_candidates(
     selected_requirement_ids: list[str] | None = None,
     excluded_modules: set[str] | None = None,
     included_modules: set[str] | None = None,
+    software_version: str = "",
 ) -> list[CandidateTestCase]:
     case_sheet = next(sheet for sheet in mapping.sheets if sheet.role == "case" and sheet.participates)
     selected = set(selected_requirement_ids) if selected_requirement_ids is not None else None
@@ -76,7 +77,7 @@ def build_candidates(
             candidate_id = stable_id("candidate-case", f"{project_id}:{scope.id}:{variant}")
             candidates.append(_candidate(
                 candidate_id, generation_id, project_id, scope, risk, automations.get(scope.id), variant,
-                references, case_sheet.name, limitations,
+                references, case_sheet.name, limitations, software_version,
             ))
     return candidates
 
@@ -84,7 +85,7 @@ def build_candidates(
 def _candidate(
     candidate_id: str, generation_id: int, project_id: int, scope: TestScopeItem, risk: RiskAssessment,
     automation: object, variant: CaseVariant, references: list[SourceReference], sheet_name: str,
-    limitations: list[dict],
+    limitations: list[dict], software_version: str,
 ) -> CandidateTestCase:
     labels = {"normal": "正常路径", "boundary": "边界值", "equivalence": "等价类", "invalid": "非法输入", "scenario": "异常场景"}
     label = labels[variant]
@@ -107,4 +108,7 @@ def _candidate(
             reason=f"按{label}拆分为可独立确认和执行的用例。", source_references=references,
         )],
         created_at=datetime.now(UTC),
+        input=scope.description,
+        test_item=scope.title,
+        software_version=software_version,
     )
