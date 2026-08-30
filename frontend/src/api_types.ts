@@ -1,6 +1,8 @@
 // API 类型兼容门面，保持旧的统一导入路径。
 export type { ProjectSettings, ProjectInput, Project } from "./api_types_project";
-export type { ModelProviderId, ModelProviderOption, SessionModelConfig, SessionModelConfigStatus } from "./api_types_ai";
+export type {
+  ModelProviderId, ModelProviderOption, SessionModelConfig, SessionModelConfigStatus,
+} from "./api_types_ai";
 
 export interface AssetProvenanceInput {
   name: string;
@@ -115,7 +117,9 @@ export interface RequirementAnalysis {
     implementation_text: string;
     implementation_source: { filename: string; locator: string; reference_id: string };
     affected_modules: string[]; affected_test_items: string[];
-    decision: "unresolved" | "srs_preferred" | "implementation_preferred" | "both_retained" | "awaiting_external_confirmation";
+    decision:
+      | "unresolved" | "srs_preferred" | "implementation_preferred" | "both_retained"
+      | "awaiting_external_confirmation";
     decided_by: string | null; decision_note: string | null;
   }>;
   test_items: Array<{ test_item_id: string; name: string; module: string; requirement_ids: string[] }>;

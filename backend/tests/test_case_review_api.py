@@ -2,10 +2,24 @@ import csv
 import io
 import zipfile
 
+import pytest
+from fastapi import HTTPException
 from test_case_generation_api import _setup
 from test_template_mapping_api import _xlsx
+from app.case_review_api import _require_project
 from app.template_service import _xlsx_sheets
 from app.ai_service import ModelResponse, OpenAICompatibleModelService
+
+
+def test_case_review_compatibility_project_guard_keeps_repository_signature() -> None:
+    class Repository:
+        def get(self, project_id: int) -> None:
+            assert project_id == 999
+            return None
+
+    with pytest.raises(HTTPException) as error:
+        _require_project(Repository(), 999)
+    assert error.value.status_code == 404
 
 
 def _create_generation(
