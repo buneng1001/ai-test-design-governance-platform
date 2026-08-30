@@ -1,4 +1,6 @@
-// 前端 API 使用的领域数据类型，集中维护以保持请求函数文件职责单一。
+// API 类型兼容门面，保持旧的统一导入路径。
+export type { ProjectSettings, ProjectInput, Project } from "./api_types_project";
+export type { ModelProviderId, ModelProviderOption, SessionModelConfig, SessionModelConfigStatus } from "./api_types_ai";
 
 export interface AssetProvenanceInput {
   name: string;
@@ -441,5 +443,3 @@ export interface ReportDocument {
   metrics: Record<string, unknown>;
   evidence: Record<string, unknown>;
 }
-
-
