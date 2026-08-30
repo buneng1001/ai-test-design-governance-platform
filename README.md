@@ -38,7 +38,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-浏览器访问 `http://127.0.0.1:5173`。SQLite 数据默认保存在 `data/app.db`；可通过后端环境变量
+浏览器访问 `http://127.0.0.1:5174`。SQLite 数据默认保存在 `data/app.db`；可通过后端环境变量
 `APP_DATABASE_PATH` 指定其他路径。
 
 ## 测试与构建
