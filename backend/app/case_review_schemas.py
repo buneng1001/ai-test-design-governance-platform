@@ -67,6 +67,7 @@ class CaseReviewBatchInput(BaseModel):
         "authentication_error", "parameter_error", "content_safety_error",
     ] = "normal"
     max_retries: int = Field(default=2, ge=0, le=2)
+    mode: Literal["mock", "real"] = "mock"
 
 
 class SuggestionDispositionInput(BaseModel):

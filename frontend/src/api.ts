@@ -708,25 +708,28 @@ export const generateCases = (
   acceptTemplateLimitations = false,
   strictConflicts = false,
   modules: string[] = [],
+  mode: "mock" | "real" = "mock",
 ): Promise<CaseGeneration> => request(
   `/api/projects/${projectId}/test-designs/${designId}/case-generations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      template_mapping_id: templateMappingId,
+      ...(templateMappingId > 0 ? { template_mapping_id: templateMappingId } : {}),
       accept_template_limitations: acceptTemplateLimitations,
       variants: ["normal", "boundary", "invalid"],
       strict_conflicts: strictConflicts,
       modules,
+      mode,
     }),
   },
 );
 
 export const createCaseReviews = (
-  projectId: number, generationId: number,
+  projectId: number, generationId: number, mode: "mock" | "real" = "mock",
 ): Promise<CaseReviewBatch> => request(
   `/api/projects/${projectId}/case-generations/${generationId}/reviews`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
   },
 );
 

@@ -1,11 +1,12 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, FastAPI, HTTPException, status
+from fastapi import APIRouter, FastAPI, Header, HTTPException, status
 from fastapi.responses import Response
 
 from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIModelConfig, AIRun
-from app.ai_service import ModelRequest, MockModelService, validate_output
+from app.ai_service import ModelRequest, MockModelService, OpenAICompatibleModelService, validate_output
+from app.model_config_api import get_session_model_config
 from app.case_repository import CaseGenerationRepository
 from app.case_review_repository import CaseReviewRepository
 from app.case_review_schemas import (
@@ -25,6 +26,7 @@ def register_case_review_routes(
     app: FastAPI, projects: ProjectRepository, generations: CaseGenerationRepository,
     reviews: CaseReviewRepository, ai_runs: AIRunRepository, requirements: RequirementRepository,
     templates: TemplateMappingRepository,
+    mock_service: MockModelService, real_model_service: OpenAICompatibleModelService,
 ) -> None:
     router = APIRouter()
 
@@ -32,7 +34,10 @@ def register_case_review_routes(
         "/api/projects/{project_id}/case-generations/{generation_id}/reviews",
         response_model=CaseReviewBatch, status_code=status.HTTP_201_CREATED,
     )
-    def create_reviews(project_id: int, generation_id: int, data: CaseReviewBatchInput) -> CaseReviewBatch:
+    def create_reviews(
+        project_id: int, generation_id: int, data: CaseReviewBatchInput,
+        x_session_id: str | None = Header(default=None),
+    ) -> CaseReviewBatch:
         _require_project(projects, project_id)
         generation = generations.get(project_id, generation_id)
         if generation is None or not generation.candidates:
@@ -44,26 +49,37 @@ def register_case_review_routes(
         if existing is not None:
             return existing
         created_runs: dict[str, int] = {}
+        session_config = get_session_model_config(x_session_id) if data.mode == "real" else None
+        if data.mode == "real" and session_config is None:
+            raise HTTPException(status_code=422, detail="未配置真实模型；请先保存当前会话模型配置")
         asset_versions = tuple(
             {"asset_id": material.asset_id, "revision": material.asset_revision}
             for material in version.materials
         )
         for role in ROLES:
-            response = MockModelService().complete(ModelRequest(
+            model_parameters = AIModelConfig(
+                provider=session_config.provider if session_config else "mock",
+                model=session_config.model if session_config else "deterministic-v1",
+            )
+            request = ModelRequest(
                 task_type="case_review", prompt_version=f"case-review.v1.{role}",
-                model_parameters=AIModelConfig(), input_asset_versions=asset_versions, scenario=data.scenario,
-            ))
+                model_parameters=model_parameters, input_asset_versions=asset_versions, scenario=data.scenario,
+                base_url=session_config.base_url if session_config else "",
+                api_key=session_config.api_key if session_config else "",
+            )
+            service = real_model_service if data.mode == "real" else mock_service
+            response = service.complete(request)
             output, errors = validate_output(getattr(response, "raw_output", None))
             run_status = (
                 "succeeded" if not errors and not response.error_code
                 else "validation_failed" if errors else "failed"
             )
             run = ai_runs.create_run(AIRun(
-                id=0, project_id=project_id, task_type="case_review", model_parameters=AIModelConfig(),
+                id=0, project_id=project_id, task_type="case_review", model_parameters=model_parameters,
                 prompt_version=f"case-review.v1.{role}", input_asset_versions=list(asset_versions), output=output,
                 validation_status="passed" if run_status == "succeeded" else "failed",
                 validation_errors=errors or ([response.error_code] if response.error_code else []), status=run_status,
-                is_mock=True, created_at=datetime.now(UTC), attempts=[AIAttempt(
+                is_mock=data.mode == "mock", created_at=datetime.now(UTC), attempts=[AIAttempt(
                     attempt=1, started_at=datetime.now(UTC), elapsed_ms=0,
                     status="succeeded" if run_status == "succeeded" else "validation_failed" if errors else "failed",
                     error_code=response.error_code,

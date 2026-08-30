@@ -1,6 +1,9 @@
 import base64
+import io
+import zipfile
 
 from fastapi.testclient import TestClient
+from app.ai_service import ModelResponse, OpenAICompatibleModelService
 
 
 def _setup(
@@ -129,3 +132,40 @@ def test_invalid_or_unconfirmed_ai_output_never_creates_candidates(client: TestC
     audit = client.get(f"/api/projects/{project_id}/ai-runs").json()
     case_runs = [run for run in audit if run["task_type"] == "case_generation"]
     assert len(case_runs) == 3
+
+
+def test_real_case_generation_uses_session_model(client: TestClient, monkeypatch) -> None:
+    project_id, design_id, mapping_id = _setup(client)
+
+    def complete(_: OpenAICompatibleModelService, request) -> ModelResponse:
+        assert request.model_parameters.provider == "custom"
+        return ModelResponse(raw_output={"contract_version": "ai-output.v1", "items": []})
+
+    monkeypatch.setattr(OpenAICompatibleModelService, "complete", complete)
+    config = client.put("/api/ai-session-config", headers={"X-Session-ID": "real-case-test"}, json={
+        "provider": "custom", "model": "test-model", "base_url": "https://example.invalid", "api_key": "secret",
+    })
+    assert config.status_code == 200 and "secret" not in config.text
+    response = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        headers={"X-Session-ID": "real-case-test"},
+        json={"template_mapping_id": mapping_id, "mode": "real", "variants": ["normal"]},
+    )
+    assert response.status_code == 201
+    assert response.json()["is_mock"] is False
+
+
+def test_default_template_is_xlsx_with_sixteen_columns(client: TestClient) -> None:
+    project_id, design_id, _ = _setup(client)
+    response = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        json={"variants": ["normal"]},
+    )
+    assert response.status_code == 201
+    mapping_id = response.json()["template_mapping_id"]
+    exported = client.get(f"/api/projects/{project_id}/template-mappings/{mapping_id}/export")
+    assert exported.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as workbook:
+        sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert sheet.count("<c ") == 16
+    assert "父记录" not in sheet

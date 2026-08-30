@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
@@ -95,7 +96,7 @@ class OpenAICompatibleModelService:
     """调用兼容 OpenAI Chat Completions 的服务，不保存 API Key。"""
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        prompt = _requirement_prompt(request) if request.task_type == "requirement_review" else ""
+        prompt = _prompt_for_request(request)
         body = json.dumps({
             "model": request.model_parameters.model,
             "temperature": request.model_parameters.temperature,
@@ -171,13 +172,7 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
                 "reason": "Mock 识别到约束性表述，但不会替测试工程师补写验收标准。",
                 "source_reference": source_reference,
             })
-    if (
-        len(request.input_context) >= 2
-        and request.input_context[0]["text"] != request.input_context[1]["text"]
-        and request.input_context[0]["source_reference"]["filename"]
-        != request.input_context[1]["source_reference"]["filename"]
-    ):
-        first, second = request.input_context[:2]
+    for first, second in _conflict_pairs(request.input_context):
         conflict_id = "CONFLICT-" + hashlib.sha256(
             f"{first['text']}\n{second['text']}".encode("utf-8")
         ).hexdigest()[:12]
@@ -192,8 +187,53 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
             "conflicts": conflicts}
 
 
+def _prompt_for_request(request: ModelRequest) -> str:
+    if request.task_type != "requirement_review":
+        return (
+            "请针对当前测试设计任务输出 ai-output.v1 JSON。只输出 contract_version 和 items，"
+            "每项包含 candidate_id、summary、source_asset_ids。不得输出 Markdown 或 API Key。"
+        )
+    return _requirement_prompt(request)
+
+
 def _requirement_prompt(request: ModelRequest) -> str:
     context = json.dumps(request.input_context, ensure_ascii=False)
     return ("请分析以下多文件需求资料，严格输出 requirement-analysis.v1 JSON。归并同义内容，提取需求、模块、"
             "测试项、验收条件，并识别歧义、遗漏、冲突、不可测试条件。每条语义结果必须引用输入中的完整"
             "source_reference，不得凭空创造来源。原始资料：" + context)
+
+
+def _conflict_pairs(context: tuple[dict[str, object], ...]) -> list[tuple[dict[str, object], dict[str, object]]]:
+    pairs: list[tuple[dict[str, object], dict[str, object]]] = []
+    for index, first in enumerate(context):
+        first_source = first.get("source_reference", {})
+        first_filename = first_source.get("filename") if isinstance(first_source, dict) else None
+        first_tokens = _conflict_tokens(str(first.get("text", "")))
+        for second in context[index + 1:]:
+            second_source = second.get("source_reference", {})
+            second_filename = second_source.get("filename") if isinstance(second_source, dict) else None
+            if not first_filename or first_filename == second_filename:
+                continue
+            second_tokens = _conflict_tokens(str(second.get("text", "")))
+            single_fragment_files = _single_fragment_files(context)
+            related = len(first_tokens & second_tokens) >= 2 or (
+                first_filename in single_fragment_files and second_filename in single_fragment_files
+            )
+            if related and first.get("text") != second.get("text"):
+                pairs.append((first, second))
+    return pairs
+
+
+def _conflict_tokens(text: str) -> set[str]:
+    words = set(re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]{2}", text))
+    return words
+
+
+def _single_fragment_files(context: tuple[dict[str, object], ...]) -> set[str]:
+    counts: dict[str, int] = {}
+    for item in context:
+        source = item.get("source_reference", {})
+        filename = source.get("filename") if isinstance(source, dict) else None
+        if filename:
+            counts[filename] = counts.get(filename, 0) + 1
+    return {filename for filename, count in counts.items() if count == 1}

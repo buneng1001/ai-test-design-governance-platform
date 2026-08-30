@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, FastAPI, HTTPException, status
+from fastapi import APIRouter, FastAPI, Header, HTTPException, status
 
 from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIRun, AIModelConfig
-from app.ai_service import ModelRequest, MockModelService, validate_output
+from app.ai_service import ModelRequest, MockModelService, OpenAICompatibleModelService, validate_output
+from app.model_config_api import get_session_model_config
+from app.case_lifecycle_service import default_template
 from app.case_repository import CaseGenerationRepository
 from app.case_schemas import CaseGeneration, CaseGenerationInput
 from app.case_service import build_candidates, template_limitations
@@ -19,6 +21,7 @@ def register_case_routes(
     app: FastAPI, projects: ProjectRepository, requirements: RequirementRepository,
     reviews: RequirementReviewRepository, designs: DesignRepository, templates: TemplateMappingRepository,
     generations: CaseGenerationRepository, ai_runs: AIRunRepository,
+    mock_service: MockModelService, real_model_service: OpenAICompatibleModelService,
 ) -> None:
     router = APIRouter()
 
@@ -26,7 +29,10 @@ def register_case_routes(
         "/api/projects/{project_id}/test-designs/{design_id}/case-generations",
         response_model=CaseGeneration, status_code=status.HTTP_201_CREATED,
     )
-    def generate_cases(project_id: int, design_id: int, data: CaseGenerationInput) -> CaseGeneration:
+    def generate_cases(
+        project_id: int, design_id: int, data: CaseGenerationInput,
+        x_session_id: str | None = Header(default=None),
+    ) -> CaseGeneration:
         _require_project(projects, project_id)
         design = designs.get(project_id, design_id)
         if design is None:
@@ -35,7 +41,13 @@ def register_case_routes(
             raise HTTPException(status_code=409, detail="测试设计确认后才能生成候选测试用例")
         version = requirements.get_version(project_id, design.requirement_version_id)
         review = reviews.latest_for_version(project_id, design.requirement_version_id)
-        mapping = templates.get(project_id, data.template_mapping_id)
+        mapping_id = data.template_mapping_id
+        if mapping_id is None:
+            mapping, raw_content = default_template(project_id)
+            mapping = templates.create(mapping, raw_content)
+            mapping_id = mapping.id
+        else:
+            mapping = templates.get(project_id, mapping_id)
         if version is None or review is None or review.status != "confirmed":
             raise HTTPException(status_code=409, detail="需求确认后才能生成候选测试用例")
         # 未解决冲突默认只排除受影响模块；严格模式才阻止整批生成。
@@ -50,11 +62,12 @@ def register_case_routes(
                 detail={"code": "unresolved_requirement_conflicts", "modules": blocked_modules},
             )
         requested_modules = set(data.modules)
-        affected = sorted(requested_modules.intersection(blocked_modules)) if requested_modules else blocked_modules
-        if affected:
+        if requested_modules.intersection(blocked_modules):
             raise HTTPException(
                 status_code=409,
-                detail={"code": "unresolved_requirement_conflicts", "modules": affected},
+                detail={"code": "unresolved_requirement_conflicts", "modules": sorted(
+                    requested_modules.intersection(blocked_modules)
+                )},
             )
         excluded_modules = set(blocked_modules) if not data.strict_conflicts else set()
         if mapping is None or mapping.status != "confirmed":
@@ -65,15 +78,29 @@ def register_case_routes(
         asset_versions = tuple(
             {"asset_id": item.asset_id, "revision": item.asset_revision} for item in version.materials
         )
-        response = MockModelService().complete(ModelRequest(
-            task_type="case_generation", prompt_version="case-generation.v1", model_parameters=AIModelConfig(),
+        session_config = get_session_model_config(x_session_id) if data.mode == "real" else None
+        if data.mode == "real" and session_config is None:
+            raise HTTPException(status_code=422, detail="未配置真实模型；请先保存当前会话模型配置")
+        model_parameters = AIModelConfig(
+            provider=session_config.provider if session_config else "mock",
+            model=session_config.model if session_config else "deterministic-v1",
+        )
+        request = ModelRequest(
+            task_type="case_generation", prompt_version="case-generation.v1", model_parameters=model_parameters,
             input_asset_versions=asset_versions, scenario=data.scenario,
-        ))
-        output, errors, attempts, run_status, validation_status = _run(response, data.max_retries, asset_versions, data)
+            base_url=session_config.base_url if session_config else "",
+            api_key=session_config.api_key if session_config else "",
+        )
+        service = real_model_service if data.mode == "real" else mock_service
+        response = service.complete(request)
+        output, errors, attempts, run_status, validation_status = _run(
+            response, data.max_retries, asset_versions, data, service, request
+        )
         run = ai_runs.create_run(AIRun(
-            id=0, project_id=project_id, task_type="case_generation", model_parameters=AIModelConfig(),
+            id=0, project_id=project_id, task_type="case_generation", model_parameters=model_parameters,
             prompt_version="case-generation.v1", input_asset_versions=list(asset_versions), output=output,
-            validation_status=validation_status, validation_errors=errors, status=run_status, is_mock=True,
+            validation_status=validation_status, validation_errors=errors, status=run_status,
+            is_mock=data.mode == "mock",
             created_at=datetime.now(UTC), attempts=attempts,
         ))
         if run_status == "validation_failed":
@@ -112,7 +139,10 @@ def register_case_routes(
     app.include_router(router)
 
 
-def _run(response: object, max_retries: int, asset_versions: tuple[dict[str, int], ...], data: CaseGenerationInput):
+def _run(
+    response: object, max_retries: int, asset_versions: tuple[dict[str, int], ...], data: CaseGenerationInput,
+    service: object, request: ModelRequest,
+):
     # 生成边界复用 AI 运行契约，确保失败只形成审计，不创建候选资产。
     attempts: list[AIAttempt] = []
     raw_response = response
@@ -125,10 +155,7 @@ def _run(response: object, max_retries: int, asset_versions: tuple[dict[str, int
                                      error_code=error_code, retryable=retryable))
             if not retryable or number == max_retries + 1:
                 return None, [], attempts, "failed", "not_run"
-            raw_response = MockModelService().complete(ModelRequest(
-                task_type="case_generation", prompt_version="case-generation.v1", model_parameters=AIModelConfig(),
-                input_asset_versions=asset_versions, scenario=data.scenario,
-            ))
+            raw_response = service.complete(request)
             continue
         output, errors = validate_output(getattr(raw_response, "raw_output", None))
         if errors:

@@ -9,7 +9,8 @@ from app.design_service import stable_id
 
 SUPPORTED_TEMPLATE_FIELDS = {
     "external_case_number", "title", "objective", "preconditions", "steps", "step_expectations",
-    "overall_expectation", "evidence_requirements", "priority",
+    "overall_expectation", "evidence_requirements", "priority", "input", "test_type", "module", "test_item",
+    "test_result", "test_record", "pre_test_notes", "planned_execution_time", "attachment", "software_version",
 }
 
 

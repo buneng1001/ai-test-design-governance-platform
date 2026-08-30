@@ -5,7 +5,7 @@ import { CaseReviewPanel } from "./CaseReviewPanel";
 
 export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const [designId, setDesignId] = useState(1);
-  const [mappingId, setMappingId] = useState(1);
+  const [mappingId, setMappingId] = useState(0);
   const [generation, setGeneration] = useState<CaseGeneration | null>(null);
   const [error, setError] = useState("");
   const [strictConflicts, setStrictConflicts] = useState(false);
@@ -19,12 +19,13 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const [testItemFilter, setTestItemFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("included");
   const [page, setPage] = useState(1);
+  const [mode, setMode] = useState<"mock" | "real">("mock");
 
   const generate = async () => {
     try {
       const created = await generateCases(
         projectId, designId, mappingId, false, strictConflicts,
-        modules.split(",").map((item) => item.trim()).filter(Boolean),
+        modules.split(",").map((item) => item.trim()).filter(Boolean), mode,
       );
       setGeneration(created);
       setError("");
@@ -46,10 +47,13 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const modulesForFilter = [...new Set((generation?.candidates ?? []).map((candidate) => candidate.module).filter(Boolean))];
   const testItemsForFilter = [...new Set((generation?.candidates ?? []).map((candidate) => candidate.test_item).filter(Boolean))];
 
-  const updateTitle = (candidateId: string, title: string) => setGeneration((current) => current && {
-    ...current, candidates: current.candidates.map((candidate) => candidate.id === candidateId
-      ? { ...candidate, title } : candidate),
-  });
+  const updateTitle = (candidateId: string, title: string) => {
+    setEditedIds((current) => current.includes(candidateId) ? current : [...current, candidateId]);
+    setGeneration((current) => current && {
+      ...current, candidates: current.candidates.map((candidate) => candidate.id === candidateId
+        ? { ...candidate, title } : candidate),
+    });
+  };
 
   const updateCandidate = (candidateId: string, update: Partial<CandidateTestCase>) => {
     setEditedIds((current) => current.includes(candidateId) ? current : [...current, candidateId]);
@@ -79,9 +83,12 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
     <label>已确认测试设计编号
       <input type="number" min="1" value={designId} onChange={(event) => setDesignId(Number(event.target.value))} />
     </label>
-    <label>已确认模板映射编号
+    <label>模板映射编号（留空使用默认 XLSX 模板）
       <input type="number" min="1" value={mappingId} onChange={(event) => setMappingId(Number(event.target.value))} />
     </label>
+    <label>生成方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
+      <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
+    </select></label>
     <button onClick={() => void generate()}>生成候选测试用例</button>
     <label><input type="checkbox" checked={strictConflicts} onChange={(event) => setStrictConflicts(event.target.checked)} /> 整批严格模式</label>
     <label>局部生成模块（逗号分隔）<input value={modules} onChange={(event) => setModules(event.target.value)} /></label>
@@ -150,6 +157,7 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
         excludedCandidateIds={removed}
         candidates={generation.candidates}
         editedIds={editedIds}
+        mode={mode}
       />}
     </div>}
   </section>;

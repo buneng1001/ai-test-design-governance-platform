@@ -91,11 +91,11 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     register_template_routes(app, repository, template_repository)
     register_case_routes(
         app, repository, requirement_repository, review_repository, design_repository, template_repository,
-        case_generation_repository, ai_run_repository,
+        case_generation_repository, ai_run_repository, model_service, real_model_service,
     )
     register_case_review_routes(
         app, repository, case_generation_repository, case_review_repository, ai_run_repository, requirement_repository,
-        template_repository,
+        template_repository, model_service, real_model_service,
     )
     register_task_routes(app, repository, case_review_repository, task_repository)
     register_execution_batch_routes(

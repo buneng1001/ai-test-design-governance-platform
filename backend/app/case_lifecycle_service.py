@@ -3,10 +3,35 @@ import csv
 import io
 import zipfile
 from xml.sax.saxutils import escape
+from xml.etree import ElementTree
 
 from app.case_review_schemas import CaseRevision
 from app.template_service import STANDARD_FIELD_NAMES, _xlsx_rows, _xlsx_sheets
 from app.template_schemas import TemplateMappingVersion, TemplateSheet
+
+DEFAULT_HEADERS = [
+    "用例编号", "测试用例标题", "优先级", "预置条件", "输入", "操作步骤", "预期结果", "测试类型",
+    "模块", "测试项", "测试结果", "测试记录", "测试前备注信息", "计划执行时间", "附件", "软件版本",
+]
+
+
+def default_template(project_id: int) -> tuple[TemplateMappingVersion, str]:
+    """返回项目默认的 16 列 XLSX 模板，不依赖用户上传文件。"""
+    field_mapping = {
+        header: STANDARD_FIELD_NAMES[header] for header in DEFAULT_HEADERS
+    }
+    sheet = TemplateSheet(
+        name="用例表", index=0, role_suggestion="case", role="case", title_row_candidates=[1], title_row=1,
+        columns=[{"index": index, "name": header, "sample_values": []}
+                 for index, header in enumerate(DEFAULT_HEADERS, start=1)],
+        participates=True, field_mapping=field_mapping,
+    )
+    content = _build_xlsx([("用例表", [DEFAULT_HEADERS])])
+    mapping = TemplateMappingVersion(
+        id=0, project_id=project_id, version=0, filename="默认测试用例模板.xlsx", format="xlsx",
+        status="confirmed", sheets=[sheet], retained_sheet_names=[sheet.name], confirmed_by="系统默认模板",
+    )
+    return mapping, base64.b64encode(content).decode("ascii")
 
 
 LIFECYCLE_TRANSITIONS = {
@@ -58,13 +83,18 @@ def export_template(
         csv.writer(output, lineterminator="\n").writerows(rows)
         return output.getvalue().encode("utf-8-sig"), "text/csv; charset=utf-8", "csv"
     with zipfile.ZipFile(io.BytesIO(raw)) as workbook:
-        sheets = []
+        rendered: dict[str, bytes] = {}
         for name, path in _xlsx_sheets(workbook):
             source = _xlsx_rows(workbook, path)
             template_sheet = next(item for item in mapping.sheets if item.name == name)
-            sheets.append((name, _export_rows(template_sheet, selected) if template_sheet.role == "case"
-                           else source))
-    return _build_xlsx(sheets), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
+            if template_sheet.role == "case":
+                rows = _export_rows(template_sheet, selected)
+                rendered[path] = _render_xlsx_sheet(workbook.read(path), rows)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as result:
+            for filename in workbook.namelist():
+                result.writestr(filename, rendered.get(filename, workbook.read(filename)))
+    return output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
 
 
 def _export_rows(sheet: TemplateSheet, revisions: list[CaseRevision]) -> list[list[str]]:
@@ -176,3 +206,29 @@ def _cell_ref(column: int, row: int) -> str:
         column, remainder = divmod(column - 1, 26)
         letters = chr(65 + remainder) + letters
     return f"{letters}{row}"
+
+
+def _render_xlsx_sheet(source: bytes, rows: list[list[str]]) -> bytes:
+    """保留工作表结构和列样式，仅替换数据行内容。"""
+    namespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    root = ElementTree.fromstring(source)
+    sheet_data = root.find(f"{{{namespace}}}sheetData")
+    if sheet_data is None:
+        return source
+    source_rows = list(sheet_data)
+    style_cells = list(source_rows[0]) if source_rows else []
+    for child in list(sheet_data):
+        sheet_data.remove(child)
+    for row_number, values in enumerate(rows, start=1):
+        row = ElementTree.Element(f"{{{namespace}}}row", {"r": str(row_number)})
+        for index, value in enumerate(values, start=1):
+            template = style_cells[index - 1] if index <= len(style_cells) else None
+            attributes = {"r": _cell_ref(index, row_number), "t": "inlineStr"}
+            if template is not None and "s" in template.attrib:
+                attributes["s"] = template.attrib["s"]
+            cell = ElementTree.SubElement(row, f"{{{namespace}}}c", attributes)
+            inline = ElementTree.SubElement(cell, f"{{{namespace}}}is")
+            text = ElementTree.SubElement(inline, f"{{{namespace}}}t")
+            text.text = value
+        sheet_data.append(row)
+    return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)

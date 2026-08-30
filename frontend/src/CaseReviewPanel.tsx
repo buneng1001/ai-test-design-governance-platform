@@ -11,13 +11,14 @@ const roleLabels: Record<string, string> = {
   project_manager: "项目经理评审员",
 };
 
-export function CaseReviewPanel({ projectId, generationId, candidateIds, excludedCandidateIds = [], candidates = [], editedIds = [] }: {
+export function CaseReviewPanel({ projectId, generationId, candidateIds, excludedCandidateIds = [], candidates = [], editedIds = [], mode = "mock" }: {
   projectId: number;
   generationId: number;
   candidateIds: string[];
   excludedCandidateIds?: string[];
   candidates?: CandidateTestCase[];
   editedIds?: string[];
+  mode?: "mock" | "real";
 }) {
   const [batch, setBatch] = useState<CaseReviewBatch | null>(null);
   const [modifiedTitles, setModifiedTitles] = useState<Record<string, string>>({});
@@ -27,7 +28,7 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
 
   const startReview = async () => {
     try {
-      let created = await createCaseReviews(projectId, generationId);
+      let created = await createCaseReviews(projectId, generationId, mode);
       for (const candidate of candidates.filter((item) => editedIds.includes(item.id))) {
         created = await editCase(projectId, created.id, candidate.id, {
           title: candidate.title, priority: candidate.priority, preconditions: candidate.preconditions,
@@ -90,7 +91,9 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
     {!batch && <button onClick={() => void startReview()}>开始三角色 AI 评审</button>}
     {error && <p role="alert" className="error">{error}</p>}
     {batch && <>
-      <p role="status">评审批次：{batch.status}；独立 AI 运行：{batch.reviewer_runs.length} 个；Mock AI 运行</p>
+      <p role="status">评审批次：{batch.status}；独立 AI 运行：{batch.reviewer_runs.length} 个；
+        {mode === "mock" ? "Mock AI 运行" : "真实模型运行"}
+      </p>
       {batch.groups.map((group) => <article key={group.id} className="case-card">
         <h3>{group.summary}</h3>
         <p>归并来源：{group.source_roles.map((role) => roleLabels[role] ?? role).join("、")}</p>

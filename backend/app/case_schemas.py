@@ -69,7 +69,8 @@ class CandidateTestCase(BaseModel):
 class CaseGenerationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    template_mapping_id: int = Field(gt=0)
+    template_mapping_id: int | None = Field(default=None, gt=0)
+    mode: Literal["mock", "real"] = "mock"
     scenario: Literal[
         "normal", "empty", "missing_source", "invalid_schema", "timeout", "rate_limit", "temporary_error",
         "authentication_error", "parameter_error", "content_safety_error"

@@ -5,6 +5,7 @@ import zipfile
 from test_case_generation_api import _setup
 from test_template_mapping_api import _xlsx
 from app.template_service import _xlsx_sheets
+from app.ai_service import ModelResponse, OpenAICompatibleModelService
 
 
 def _create_generation(
@@ -37,6 +38,27 @@ def test_three_reviewer_runs_are_isolated_and_grouped_with_sources(client) -> No
     assert {run["prompt_version"] for run in review_runs} == {
         "case-review.v1.product_manager", "case-review.v1.test_manager", "case-review.v1.project_manager",
     }
+
+
+def test_real_case_review_uses_session_model(client, monkeypatch) -> None:
+    project_id, generation_id = _create_generation(client)
+
+    def complete(_: OpenAICompatibleModelService, request) -> ModelResponse:
+        assert request.model_parameters.provider == "custom"
+        return ModelResponse(raw_output={"contract_version": "ai-output.v1", "items": []})
+
+    monkeypatch.setattr(OpenAICompatibleModelService, "complete", complete)
+    config = client.put("/api/ai-session-config", headers={"X-Session-ID": "real-review-test"}, json={
+        "provider": "custom", "model": "test-model", "base_url": "https://example.invalid", "api_key": "secret",
+    })
+    assert config.status_code == 200 and "secret" not in config.text
+    response = client.post(
+        f"/api/projects/{project_id}/case-generations/{generation_id}/reviews",
+        headers={"X-Session-ID": "real-review-test"}, json={"mode": "real"},
+    )
+    assert response.status_code == 201
+    runs = client.get(f"/api/projects/{project_id}/ai-runs").json()
+    assert all(not run["is_mock"] for run in runs if run["task_type"] == "case_review")
 
 
 def test_disposition_creates_immutable_revision_and_confirmation_gate(client) -> None:
