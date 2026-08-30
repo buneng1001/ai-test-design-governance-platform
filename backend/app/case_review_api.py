@@ -110,10 +110,19 @@ def register_case_review_routes(
             raise HTTPException(status_code=422, detail="修改建议只能调整用例公开文本字段")
         generation = generations.get(project_id, batch.generation_id)
         assert generation is not None
-        candidate = next(item for item in generation.candidates if item.id == suggestion.candidate_id)
+        candidate_revision = max(
+            (item for item in batch.revisions if item.candidate_id == suggestion.candidate_id),
+            key=lambda item: item.revision,
+            default=None,
+        )
+        candidate = candidate_revision.candidate if candidate_revision else next(
+            item for item in generation.candidates if item.id == suggestion.candidate_id
+        )
         suggestion.disposition, suggestion.disposition_reason = data.decision, data.reason
         suggestion.modified_fields = data.modified_fields
         create_revision(batch, suggestion, candidate)
+        if candidate_revision and candidate_revision.original_candidate:
+            batch.revisions[-1].original_candidate = candidate_revision.original_candidate
         return reviews.save(batch, "suggestion_disposed")
 
     @router.post(
@@ -156,6 +165,7 @@ def register_case_review_routes(
                 lifecycle_status="effective",
                 participation_status="included" if data.inclusion[candidate.id] else "not_included",
                 candidate=latest_revision.candidate,
+                original_candidate=latest_revision.original_candidate,
                 review_notes=["用例确认时分配稳定用例 ID"], created_at=datetime.now(UTC),
             ))
         batch.inclusion = data.inclusion
@@ -184,9 +194,14 @@ def register_case_review_routes(
         generation = generations.get(project_id, batch.generation_id)
         if generation is None:
             raise HTTPException(status_code=404, detail="候选测试用例生成记录不存在")
-        previous = next(
-            (item for item in latest_revisions(batch.revisions)
-             if item.stable_case_id == case_id or item.candidate_id == case_id), None,
+        # 编辑确认前的草稿修订还没有稳定用例 ID，恢复时也必须能找到它。
+        previous = max(
+            (
+                item for item in batch.revisions
+                if item.stable_case_id == case_id or item.candidate_id == case_id
+            ),
+            key=lambda item: item.revision,
+            default=None,
         )
         source = previous.candidate if previous else next(
             (item for item in generation.candidates if item.id == case_id), None,
@@ -200,6 +215,11 @@ def register_case_review_routes(
             updates = {}
         else:
             updates = data.model_dump(exclude_none=True, exclude={"reason", "restore_original"})
+        original_candidate = previous.original_candidate if previous else source
+        if previous and original_candidate is None:
+            original_candidate = next(
+                (item for item in generation.candidates if item.id == source.id), source
+            )
         if "input" in updates and "steps" not in updates:
             updates["steps"] = [step.model_copy(update={"input": updates["input"]}) for step in source.steps]
         edited = source.__class__.model_validate({**source.model_dump(), **updates})
@@ -210,7 +230,7 @@ def register_case_review_routes(
             external_case_number=source.external_case_number,
             lifecycle_status=previous.lifecycle_status if previous else "draft",
             participation_status=previous.participation_status if previous else "not_included",
-            candidate=edited, original_candidate=previous.original_candidate if previous else source,
+            candidate=edited, original_candidate=original_candidate,
             manual_modified=True, edit_history=(previous.edit_history if previous else []) + [{
                 "reason": data.reason, "title": edited.title,
             }], created_at=datetime.now(UTC),

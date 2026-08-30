@@ -1,6 +1,6 @@
 # AI 测试设计与治理平台
 
-当前发布标识：`v0.1.0-rc.1`。
+当前发布标识：`v0.1.0-rc.2`。
 
 供单个本地测试工程师使用的测试设计与治理平台。当前已提供测试设计项目闭环，以及资产来源记录、SHA-256 校验、
 不可覆盖的来源修订历史和需求资料包/模型上下文准入护栏。测试工程师可导入 Markdown、TXT、JSON、YAML 和
@@ -50,3 +50,14 @@ pnpm build
 ```
 
 这些基础检查只使用本地 SQLite 和前端 Mock 请求，不调用模型或其他外部服务。
+
+## rc.2 验收
+
+第 5 阶段的 Mock 全闭环验收覆盖多文件需求分析、冲突处理、需求确认、用例编辑/移除/恢复和 16 列导出：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest backend/tests/test_rc2_acceptance.py
+```
+
+真实模型验收默认跳过。设置 `RC2_REAL_MODEL_BASE_URL`、`RC2_REAL_MODEL_API_KEY` 和
+`RC2_REAL_MODEL_NAME` 后，会额外验证真实模型标识及 API Key 不进入审计导出；密钥只通过当前进程环境变量提供。
