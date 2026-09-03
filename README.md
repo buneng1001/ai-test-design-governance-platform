@@ -61,3 +61,7 @@ pnpm build
 
 真实模型验收默认跳过。设置 `RC2_REAL_MODEL_BASE_URL`、`RC2_REAL_MODEL_API_KEY` 和
 `RC2_REAL_MODEL_NAME` 后，会额外验证真实模型标识及 API Key 不进入审计导出；密钥只通过当前进程环境变量提供。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。

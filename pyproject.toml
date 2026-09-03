@@ -2,6 +2,7 @@
 name = "ai-test-design-governance-platform"
 version = "0.1.0rc2"
 description = "本地 AI 测试设计与治理平台"
+license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116,<1",
