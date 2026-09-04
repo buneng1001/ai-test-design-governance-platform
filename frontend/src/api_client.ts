@@ -2,6 +2,9 @@
 interface ValidationError {
   loc?: unknown[];
   type?: string;
+  msg?: string;
+  message?: string;
+  detail?: unknown;
 }
 
 const fieldLabels: Record<string, string> = {
@@ -14,6 +17,16 @@ const fieldLabels: Record<string, string> = {
 
 function formatErrorDetail(detail: unknown): string {
   if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const error = detail as ValidationError;
+    if (typeof error.message === "string") return error.message;
+    if (typeof error.msg === "string") return error.msg;
+    if (error.detail !== undefined) return formatErrorDetail(error.detail);
+    const code = typeof (detail as { code?: unknown }).code === "string"
+      ? (detail as { code: string }).code
+      : "";
+    return code ? `请求失败（${code}），请查看服务端诊断信息` : "请求失败，请查看服务端诊断信息";
+  }
   if (!Array.isArray(detail)) return "请求未完成，请检查填写内容";
   if (detail.every((item) => typeof item === "string")) {
     return `AI 输出字段校验失败：${detail.slice(0, 3).join("；")}`;
