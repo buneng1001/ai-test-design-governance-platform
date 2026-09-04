@@ -4,7 +4,7 @@ from fastapi import FastAPI, Header, HTTPException
 
 from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIModelConfig
-from app.ai_service import ModelRequest, validate_requirement_analysis_output
+from app.ai_service import ModelRequest, analysis_max_tokens, validate_requirement_analysis_output
 from app.main_route_context import AppRouteContext
 from app.project_asset_api import require_project
 from app.requirement_repository import RequirementRepository
@@ -83,7 +83,8 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             provider=session_config.provider if session_config else "mock",
             model=session_config.model if session_config else "deterministic-v1",
             # 真实模型先控制单次输出规模，避免小模型长时间生成大型 JSON。
-            max_tokens=4000 if analysis_input.mode == "real" else 1200,
+            max_tokens=analysis_max_tokens(session_config.provider, session_config.model)
+            if analysis_input.mode == "real" else 1200,
         )
         request = ModelRequest(
             task_type="requirement_review",

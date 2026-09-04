@@ -32,6 +32,7 @@ class ModelResponse:
 
 MAX_MOCK_REQUIREMENTS = 100
 MODEL_REQUEST_TIMEOUT_SECONDS = 120
+REAL_ANALYSIS_MAX_TOKENS = 4000
 
 
 class ModelService(Protocol):
@@ -159,6 +160,12 @@ def _provider_request_parameters(provider: str, model: str) -> dict[str, object]
     if provider == "deepseek" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}:
         return {"thinking": {"type": "disabled"}}
     return {}
+
+
+def analysis_max_tokens(provider: str, model: str) -> int:
+    if provider == "deepseek" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}:
+        return 8000
+    return REAL_ANALYSIS_MAX_TOKENS
 
 
 def _finish_reason(payload: object) -> str | None:
