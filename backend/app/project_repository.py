@@ -107,6 +107,42 @@ class ProjectRepository:
                 return None
         return self.get(project_id)
 
+    def delete(self, project_id: int) -> bool:
+        """删除项目及其业务数据，保留跨项目的模型配置。"""
+        with self.connect() as connection:
+            if connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+                return False
+            connection.execute("DELETE FROM requirement_analysis_history WHERE analysis_id IN "
+                               "(SELECT id FROM requirement_analyses WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM test_design_history WHERE design_id IN "
+                               "(SELECT id FROM test_designs WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM template_mapping_history WHERE mapping_id IN "
+                               "(SELECT id FROM template_mappings WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM case_review_history WHERE batch_id IN "
+                               "(SELECT id FROM case_review_batches WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM ai_run_dispositions WHERE run_id IN "
+                               "(SELECT id FROM ai_runs WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM ai_run_attempts WHERE run_id IN "
+                               "(SELECT id FROM ai_runs WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM change_impact_history WHERE analysis_id IN "
+                               "(SELECT id FROM change_impact_analyses WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM execution_batch_conclusions WHERE batch_id IN "
+                               "(SELECT id FROM execution_batches WHERE project_id = ?)", (project_id,))
+            for table in (
+                "requirement_analyses", "test_designs", "template_mappings", "case_review_batches",
+                "case_generations", "ai_runs", "test_tasks", "execution_result_conflicts",
+                "execution_result_records", "execution_records", "execution_batches", "regression_selections",
+                "change_impact_analyses", "quality_issue_references", "defect_patterns", "ai_evaluation_runs",
+            ):
+                connection.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+            connection.execute("DELETE FROM asset_provenance_revisions WHERE asset_id IN "
+                               "(SELECT id FROM assets WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM assets WHERE project_id = ?", (project_id,))
+            connection.execute("DELETE FROM requirement_versions WHERE project_id = ?", (project_id,))
+            connection.execute("DELETE FROM requirement_packages WHERE project_id = ?", (project_id,))
+            connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        return True
+
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat()

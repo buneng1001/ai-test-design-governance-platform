@@ -207,3 +207,44 @@ def test_asset_endpoints_reject_missing_project_and_invalid_content(client: Test
     assert missing_project.status_code == 404
     assert missing_project.json() == {"detail": "测试设计项目不存在"}
     assert invalid_content.status_code == 422
+
+
+def test_asset_can_be_deleted_when_not_referenced(client: TestClient) -> None:
+    project_id = create_project(client)
+    asset = client.post(f"/api/projects/{project_id}/assets", json=asset_input()).json()
+
+    response = client.delete(f"/api/projects/{project_id}/assets/{asset['id']}")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+    assert client.get(f"/api/projects/{project_id}/assets").json() == []
+    assert client.get(f"/api/projects/{project_id}/assets/{asset['id']}/history").status_code == 404
+
+
+def test_asset_delete_is_blocked_when_requirement_version_references_it(client: TestClient) -> None:
+    project_id = create_project(client)
+    asset = client.post(f"/api/projects/{project_id}/assets", json=asset_input()).json()
+
+    with client.app.state.repository.connect() as connection:
+        connection.execute(
+            "INSERT INTO requirement_packages(project_id, name, payload_json, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (project_id, "已发布包", '{"materials": []}', "2026-01-01T00:00:00+00:00"),
+        )
+        package_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+        connection.execute(
+            "INSERT INTO requirement_versions(project_id, package_id, version, payload_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                project_id,
+                package_id,
+                1,
+                '{"materials": [{"asset_id": %d}]}' % asset["id"],
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+
+    response = client.delete(f"/api/projects/{project_id}/assets/{asset['id']}")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "资产已被需求版本引用，不能删除"}

@@ -11,10 +11,10 @@ export type {
 } from "./api_types";
 
 export {
-  listProjects, getProject, createProject, updateProject,
+  listProjects, getProject, createProject, updateProject, deleteProject,
 } from "./project_api";
 export {
-  listAssets, createAsset,
+  listAssets, createAsset, deleteAsset,
 } from "./asset_api";
 export {
   createRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview,

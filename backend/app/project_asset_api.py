@@ -42,6 +42,12 @@ def register_project_asset_routes(app: FastAPI, context: AppRouteContext) -> Non
     def update_project(project_id: int, project_input: ProjectInput) -> Project:
         return require_project(repository.update(project_id, project_input))
 
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(project_id: int) -> dict[str, bool]:
+        require_project(repository.get(project_id))
+        repository.delete(project_id)
+        return {"deleted": True}
+
     @app.post(
         "/api/projects/{project_id}/assets",
         response_model=AssetProvenanceRecord,
@@ -55,6 +61,14 @@ def register_project_asset_routes(app: FastAPI, context: AppRouteContext) -> Non
     def list_assets(project_id: int) -> list[AssetProvenanceRecord]:
         require_project(repository.get(project_id))
         return asset_repository.list_assets(project_id)
+
+    @app.delete("/api/projects/{project_id}/assets/{asset_id}")
+    def delete_asset(project_id: int, asset_id: int) -> dict[str, bool]:
+        require_project(repository.get(project_id))
+        require_asset(asset_repository.get(project_id, asset_id))
+        raise_if_asset_is_referenced(repository, project_id, asset_id)
+        asset_repository.delete(project_id, asset_id)
+        return {"deleted": True}
 
     @app.put("/api/projects/{project_id}/assets/{asset_id}", response_model=AssetProvenanceRecord)
     def revise_asset(
@@ -88,3 +102,14 @@ def register_project_asset_routes(app: FastAPI, context: AppRouteContext) -> Non
     def get_model_context_assets(project_id: int) -> list[AssetProvenanceRecord]:
         require_project(repository.get(project_id))
         return asset_repository.model_context_assets(project_id)
+
+
+def raise_if_asset_is_referenced(repository: ProjectRepository, project_id: int, asset_id: int) -> None:
+    """阻止删除已经进入需求版本快照的资产，保留来源追溯关系。"""
+    with repository.connect() as connection:
+        rows = connection.execute(
+            "SELECT payload_json FROM requirement_versions WHERE project_id = ?", (project_id,)
+        ).fetchall()
+    marker = f'"asset_id": {asset_id}'
+    if any(marker in row["payload_json"] for row in rows):
+        raise HTTPException(status_code=409, detail="资产已被需求版本引用，不能删除")

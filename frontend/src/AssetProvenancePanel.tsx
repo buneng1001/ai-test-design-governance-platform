@@ -4,6 +4,7 @@ import {
   AssetProvenanceInput,
   AssetProvenanceRecord,
   createAsset,
+  deleteAsset,
   listAssets,
 } from "./api";
 
@@ -134,6 +135,15 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
           <span>大小：{asset.size_bytes} 字节</span>
           <span>{asset.reason}</span>
           <span>内容指纹：{shortHash(asset.sha256)}</span>
+          <button type="button" onClick={async () => {
+            if (!window.confirm(`确定删除资产“${asset.name}”吗？`)) return;
+            try {
+              await deleteAsset(projectId, asset.id);
+              setAssets((current) => current.filter((item) => item.id !== asset.id));
+            } catch (reason) {
+              setError(message(reason));
+            }
+          }}>删除资产</button>
         </article>)}
       </div>
     </section>

@@ -12,3 +12,6 @@ export const updateProject = (projectId: number, project: ProjectInput): Promise
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(project),
   },
 );
+export const deleteProject = (projectId: number): Promise<{ deleted: boolean }> => request(
+  `/api/projects/${projectId}`, { method: "DELETE" },
+);

@@ -34,6 +34,7 @@ input, textarea, select {
 }
 textarea { min-height: 96px; resize: vertical; }
 button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; background: #255b43; font-weight: 700; }
+.danger-button { margin-top: 16px; background: #a32525; }
 .project-form button { justify-self: start; }
 .panel > label { display: grid; gap: 8px; margin: 12px 0; font-weight: 650; }
 .checkbox-label { display: inline-flex !important; grid-template-columns: none !important; align-items: center; gap: 8px; font-weight: 400 !important; }

@@ -8,3 +8,6 @@ export const createAsset = (projectId: number, asset: AssetProvenanceInput): Pro
   request(`/api/projects/${projectId}/assets`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(asset),
   });
+export const deleteAsset = (projectId: number, assetId: number): Promise<{ deleted: boolean }> => request(
+  `/api/projects/${projectId}/assets/${assetId}`, { method: "DELETE" },
+);

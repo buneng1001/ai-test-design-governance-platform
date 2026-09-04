@@ -57,6 +57,16 @@ class AssetRepository:
             self._insert_revision(connection, asset_id, latest["revision"] + 1, asset_input, self._now())
         return self.get(project_id, asset_id)
 
+    def delete(self, project_id: int, asset_id: int) -> bool:
+        """删除资产及其修订记录。引用检查由接口层负责。"""
+        with self.connect() as connection:
+            if connection.execute("SELECT id FROM assets WHERE id = ? AND project_id = ?",
+                                  (asset_id, project_id)).fetchone() is None:
+                return False
+            connection.execute("DELETE FROM asset_provenance_revisions WHERE asset_id = ?", (asset_id,))
+            connection.execute("DELETE FROM assets WHERE id = ? AND project_id = ?", (asset_id, project_id))
+        return True
+
     def get(self, project_id: int, asset_id: int) -> AssetProvenanceRecord | None:
         with self.connect() as connection:
             row = connection.execute(

@@ -102,3 +102,29 @@ def test_project_persists_when_application_restarts(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["name"] == created["name"]
+
+
+def test_project_can_be_deleted_with_its_assets(client: TestClient) -> None:
+    created = create_project(client)
+    client.post(
+        f"/api/projects/{created['id']}/assets",
+        json={
+            "name": "project-data.md",
+            "asset_type": "requirement_material",
+            "provenance_kind": "original_synthetic",
+            "source": "项目内创建",
+            "usage_permission": "project_owned",
+            "model_permission": "allowed",
+            "requirement_version": "V1",
+            "purpose": "删除测试",
+            "content_base64": "cHJvamVjdCBkYXRh",
+            "change_reason": "首次登记",
+        },
+    )
+
+    response = client.delete(f"/api/projects/{created['id']}")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+    assert client.get(f"/api/projects/{created['id']}").status_code == 404
+    assert client.get("/api/projects").json() == []

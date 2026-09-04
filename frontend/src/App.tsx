@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { createProject, getProject, listProjects, Project, ProjectInput, updateProject } from "./api";
+import { createProject, deleteProject, getProject, listProjects, Project, ProjectInput, updateProject } from "./api";
 import { AssetProvenancePanel } from "./AssetProvenancePanel";
 import { AIRunPanel } from "./AIRunPanel";
 import { RequirementImportPanel } from "./RequirementImportPanel";
@@ -101,6 +101,15 @@ export function App() {
         <section className="panel">
           <h2>项目信息</h2>
           <ProjectForm input={projectInput} setInput={setProjectInput} submitLabel="保存修改" onSubmit={submitUpdate} />
+          <button type="button" className="danger-button" onClick={async () => {
+            if (!window.confirm(`确定删除项目“${activeProject.name}”及其全部数据吗？此操作不可恢复。`)) return;
+            try {
+              await deleteProject(activeProject.id);
+              window.location.assign("/");
+            } catch (reason) {
+              setError(errorMessage(reason));
+            }
+          }}>删除项目及全部数据</button>
           {error && <p role="alert" className="error">{error}</p>}
           {saveStatus && <p role="status" className="success">{saveStatus}</p>}
         </section>
