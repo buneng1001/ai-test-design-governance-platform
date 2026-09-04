@@ -15,7 +15,7 @@ const fieldLabels: Record<string, string> = {
   body: "请求数据",
 };
 
-function formatErrorDetail(detail: unknown): string {
+function formatErrorDetail(detail: unknown, fallback = "请求失败，请查看服务端诊断信息"): string {
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object" && !Array.isArray(detail)) {
     const error = detail as ValidationError;
@@ -27,7 +27,7 @@ function formatErrorDetail(detail: unknown): string {
       : "";
     return code ? `请求失败（${code}），请查看服务端诊断信息` : "请求失败，请查看服务端诊断信息";
   }
-  if (!Array.isArray(detail)) return "请求未完成，请检查填写内容";
+  if (!Array.isArray(detail)) return fallback;
   if (detail.every((item) => typeof item === "string")) {
     return `AI 输出字段校验失败：${detail.slice(0, 3).join("；")}`;
   }
@@ -43,8 +43,18 @@ function formatErrorDetail(detail: unknown): string {
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw new Error(formatErrorDetail(body?.detail));
+    const responseText = await response.text();
+    let body: unknown = null;
+    try {
+      body = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      body = responseText;
+    }
+    const detail = body && typeof body === "object" && !Array.isArray(body) && "detail" in body
+      ? (body as { detail: unknown }).detail
+      : body;
+    const fallback = `请求失败（HTTP ${response.status}）：${response.statusText || "服务端未返回具体原因"}`;
+    throw new Error(formatErrorDetail(detail, fallback));
   }
   return response.json() as Promise<T>;
 }
