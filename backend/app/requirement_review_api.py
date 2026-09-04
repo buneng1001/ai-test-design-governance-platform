@@ -123,7 +123,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
                 if not response.retryable or attempt_number == analysis_input.max_retries + 1:
                     break
                 continue
-            output, validation_errors = validate_requirement_analysis_output(response.raw_output)
+            output, validation_errors = validate_requirement_analysis_output(response.raw_output, context_values)
             if validation_errors:
                 attempts.append(AIAttempt(
                     attempt=attempt_number,

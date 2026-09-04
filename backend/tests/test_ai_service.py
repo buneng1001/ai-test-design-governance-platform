@@ -2,7 +2,7 @@ import json
 
 from app.ai_service import (
     AIModelConfig, ModelRequest, OpenAICompatibleModelService, _extract_structured_content, _finish_reason,
-    _provider_request_parameters,
+    _provider_request_parameters, validate_requirement_analysis_output,
 )
 
 
@@ -48,3 +48,20 @@ def test_provider_thinking_parameters_are_disabled_for_structured_analysis() -> 
     assert _provider_request_parameters("siliconflow", "deepseek-ai/DeepSeek-V3.2") == {
         "enable_thinking": False,
     }
+
+
+def test_requirement_output_normalizes_existing_string_source_references() -> None:
+    context = ({"source_reference": {
+        "reference_id": "ref-1", "asset_id": 7, "filename": "SRS.md", "locator": "line 1",
+    }},)
+    output, errors = validate_requirement_analysis_output({
+        "requirements": [{
+            "requirement_id": "REQ-1", "name": "需求", "statement": "系统应工作",
+            "requirement_type": "functional", "module": "核心", "source_references": ["SRS.md"],
+            "analysis_note": "来源可追溯",
+        }], "test_items": [], "acceptance_criteria": [], "findings": [], "conflicts": [],
+    }, context)
+    assert not errors
+    assert output is not None
+    assert output.contract_version == "requirement-analysis.v1"
+    assert output.requirements[0].source_references[0].reference_id == "ref-1"

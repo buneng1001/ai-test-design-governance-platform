@@ -222,14 +222,67 @@ def validate_output(raw_output: object) -> tuple[dict | None, list[str]]:
     return output.model_dump(mode="json"), []
 
 
-def validate_requirement_analysis_output(raw_output: object) -> tuple[StructuredAnalysisOutput | None, list[str]]:
+def validate_requirement_analysis_output(
+    raw_output: object, input_context: tuple[dict[str, object], ...] = ()
+) -> tuple[StructuredAnalysisOutput | None, list[str]]:
     try:
-        return StructuredAnalysisOutput.model_validate(raw_output), []
+        normalized = _normalize_requirement_output(raw_output, input_context)
+        return StructuredAnalysisOutput.model_validate(normalized), []
     except ValidationError as error:
         return None, [
             f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
             for item in error.errors()[:10]
         ]
+
+
+def _normalize_requirement_output(raw_output: object, input_context: tuple[dict[str, object], ...]) -> object:
+    if not isinstance(raw_output, dict):
+        return raw_output
+    normalized = dict(raw_output)
+    normalized.setdefault("contract_version", "requirement-analysis.v1")
+    references = [
+        item.get("source_reference") for item in input_context
+        if isinstance(item.get("source_reference"), dict)
+    ]
+    for collection_name in ("requirements", "test_items", "acceptance_criteria", "findings"):
+        collection = normalized.get(collection_name)
+        if isinstance(collection, list):
+            normalized[collection_name] = [
+                _normalize_output_item(item, references) for item in collection
+            ]
+    conflicts = normalized.get("conflicts")
+    if isinstance(conflicts, list):
+        normalized["conflicts"] = [_normalize_output_item(item, references) for item in conflicts]
+    return normalized
+
+
+def _normalize_output_item(item: object, references: list[object]) -> object:
+    if not isinstance(item, dict):
+        return item
+    normalized = dict(item)
+    for field in ("source_references", "source_reference", "srs_source", "implementation_source"):
+        if field in normalized:
+            value = normalized[field]
+            if field == "source_references" and isinstance(value, list):
+                normalized[field] = [_resolve_source_reference(item, references) for item in value]
+            else:
+                normalized[field] = _resolve_source_reference(value, references)
+    return normalized
+
+
+def _resolve_source_reference(value: object, references: list[object]) -> object:
+    if isinstance(value, dict) and {"reference_id", "asset_id", "filename", "locator"}.issubset(value):
+        return value
+    text = str(value).strip() if isinstance(value, (str, int)) else ""
+    if not text:
+        return value
+    for reference in references:
+        if not isinstance(reference, dict):
+            continue
+        candidates = (reference.get("reference_id"), reference.get("filename"), reference.get("locator"))
+        if any(isinstance(candidate, str) and (text == candidate or candidate in text) for candidate in candidates):
+            return reference
+    return value
 
 
 def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
