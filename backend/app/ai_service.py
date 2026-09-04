@@ -27,6 +27,10 @@ class ModelResponse:
     raw_output: object | None = None
     error_code: str | None = None
     retryable: bool = False
+    diagnostic: str | None = None
+
+
+MAX_MOCK_REQUIREMENTS = 100
 
 
 class ModelService(Protocol):
@@ -97,30 +101,88 @@ class OpenAICompatibleModelService:
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         prompt = _prompt_for_request(request)
-        body = json.dumps({
-            "model": request.model_parameters.model,
-            "temperature": request.model_parameters.temperature,
-            "max_tokens": request.model_parameters.max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object"},
-        }).encode("utf-8")
-        http_request = Request(
-            f"{request.base_url.rstrip('/')}/chat/completions",
-            data=body,
-            headers={"Authorization": f"Bearer {request.api_key}",
-                     "Content-Type": "application/json"},
-            method="POST",
+        response = _request_json(request, prompt, include_response_format=True)
+        if response.error_code == "provider_http_400":
+            # 部分 OpenAI 兼容服务不接受 response_format，降级为 Prompt 强制 JSON。
+            response = _request_json(request, prompt, include_response_format=False)
+        return response
+
+
+def _request_json(request: ModelRequest, prompt: str, include_response_format: bool) -> ModelResponse:
+    body_data: dict[str, object] = {
+        "model": request.model_parameters.model,
+        "temperature": request.model_parameters.temperature,
+        "max_tokens": request.model_parameters.max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if include_response_format:
+        body_data["response_format"] = {"type": "json_object"}
+    body = json.dumps(body_data).encode("utf-8")
+    http_request = Request(
+        f"{request.base_url.rstrip('/')}/chat/completions",
+        data=body,
+        headers={"Authorization": f"Bearer {request.api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(http_request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        finish_reason = _finish_reason(payload)
+        if finish_reason == "length":
+            return ModelResponse(
+                error_code="provider_response_truncated",
+                diagnostic="finish_reason=length",
+            )
+        return ModelResponse(raw_output=_extract_structured_content(payload))
+    except HTTPError as error:
+        retryable = error.code == 429 or error.code >= 500
+        return ModelResponse(error_code=f"provider_http_{error.code}", retryable=retryable,
+                             diagnostic=f"http_status={error.code}")
+    except (URLError, TimeoutError) as error:
+        return ModelResponse(error_code="provider_response_invalid", diagnostic=type(error).__name__)
+    except (ValueError, KeyError, IndexError, TypeError) as error:
+        return ModelResponse(error_code="provider_json_invalid", diagnostic=type(error).__name__)
+
+
+def _finish_reason(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+    reason = choices[0].get("finish_reason")
+    return reason if isinstance(reason, str) else None
+
+
+def _extract_structured_content(payload: object) -> object:
+    """兼容常见 OpenAI 兼容服务的 JSON、代码块和多段文本响应。"""
+    if not isinstance(payload, dict):
+        raise ValueError("模型响应不是 JSON 对象")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("模型响应缺少 choices")
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise ValueError("模型响应缺少 message")
+    content = message.get("content")
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, list):
+        content = "".join(
+            part.get("text", "") for part in content if isinstance(part, dict) and isinstance(part.get("text"), str)
         )
-        try:
-            with urlopen(http_request, timeout=30) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            content = payload["choices"][0]["message"]["content"]
-            return ModelResponse(raw_output=json.loads(content))
-        except HTTPError as error:
-            retryable = error.code == 429 or error.code >= 500
-            return ModelResponse(error_code=f"provider_http_{error.code}", retryable=retryable)
-        except (URLError, TimeoutError, json.JSONDecodeError, KeyError, IndexError, TypeError):
-            return ModelResponse(error_code="provider_response_invalid", retryable=False)
+    if not isinstance(content, str):
+        raise ValueError("模型响应缺少可解析 content")
+    text = content.strip()
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```").removeprefix("json").removesuffix("```").strip()
+    if not text.startswith(("{", "[")):
+        start = min((index for index in (text.find("{"), text.find("[") ) if index >= 0), default=-1)
+        end = max(text.rfind("}"), text.rfind("]"))
+        if start >= 0 and end > start:
+            text = text[start:end + 1]
+    return json.loads(text)
 
 
 def validate_output(raw_output: object) -> tuple[dict | None, list[str]]:
@@ -144,7 +206,9 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
     test_items = []
     findings = []
     conflicts = []
-    for index, item in enumerate(request.input_context, start=1):
+    # Mock 结果必须先遵守需求分析契约上限，长文档不能生成超出契约的响应。
+    bounded_context = request.input_context[:MAX_MOCK_REQUIREMENTS]
+    for index, item in enumerate(bounded_context, start=1):
         source = item["source_reference"]
         source_reference = source if isinstance(source, dict) else {}
         requirement_id = f"REQ-CANDIDATE-{index}"
@@ -172,7 +236,7 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
                 "reason": "Mock 识别到约束性表述，但不会替测试工程师补写验收标准。",
                 "source_reference": source_reference,
             })
-    for first, second in _conflict_pairs(request.input_context):
+    for first, second in _conflict_pairs(bounded_context)[:MAX_MOCK_REQUIREMENTS]:
         conflict_id = "CONFLICT-" + hashlib.sha256(
             f"{first['text']}\n{second['text']}".encode("utf-8")
         ).hexdigest()[:12]
@@ -198,7 +262,8 @@ def _prompt_for_request(request: ModelRequest) -> str:
 
 def _requirement_prompt(request: ModelRequest) -> str:
     context = json.dumps(request.input_context, ensure_ascii=False)
-    return ("请分析以下多文件需求资料，严格输出 requirement-analysis.v1 JSON。归并同义内容，提取需求、模块、"
+    return ("请分析以下多文件需求资料，严格只输出紧凑的 requirement-analysis.v1 JSON，不要输出 Markdown、解释文字或思考过程。"
+            "归并同义内容，提取需求、模块、"
             "测试项、验收条件，并识别歧义、遗漏、冲突、不可测试条件。每条语义结果必须引用输入中的完整"
             "source_reference，不得凭空创造来源。原始资料：" + context)
 

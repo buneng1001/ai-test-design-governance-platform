@@ -139,7 +139,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     register_evaluation_routes(
         app, repository, asset_repository, ai_run_repository, evaluation_repository
     )
-    register_model_config_routes(app)
+    register_model_config_routes(app, resolved_database_path)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

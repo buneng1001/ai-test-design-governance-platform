@@ -31,12 +31,16 @@ class ConnectionTestResult(BaseModel):
 
 
 PROVIDER_DEFAULTS: dict[str, dict[str, object]] = {
-    "deepseek": {"base_url": "https://api.deepseek.com", "models": ["deepseek-chat", "deepseek-reasoner"]},
+    "deepseek": {"base_url": "https://api.deepseek.com", "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
     "siliconflow": {
         "base_url": "https://api.siliconflow.cn/v1",
-        "models": ["Qwen/Qwen3-8B", "deepseek-ai/DeepSeek-V3"],
+        "models": [
+            "Qwen/Qwen2.5-72B-Instruct", "zai-org/GLM-5.2", "zai-org/GLM-4.5V",
+            "Pro/moonshotai/Kimi-K2.6", "MiniMaxAI/MiniMax-M2.5", "deepseek-ai/DeepSeek-V3.2",
+            "Qwen/Qwen3.6-27B", "Qwen/Qwen3.5-27B", "Qwen/Qwen3-8B",
+        ],
     },
-    "kimi": {"base_url": "https://api.moonshot.cn/v1", "models": ["moonshot-v1-8k", "moonshot-v1-32k"]},
+    "kimi": {"base_url": "https://api.moonshot.cn/v1", "models": ["kimi-k2.6", "kimi-k2.5", "kimi-k2.7-code"]},
     "glm": {"base_url": "https://open.bigmodel.cn/api/paas/v4", "models": ["glm-4.5", "glm-4.5-air"]},
 }
 

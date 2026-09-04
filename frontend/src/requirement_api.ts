@@ -12,9 +12,10 @@ export const publishRequirementPackage = (projectId: number, packageId: number):
 export const listRequirementVersions = (projectId: number): Promise<RequirementVersion[]> =>
   request(`/api/projects/${projectId}/requirement-versions`);
 export const createRequirementReview = (projectId: number, versionId: number,
-  mode: "mock" | "real" = "mock"): Promise<RequirementAnalysis> =>
+  mode: "mock" | "real" = "mock", forceNew = false): Promise<RequirementAnalysis> =>
   request(`/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review`, {
-    method: "POST", headers: sessionHeaders(), body: JSON.stringify({ mode }),
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, force_new: forceNew }),
   });
 export const updateAtomicRequirement = (projectId: number, analysisId: number, candidateId: string,
   input: { decision: "accepted" | "rejected"; statement?: string }): Promise<RequirementAnalysis> =>

@@ -61,10 +61,11 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         version = requirement_repository.get_version(project_id, version_id)
         if version is None:
             raise HTTPException(status_code=404, detail="需求版本不存在")
-        existing = review_repository.latest_for_version(project_id, version_id)
-        if existing is not None:
-            return existing
         analysis_input = analysis_input or RequirementAnalysisInput()
+        existing = review_repository.latest_for_version(project_id, version_id)
+        same_mode = existing is not None and existing.is_mock == (analysis_input.mode == "mock")
+        if existing is not None and same_mode and not analysis_input.force_new:
+            return existing
         input_asset_versions = [
             {"asset_id": material.asset_id, "revision": material.asset_revision}
             for material in version.materials
@@ -81,6 +82,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         model_parameters = AIModelConfig(
             provider=session_config.provider if session_config else "mock",
             model=session_config.model if session_config else "deterministic-v1",
+            max_tokens=8000 if analysis_input.mode == "real" else 1200,
         )
         request = ModelRequest(
             task_type="requirement_review",
@@ -96,6 +98,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         attempts: list[AIAttempt] = []
         output = None
         validation_errors: list[str] = []
+        last_error_code: str | None = None
         run_status = "failed"
         validation_status = "not_run"
         for attempt_number in range(1, analysis_input.max_retries + 2):
@@ -103,6 +106,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             response = selected_model_service.complete(request)
             elapsed_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
             if response.error_code:
+                last_error_code = response.error_code
                 attempts.append(AIAttempt(
                     attempt=attempt_number,
                     started_at=started_at,
@@ -110,6 +114,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
                     status="failed",
                     error_code=response.error_code,
                     retryable=response.retryable,
+                    diagnostic=response.diagnostic,
                 ))
                 if not response.retryable or attempt_number == analysis_input.max_retries + 1:
                     break
@@ -140,7 +145,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             break
         if output is None:
             raise HTTPException(status_code=502 if run_status == "failed" else 422,
-                                detail=validation_errors or "模型分析失败")
+                                detail=validation_errors or _analysis_failure_message(last_error_code))
         requirements, test_items, criteria, atomic_requirements, findings, conflicts = (
             semantic_output_to_analysis(version, output)
         )
@@ -359,3 +364,28 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         analysis.confirmed_by = confirmation.confirmer_name
         analysis.confirmed_at = datetime.now(UTC)
         return review_repository.save(analysis, "requirement_confirmed")
+
+
+def _analysis_failure_message(error_code: str | None) -> str:
+    """将模型服务错误转换为用户可以直接处理的提示，不暴露 API Key。"""
+    if error_code in {"authentication_error", "provider_http_401", "provider_http_403"}:
+        return "真实模型认证失败，请检查 API Key 是否正确且仍有调用权限"
+    if error_code in {"parameter_error", "provider_http_400"}:
+        return "真实模型请求参数不被供应商接受，请检查模型名称和 Base URL"
+    if error_code == "provider_http_404":
+        return "真实模型接口不存在，请检查 Base URL 是否正确，以及模型名称是否可用"
+    if error_code == "provider_response_truncated":
+        return "真实模型输出被截断，请减少需求资料、切换输出能力更强的模型后重试"
+    if error_code in {"provider_response_invalid", "provider_json_invalid"}:
+        return "真实模型已响应，但返回内容不是可解析的 JSON；请确认模型支持 JSON 输出，或切换模型后重试"
+    if error_code in {"timeout", "provider_http_408"}:
+        return "真实模型请求超时，请检查网络或稍后重试"
+    if error_code in {"rate_limit", "provider_http_429"}:
+        return "真实模型请求受到限流，请稍后重试或更换可用模型"
+    if error_code == "provider_unavailable":
+        return "真实模型服务当前不可用，请先检查模型配置并重新保存"
+    if error_code and error_code.startswith("provider_http_"):
+        return f"真实模型服务请求失败（{error_code.removeprefix('provider_http_')}），请检查模型配置或稍后重试"
+    if error_code == "content_safety_error":
+        return "真实模型拒绝处理当前内容，请检查需求资料内容后重试"
+    return "真实模型分析失败，请检查 API Key、Base URL 和模型名称后重试"

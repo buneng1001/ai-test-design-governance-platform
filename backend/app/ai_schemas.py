@@ -67,6 +67,7 @@ class AIAttempt(BaseModel):
     status: Literal["succeeded", "validation_failed", "failed"]
     error_code: str | None = None
     retryable: bool = False
+    diagnostic: str | None = None
 
 
 class AIRun(BaseModel):

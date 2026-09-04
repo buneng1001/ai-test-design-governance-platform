@@ -216,3 +216,4 @@ class RequirementAnalysisInput(BaseModel):
     mode: Literal["mock", "real"] = "mock"
     scenario: MockScenario = "normal"
     max_retries: int = Field(default=2, ge=0, le=2)
+    force_new: bool = False

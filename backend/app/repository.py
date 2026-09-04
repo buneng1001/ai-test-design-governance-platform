@@ -297,6 +297,13 @@ MIGRATIONS = (
     """
     ALTER TABLE asset_provenance_revisions ADD COLUMN media_type TEXT NOT NULL DEFAULT 'application/octet-stream';
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_model_configs (
+        client_id TEXT PRIMARY KEY,
+        config_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 )
 
 

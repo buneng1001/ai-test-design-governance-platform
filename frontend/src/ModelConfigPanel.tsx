@@ -31,11 +31,13 @@ export function ModelConfigPanel() {
     event.preventDefault();
     try {
       await saveSessionModelConfig(config);
-      setMessage("配置已保存到当前浏览器会话，API Key 不会写入服务器存储");
+      setMessage("配置已保存，刷新或重新打开系统后仍可使用；API Key 不会在页面回显");
       setError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "模型配置保存失败"); }
   };
   const test = async () => {
+    setMessage("正在调用真实模型测试连接，请稍候…");
+    setError("");
     try {
       const result = await testSessionModelConfig(config);
       setMessage(result.message);
@@ -52,7 +54,7 @@ export function ModelConfigPanel() {
   const selectedProvider = providers.find((item) => item.id === config.provider);
   return <section className="panel" aria-label="模型配置">
     <h2>模型配置</h2>
-    <p>真实模型配置只在当前浏览器会话使用；Mock AI 仍可离线使用，并会明确标记。</p>
+    <p>保存后刷新或重新打开系统仍可使用；API Key 只用于当前本机配置，不会在页面回显。</p>
     <form className="project-form" onSubmit={submit}>
       <label>供应商<select value={config.provider}
         onChange={(event) => changeProvider(event.target.value as ModelProviderId)}>

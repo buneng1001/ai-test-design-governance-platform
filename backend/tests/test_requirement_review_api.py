@@ -2,9 +2,33 @@ import base64
 
 from fastapi.testclient import TestClient
 
+from app.ai_schemas import AIModelConfig
+from app.ai_service import ModelRequest, MockModelService, validate_requirement_analysis_output
+
 
 def encoded(content: bytes) -> str:
     return base64.b64encode(content).decode("ascii")
+
+
+def test_mock_requirement_analysis_respects_output_limits() -> None:
+    context = tuple({
+        "text": f"需求片段 {index}",
+        "source_reference": {
+            "reference_id": f"ref-{index}", "asset_id": 1, "filename": "requirements.md",
+            "locator": f"lines:{index}-{index}",
+        },
+    } for index in range(101))
+    response = MockModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="requirement-analysis.v1",
+        model_parameters=AIModelConfig(), input_asset_versions=({"asset_id": 1, "revision": 1},),
+        scenario="normal", input_context=context,
+    ))
+
+    output, errors = validate_requirement_analysis_output(response.raw_output)
+    assert errors == []
+    assert output is not None
+    assert len(output.requirements) == 100
+    assert len(output.test_items) == 100
 
 
 def setup_version(client: TestClient) -> tuple[int, int]:
@@ -110,6 +134,22 @@ def test_requirement_review_requires_human_confirmation_and_keeps_history(client
     assert immutable.status_code == 409
 
 
+def test_requirement_review_can_create_new_analysis_with_force_new(client: TestClient) -> None:
+    project_id, version_id = setup_version(client)
+    first = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        json={"mode": "mock"},
+    )
+    second = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        json={"mode": "mock", "force_new": True},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["id"] != first.json()["id"]
+
+
 def test_visual_inference_cannot_be_confirmed_as_fact_without_decision(client: TestClient) -> None:
     project_id, version_id = setup_version(client)
     analysis = client.post(
@@ -132,6 +172,11 @@ def test_structured_analysis_contains_semantic_items_and_traceable_sources(clien
 
 def test_real_analysis_requires_a_session_model_configuration(client: TestClient) -> None:
     project_id, version_id = setup_version(client)
+    mock_response = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        json={"mode": "mock"},
+    )
+    assert mock_response.status_code == 201
     response = client.post(
         f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
         json={"mode": "real"},
