@@ -31,7 +31,7 @@ export function TaskPublicationPanel({ projectId }: Props) {
 
   return (
     <section className="panel">
-      <h2>发布测试任务</h2>
+      <h2 id="task-publication">发布测试任务</h2>
       <p className="muted">仅能发布已完成用例确认的评审批次；目标扩展由执行适配器负责。</p>
       <p className="field-help">评审批次 ID 和稳定用例 ID 都来自前一步生成结果；这里不新建编号，也不填写 V1/V2。</p>
       <form className="project-form" onSubmit={submit}>

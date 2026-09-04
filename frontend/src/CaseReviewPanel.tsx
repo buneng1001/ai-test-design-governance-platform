@@ -87,7 +87,7 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
   };
 
   return <section className="panel" aria-label="三角色 AI 评审与用例确认">
-    <h2>三角色 AI 评审与用例确认</h2>
+    <h2 id="case-review">三角色 AI 评审与用例确认</h2>
     {!batch && <button onClick={() => void startReview()}>开始三角色 AI 评审</button>}
     {error && <p role="alert" className="error">{error}</p>}
     {batch && <>

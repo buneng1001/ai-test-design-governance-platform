@@ -54,7 +54,7 @@ export function TestDesignPanel({ projectId }: { projectId: number }) {
 
   return (
     <section className="panel">
-      <h2>测试维度、范围、风险与自动化</h2>
+      <h2 id="test-design">测试维度、范围、风险与自动化</h2>
       {!design && <>
         <label>已确认需求版本（选择 V1、V2；系统内部使用对应 ID）
           <select value={versionId} onChange={(event) => setVersionId(event.target.value)} disabled={versions.length === 0}>

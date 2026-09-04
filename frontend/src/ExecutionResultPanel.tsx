@@ -60,7 +60,7 @@ export function ExecutionResultPanel({ projectId }: Props) {
   };
 
   return <section className="panel">
-    <h2>导入运行结果</h2>
+      <h2 id="execution-results">导入运行结果</h2>
     <p className="muted">保留每次结果事实；未匹配结果和结果冲突必须由测试工程师处理。</p>
     <form className="project-form" onSubmit={importResults}>
       <label>执行批次 ID<input value={batchId} onChange={(event) => setBatchId(event.target.value)} required /></label>

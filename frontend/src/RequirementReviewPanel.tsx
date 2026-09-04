@@ -104,7 +104,7 @@ export function RequirementReviewPanel({
 
   return (
     <section className="panel">
-      <h2>需求评审与确认</h2>
+      <h2 id="requirement-review">需求评审与确认</h2>
       {!analysis && <>
         <label>需求版本
           <select aria-label="需求版本" value={selectedVersionId}
@@ -142,7 +142,7 @@ export function RequirementReviewPanel({
         {isRunning && <p role="status" className="running-status">正在使用{mode === "real" ? "真实模型" : "Mock AI"}分析需求，
           预计需要{mode === "real" ? "10–30 秒" : "1–3 秒"}，请勿重复点击。</p>}
         <div className="requirement-summary">
-          <h3>按模块归并的需求表</h3>
+          <h3 id="grouped-requirements">按模块归并的需求表</h3>
           {requirements.length === 0 && <p className="muted">模型没有返回需求候选，请检查输入或模型输出。</p>}
           <label>搜索需求<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} /></label>
           <label>模块筛选<select value={moduleFilter} onChange={(event) => { setModuleFilter(event.target.value); setPage(1); }}>
@@ -172,7 +172,7 @@ export function RequirementReviewPanel({
             <span>第 {page} / {Math.ceil(requirements.length / 20)} 页</span>
             <button disabled={page >= Math.ceil(requirements.length / 20)} onClick={() => setPage(page + 1)}>下一页</button></nav>}
           <p>测试项：{testItems.length} · 验收条件：{acceptanceCriteria.length}</p>
-          <h3>需求冲突表</h3>
+          <h3 id="requirement-conflicts">需求冲突表</h3>
           {conflicts.length === 0 && <p className="muted">未发现跨资料冲突。</p>}
           {conflicts.map((conflict) => <article key={conflict.conflict_id}>
             <strong>{conflict.topic}</strong><p>影响模块：{conflict.affected_modules.join("、")} ·
@@ -187,7 +187,7 @@ export function RequirementReviewPanel({
               <option value="implementation_preferred">以实现规格为准</option><option value="both_retained">两者保留</option>
               <option value="awaiting_external_confirmation">待外部确认</option></select>}
           </article>)}
-          <h3>原子需求候选</h3>
+          <h3 id="atomic-requirements">原子需求候选</h3>
           {analysis.atomic_requirements.some((item) => item.decision === "pending_confirmation") &&
             <button onClick={() => refresh(bulkConfirmAtomicRequirements(
               projectId, analysis.id,
@@ -207,7 +207,7 @@ export function RequirementReviewPanel({
             </div>}
             {candidate.stable_requirement_id && <small>稳定需求 ID：{candidate.stable_requirement_id}</small>}
           </article>)}
-          <h3>需求评审发现</h3>
+          <h3 id="review-findings">需求评审发现</h3>
           {analysis.findings.map((finding) => <article key={finding.finding_id}>
             {finding.status === "pending_confirmation" ? <>
               <label>问题描述<textarea value={findingDrafts[finding.finding_id]?.summary ?? finding.summary}

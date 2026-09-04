@@ -32,7 +32,7 @@ export function CoveragePanel({ projectId }: Props) {
 
   const metric = coverage?.metrics[selectedMetric];
   return <section className="panel">
-    <h2>治理指标与缺口</h2>
+    <h2 id="coverage">治理指标与缺口</h2>
     <p className="muted">指标只统计已确认追踪关系；选择指标可展开未覆盖项、质量问题和执行证据。</p>
     <p className="field-help">这里的需求版本、测试设计、用例评审批次和执行批次 ID 都是前序模块生成的内部 ID，不需要重新命名。</p>
     <form className="project-form" onSubmit={loadCoverage}>

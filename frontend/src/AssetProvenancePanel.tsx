@@ -65,7 +65,7 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
 
   return (
     <section className="panel">
-      <h2>资产来源记录</h2>
+      <h2 id="asset-provenance">资产来源记录</h2>
       <p>资产必须先登记来源、权限和内容哈希，来源不明资产不会进入需求资料包或模型上下文。</p>
       <form className="project-form" onSubmit={submit}>
         <label>资产文件<input type="file" multiple onChange={(event) => selectFiles(event.target.files)} /></label>

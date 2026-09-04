@@ -16,7 +16,7 @@ export function AIRunPanel({ projectId }: AIRunPanelProps) {
 
   return (
     <section className="panel" aria-label="AI 运行审计">
-      <h2>AI 运行审计</h2>
+      <h2 id="ai-run-audit">AI 运行审计</h2>
       <p>模型输出先经过结构校验；Mock 运行只用于离线演示和验证，不代表真实模型结果。</p>
       {error && <p role="alert" className="error">{error}</p>}
       {runs.length === 0 && !error && <p>当前项目还没有 AI 运行。</p>}

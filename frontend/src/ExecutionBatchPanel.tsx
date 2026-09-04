@@ -37,7 +37,7 @@ export function ExecutionBatchPanel({ projectId }: Props) {
 
   return (
     <section className="panel">
-      <h2>创建执行批次</h2>
+      <h2 id="execution-batch">创建执行批次</h2>
       <p className="muted">从已发布测试任务选择稳定用例，冻结本轮上下文并生成供人工填写的执行文件。</p>
       <p className="field-help">测试任务 ID、稳定用例 ID 来自前一步；执行批次 ID 由本页面创建。需求版本 ID 关联已发布的 V1/V2 版本。</p>
       <form className="project-form" onSubmit={submit}>

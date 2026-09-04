@@ -79,7 +79,7 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   };
 
   return <section className="panel" aria-label="候选测试用例生成">
-    <h2>生成可追踪的候选测试用例</h2>
+    <h2 id="case-generation">生成可追踪的候选测试用例</h2>
     <p className="field-help">测试设计编号由“测试维度、范围、风险与自动化”生成；模板映射编号由模板上传后生成。两者都是系统内部 ID，不是 V1/V2。</p>
     <label>已确认测试设计编号
       <input type="number" min="1" value={designId} onChange={(event) => setDesignId(Number(event.target.value))} />

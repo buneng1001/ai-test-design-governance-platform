@@ -53,7 +53,7 @@ export function ModelConfigPanel() {
 
   const selectedProvider = providers.find((item) => item.id === config.provider);
   return <section className="panel" aria-label="模型配置">
-    <h2>模型配置</h2>
+      <h2 id="model-config">模型配置</h2>
     <p>保存后刷新或重新打开系统仍可使用；API Key 只用于当前本机配置，不会在页面回显。</p>
     <form className="project-form" onSubmit={submit}>
       <label>供应商<select value={config.provider}

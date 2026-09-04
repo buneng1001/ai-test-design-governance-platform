@@ -81,7 +81,7 @@ export function RequirementImportPanel({
 
   return (
     <section className="panel">
-      <h2>导入需求资料</h2>
+      <h2 id="requirement-import">导入需求资料</h2>
       <p>先登记资产来源，再选择同名文件组成需求资料包；发布后会形成不可覆盖的需求版本。</p>
       <form className="project-form" onSubmit={inspect}>
         <label>
@@ -101,7 +101,7 @@ export function RequirementImportPanel({
       </form>
       {error && <p role="alert" className="error">{error}</p>}
       {draft && <div className="requirement-summary">
-        <h3>发布前资料包清单</h3>
+        <h3 id="requirement-package-list">发布前资料包清单</h3>
         {draft.materials.map((material) => <article key={material.asset_id}>
           <strong>{material.filename}</strong>
           <span>{statusLabel(material.parse_status)} · {material.format} · {material.fragments.length} 个来源片段</span>

@@ -44,7 +44,7 @@ export function ChangeImpactPanel({ projectId }: { projectId: number }) {
   };
 
   return <section className="panel" aria-label="V1 到 V2 变更影响和回归治理">
-    <h2>V1→V2 变更影响与回归治理</h2>
+    <h2 id="change-impact">V1→V2 变更影响与回归治理</h2>
     <div className="inline-form">
       <label>V1 版本 ID<span className="field-help">页面显示 V1/V2，系统自动使用对应内部 ID</span><select aria-label="V1 版本 ID" value={baseVersionId} onChange={(event) => setBaseVersionId(event.target.value)}>
         <option value="">请选择</option>{versions.map((version) => <option key={version.id} value={version.id}>V{version.version} · {version.name}</option>)}

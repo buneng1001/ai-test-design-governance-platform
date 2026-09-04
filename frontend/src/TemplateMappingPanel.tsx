@@ -50,7 +50,7 @@ export function TemplateMappingPanel({ projectId }: Props) {
   };
 
   return <section className="panel" aria-label="用例模板映射">
-    <h2>用例模板映射</h2>
+    <h2 id="template-mapping">用例模板映射</h2>
     <label>上传 XLSX 或 CSV 用例模板<input type="file" accept=".xlsx,.csv" onChange={upload} /></label>
     {mapping && <div>
       <p>{mapping.filename}：发现 {mapping.sheets.length} 张工作表</p>
