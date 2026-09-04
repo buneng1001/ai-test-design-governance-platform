@@ -140,3 +140,20 @@ def test_requirement_output_resolves_compact_source_aliases() -> None:
     assert not errors
     assert output is not None
     assert output.requirements[0].source_references[0].reference_id == "ref-2"
+
+
+def test_requirement_output_normalizes_type_alias_and_empty_analysis_note() -> None:
+    context = ({"source_reference": {
+        "reference_id": "ref-1", "asset_id": 7, "filename": "SRS.md", "locator": "line 1",
+    }},)
+    output, errors = validate_requirement_analysis_output({
+        "requirements": [{
+            "requirement_id": "REQ-1", "name": "需求", "statement": "系统应工作",
+            "requirement_type": "业务功能", "module": "核心", "source_references": ["S1"],
+            "analysis_note": "",
+        }], "test_items": [], "acceptance_criteria": [], "findings": [], "conflicts": [],
+    }, context)
+    assert not errors
+    assert output is not None
+    assert output.requirements[0].requirement_type == "functional"
+    assert output.requirements[0].analysis_note == "模型未提供补充分析说明。"

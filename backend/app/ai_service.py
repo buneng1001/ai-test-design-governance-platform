@@ -274,6 +274,10 @@ def _normalize_output_item(
     if not isinstance(item, dict):
         return item
     normalized = dict(item)
+    if "requirement_type" in normalized:
+        normalized["requirement_type"] = _normalize_requirement_type(normalized["requirement_type"])
+    if "analysis_note" in normalized and not str(normalized["analysis_note"]).strip():
+        normalized["analysis_note"] = "模型未提供补充分析说明。"
     for field in ("source_references", "source_reference", "srs_source", "implementation_source"):
         if field in normalized:
             value = normalized[field]
@@ -286,6 +290,22 @@ def _normalize_output_item(
                 resolved = _resolve_source_reference(value, references)
                 normalized[field] = None if optional_finding_source and resolved is value else resolved
     return normalized
+
+
+def _normalize_requirement_type(value: object) -> str:
+    """把常见中文分类归一到平台契约，避免单个分类词使整批结果失效。"""
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        aliases = {
+            "功能": "functional", "功能性": "functional", "业务功能": "functional",
+            "接口": "interface", "接口类": "interface", "数据": "data", "数据类": "data",
+            "质量": "quality", "非功能": "quality", "约束": "constraint", "限制": "constraint",
+            "流程": "workflow", "工作流": "workflow",
+        }
+        return aliases.get(normalized, normalized if normalized in {
+            "functional", "interface", "data", "quality", "constraint", "workflow", "other",
+        } else "other")
+    return "other"
 
 
 def _resolve_source_reference(value: object, references: list[object], field_index: int | None = None) -> object:

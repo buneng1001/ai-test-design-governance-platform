@@ -9,7 +9,7 @@
 body { margin: 0; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
-.shell { max-width: 1040px; margin: 0 auto; padding: 56px 24px; }
+.shell { width: min(calc(100% - 48px), 1600px); margin: 0 auto; padding: 56px 0; }
 .workspace-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: start; }
 .workspace-content { min-width: 0; }
 .workspace-navigation { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto;
