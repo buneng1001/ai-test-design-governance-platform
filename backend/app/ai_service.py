@@ -271,8 +271,9 @@ def _prompt_for_request(request: ModelRequest) -> str:
 def _requirement_prompt(request: ModelRequest) -> str:
     context = json.dumps(request.input_context, ensure_ascii=False)
     return ("请分析以下多文件需求资料，严格只输出紧凑的 requirement-analysis.v1 JSON，不要输出 Markdown、解释文字或思考过程。"
-            "归并同义内容，提取需求、模块、"
-            "测试项、验收条件，并识别歧义、遗漏、冲突、不可测试条件。每条语义结果必须引用输入中的完整"
+            "归并同义内容，优先保证 JSON 完整；最多输出 30 条 requirements、40 条 test_items、40 条 "
+            "acceptance_criteria、30 条 findings、20 条 conflicts。"
+            "识别需求、模块、测试项、验收条件、歧义、遗漏、冲突、不可测试条件。每条语义结果必须引用输入中的完整"
             "source_reference，不得凭空创造来源。原始资料：" + context)
 
 
