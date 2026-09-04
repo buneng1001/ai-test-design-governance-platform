@@ -106,7 +106,24 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         last_diagnostic: str | None = None
         for attempt_number in range(1, analysis_input.max_retries + 2):
             started_at = datetime.now(UTC)
-            response = selected_model_service.complete(request)
+            elapsed_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
+            try:
+                response = selected_model_service.complete(request)
+            except Exception as exc:
+                # 供应商适配器的未知异常也必须转成可诊断的业务错误，避免直接返回裸 500。
+                response = None
+                last_error_code = "provider_unexpected_error"
+                last_diagnostic = f"{type(exc).__name__}: {str(exc)[:160]}"
+                attempts.append(AIAttempt(
+                    attempt=attempt_number,
+                    started_at=started_at,
+                    elapsed_ms=elapsed_ms,
+                    status="failed",
+                    error_code=last_error_code,
+                    retryable=False,
+                    diagnostic=last_diagnostic,
+                ))
+                break
             elapsed_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
             if response.error_code:
                 last_error_code = response.error_code
@@ -393,6 +410,8 @@ def _analysis_failure_message(error_code: str | None) -> str:
         return "真实模型请求超时，请检查网络或稍后重试"
     if error_code == "provider_connection_error":
         return "真实模型连接失败，请检查 VPN、代理、网络或 Base URL 后重试"
+    if error_code == "provider_unexpected_error":
+        return "真实模型服务发生未预期错误，请检查后端日志和模型配置后重试"
     if error_code in {"rate_limit", "provider_http_429"}:
         return "真实模型请求受到限流，请稍后重试或更换可用模型"
     if error_code == "provider_unavailable":
