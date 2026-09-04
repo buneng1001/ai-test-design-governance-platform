@@ -39,6 +39,14 @@ class ProjectRepository:
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                     (version, self._now()),
                 )
+            self._ensure_ai_attempt_diagnostic(connection)
+
+    @staticmethod
+    def _ensure_ai_attempt_diagnostic(connection: sqlite3.Connection) -> None:
+        """按实际表结构补齐历史迁移可能漏掉的 AI 运行诊断字段。"""
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(ai_run_attempts)")}
+        if "diagnostic" not in columns:
+            connection.execute("ALTER TABLE ai_run_attempts ADD COLUMN diagnostic TEXT")
 
     def create(self, project_input: ProjectInput) -> Project:
         now = self._now()
@@ -115,4 +123,3 @@ class ProjectRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
-

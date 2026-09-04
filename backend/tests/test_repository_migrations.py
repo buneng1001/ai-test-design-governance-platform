@@ -14,6 +14,11 @@ def test_migrate_applies_new_diagnostic_column_to_previous_schema(tmp_path) -> N
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (version, "2026-01-01T00:00:00+00:00"),
             )
+        # 模拟历史版本已错误记录最新迁移编号，但实际字段没有创建。
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (len(MIGRATIONS) - 1, "2026-01-01T00:00:00+00:00"),
+        )
 
     ProjectRepository(database_path).migrate()
 
