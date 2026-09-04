@@ -38,6 +38,7 @@ export function RequirementReviewPanel({
   const [problemOnly, setProblemOnly] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [findingDrafts, setFindingDrafts] = useState<Record<string, { summary: string; reason: string }>>({});
+  const [selectedAtomicIds, setSelectedAtomicIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const loadVersions = async () => {
@@ -101,6 +102,15 @@ export function RequirementReviewPanel({
   const conflicts = analysis?.conflicts ?? [];
   const testItems = analysis?.test_items ?? [];
   const acceptanceCriteria = analysis?.acceptance_criteria ?? [];
+  const atomicGroups = groupAtomicByModule(analysis?.atomic_requirements ?? [], analysis?.requirements ?? []);
+
+  useEffect(() => {
+    setSelectedAtomicIds(new Set(
+      (analysis?.atomic_requirements ?? [])
+        .filter((item) => item.decision === "pending_confirmation")
+        .map((item) => item.candidate_id),
+    ));
+  }, [analysis?.atomic_requirements]);
 
   return (
     <section className="panel">
@@ -172,6 +182,7 @@ export function RequirementReviewPanel({
             <span>第 {page} / {Math.ceil(requirements.length / 20)} 页</span>
             <button disabled={page >= Math.ceil(requirements.length / 20)} onClick={() => setPage(page + 1)}>下一页</button></nav>}
           <p>测试项：{testItems.length} · 验收条件：{acceptanceCriteria.length}</p>
+          <p className="field-help">验收条件是对需求可验证结果的检查标准；原子需求候选是需要人工确认、并用于后续追踪的最小需求单元。</p>
           <h3 id="requirement-conflicts">需求冲突表</h3>
           {conflicts.length === 0 && <p className="muted">未发现跨资料冲突。</p>}
           {conflicts.map((conflict) => <article key={conflict.conflict_id}>
@@ -188,16 +199,27 @@ export function RequirementReviewPanel({
               <option value="awaiting_external_confirmation">待外部确认</option></select>}
           </article>)}
           <h3 id="atomic-requirements">原子需求候选</h3>
+          <p className="field-help">这里确认的是需求是否作为后续测试设计的正式追踪对象，不是重复确认上面的验收条件。</p>
           {analysis.atomic_requirements.some((item) => item.decision === "pending_confirmation") &&
-            <button onClick={() => refresh(bulkConfirmAtomicRequirements(
-              projectId, analysis.id,
-              analysis.atomic_requirements.filter((item) => item.decision === "pending_confirmation")
-                .map((item) => item.candidate_id),
-            ))}>一键确认全部原子需求候选</button>}
-          {analysis.atomic_requirements.map((candidate) => <article key={candidate.candidate_id}>
-            <span>{candidate.statement}</span>
+            <div className="button-group">
+              <button disabled={selectedAtomicIds.size === 0} onClick={() => refresh(bulkConfirmAtomicRequirements(
+                projectId, analysis.id, [...selectedAtomicIds],
+              ))}>确认已勾选的原子需求</button>
+            </div>}
+          {atomicGroups.map(([module, candidates]) => <div className="atomic-module-group" key={module}>
+            <strong>{module}</strong>
+            {candidates.map((candidate) => <article key={candidate.candidate_id}>
+            <label className="checkbox-label"><input type="checkbox"
+              checked={selectedAtomicIds.has(candidate.candidate_id)}
+              disabled={candidate.decision !== "pending_confirmation"}
+              onChange={() => setSelectedAtomicIds((current) => {
+                const next = new Set(current);
+                if (next.has(candidate.candidate_id)) next.delete(candidate.candidate_id);
+                else next.add(candidate.candidate_id);
+                return next;
+              })} /><span>{candidate.statement}</span></label>
             <small>来源：{candidate.source_reference.filename} {candidate.source_reference.locator}</small>
-            {candidate.decision === "pending_confirmation" && <div>
+            {candidate.decision === "pending_confirmation" && <div className="button-group">
               <button onClick={() => refresh(updateAtomicRequirement(
                 projectId, analysis.id, candidate.candidate_id, { decision: "accepted" },
               ))}>接受并获得稳定需求 ID</button>
@@ -206,7 +228,8 @@ export function RequirementReviewPanel({
               ))}>拒绝</button>
             </div>}
             {candidate.stable_requirement_id && <small>稳定需求 ID：{candidate.stable_requirement_id}</small>}
-          </article>)}
+            </article>)}
+          </div>)}
           <h3 id="review-findings">需求评审发现</h3>
           {analysis.findings.map((finding) => <article key={finding.finding_id}>
             {finding.status === "pending_confirmation" ? <>
@@ -222,7 +245,7 @@ export function RequirementReviewPanel({
                 }))} /></label>
             </> : <span>{finding.summary}（{finding.finding_type}）</span>}
             <small>{finding.reason} {finding.source_reference?.locator ?? "来源待补充"}</small>
-            {finding.status === "pending_confirmation" && <div>
+            {finding.status === "pending_confirmation" && <div className="button-group">
               <button onClick={() => {
                 const draft = findingDrafts[finding.finding_id] ?? { summary: finding.summary, reason: finding.reason };
                 refresh(updateFinding(projectId, analysis.id, finding.finding_id, "pending_confirmation",
@@ -241,7 +264,7 @@ export function RequirementReviewPanel({
           {analysis.visual_inferences.map((inference) => <article key={inference.inference_id}>
             <span>视觉推断（待人工确认）：{inference.description}</span>
             <small>来源：{inference.source_reference.locator}</small>
-            {inference.decision === "pending_confirmation" && <div>
+            {inference.decision === "pending_confirmation" && <div className="button-group">
               <button onClick={() => refresh(updateVisualInference(
                 projectId, analysis.id, inference.inference_id, "accepted",
               ))}>
@@ -273,3 +296,22 @@ const groupByModule = (requirements: RequirementAnalysis["requirements"]): Array
   (groups, requirement) => ({ ...groups, [requirement.module]: [...(groups[requirement.module] ?? []), requirement] }),
   {},
 ));
+
+const groupAtomicByModule = (
+  candidates: RequirementAnalysis["atomic_requirements"],
+  requirements: RequirementAnalysis["requirements"],
+): Array<[string, RequirementAnalysis["atomic_requirements"]]> => {
+  const moduleBySource = new Map<string, string>(
+    requirements.flatMap((requirement) => requirement.source_references.map((source) => [
+      `${source.filename}|${source.locator}`, requirement.module,
+    ] as const)),
+  );
+  return Object.entries(candidates.reduce<Record<string, RequirementAnalysis["atomic_requirements"]>>(
+    (groups, candidate) => {
+      const sourceKey = `${candidate.source_reference.filename}|${candidate.source_reference.locator}`;
+      const module = moduleBySource.get(sourceKey) ?? "未分类模块";
+      return { ...groups, [module]: [...(groups[module] ?? []), candidate] };
+    },
+    {},
+  ));
+};
