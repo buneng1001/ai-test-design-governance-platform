@@ -51,7 +51,8 @@ class RequirementReviewFinding(BaseModel):
     finding_type: ReviewFindingType
     summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
-    source_reference: SourceReference
+    # 发现项可能是模型的综合判断，无法映射到单一原文时允许后续人工补充来源。
+    source_reference: SourceReference | None = None
     inference_marker: str | None = None
     status: ReviewFindingStatus = "pending_confirmation"
     created_at: datetime

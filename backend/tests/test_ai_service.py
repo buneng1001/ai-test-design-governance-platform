@@ -65,3 +65,16 @@ def test_requirement_output_normalizes_existing_string_source_references() -> No
     assert output is not None
     assert output.contract_version == "requirement-analysis.v1"
     assert output.requirements[0].source_references[0].reference_id == "ref-1"
+
+
+def test_requirement_output_allows_unmapped_optional_finding_source() -> None:
+    output, errors = validate_requirement_analysis_output({
+        "requirements": [], "test_items": [], "acceptance_criteria": [],
+        "findings": [{
+            "finding_id": "F-1", "finding_type": "ambiguity", "summary": "存在歧义",
+            "reason": "需要人工确认", "source_reference": "未提供来源",
+        }], "conflicts": [],
+    })
+    assert not errors
+    assert output is not None
+    assert output.findings[0].source_reference is None

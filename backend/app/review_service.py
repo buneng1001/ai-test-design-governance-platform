@@ -109,7 +109,7 @@ def semantic_output_to_analysis(
         if any(reference.reference_id not in references for reference in item.source_references):
             raise ValueError("模型输出包含不属于当前需求版本的来源引用")
     for finding in output.findings:
-        if finding.source_reference.reference_id not in references:
+        if finding.source_reference and finding.source_reference.reference_id not in references:
             raise ValueError("模型发现包含不属于当前需求版本的来源引用")
     now = datetime.now(UTC)
     atomics = []

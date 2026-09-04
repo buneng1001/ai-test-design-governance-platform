@@ -248,7 +248,12 @@ def _normalize_requirement_output(raw_output: object, input_context: tuple[dict[
         collection = normalized.get(collection_name)
         if isinstance(collection, list):
             normalized[collection_name] = [
-                _normalize_output_item(item, references) for item in collection
+                _normalize_output_item(
+                    item,
+                    references,
+                    optional_finding_source=collection_name == "findings",
+                )
+                for item in collection
             ]
     conflicts = normalized.get("conflicts")
     if isinstance(conflicts, list):
@@ -256,7 +261,11 @@ def _normalize_requirement_output(raw_output: object, input_context: tuple[dict[
     return normalized
 
 
-def _normalize_output_item(item: object, references: list[object]) -> object:
+def _normalize_output_item(
+    item: object,
+    references: list[object],
+    optional_finding_source: bool = False,
+) -> object:
     if not isinstance(item, dict):
         return item
     normalized = dict(item)
@@ -266,7 +275,8 @@ def _normalize_output_item(item: object, references: list[object]) -> object:
             if field == "source_references" and isinstance(value, list):
                 normalized[field] = [_resolve_source_reference(item, references) for item in value]
             else:
-                normalized[field] = _resolve_source_reference(value, references)
+                resolved = _resolve_source_reference(value, references)
+                normalized[field] = None if optional_finding_source and resolved is value else resolved
     return normalized
 
 
