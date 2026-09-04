@@ -12,7 +12,7 @@ const initialInput: AssetProvenanceInput = {
   name: "",
   asset_type: "requirement_material",
   provenance_kind: "original_synthetic",
-  source: "本项目原创合成",
+  source: "",
   usage_permission: "project_owned",
   model_permission: "allowed",
   requirement_version: "V1",
@@ -30,7 +30,7 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
   const [assets, setAssets] = useState<AssetProvenanceRecord[]>([]);
   const [input, setInput] = useState(initialInput);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [sourcePreset, setSourcePreset] = useState("本项目原创合成");
+  const [sourcePreset, setSourcePreset] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -43,8 +43,8 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (selectedFiles.length === 0 || !input.source) {
-      setError("请选择至少一个文件并填写来源或创建方式");
+    if (selectedFiles.length === 0) {
+      setError("请选择至少一个文件");
       return;
     }
     try {
@@ -53,7 +53,7 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
       })));
       setAssets([...assets, ...created]);
       setInput(initialInput);
-      setSourcePreset("本项目原创合成");
+      setSourcePreset("");
       setSelectedFiles([]);
       onAssetRegistered?.();
       setError("");
@@ -88,14 +88,14 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
           <option value="public_authorized">公开授权</option>
           <option value="prohibited">禁止使用</option>
         </select></label>
-        <label>来源或创建方式<span className="field-help">常用选项包括原创合成、公开授权、用户提供等；没有合适选项时选择“其他”并填写。</span>
+        <label>来源或创建方式（可选）<span className="field-help">可选择常用来源；不填写时资产会标记为来源不明，暂不能进入需求资料包或模型上下文。</span>
           <select value={sourcePreset} onChange={(event) => {
             const value = event.target.value;
             setSourcePreset(value);
             if (value !== "其他") setInput({ ...input, source: value });
             else setInput({ ...input, source: "" });
           }}>
-            <option>本项目原创合成</option><option>测试工程师创作</option><option>公开授权资料</option>
+            <option value="">不填写</option><option>本项目原创合成</option><option>测试工程师创作</option><option>公开授权资料</option>
             <option>用户提供</option><option>其他</option>
           </select>
           {sourcePreset === "其他" && <input aria-label="其他来源或创建方式" placeholder="请填写来源或创建方式"
