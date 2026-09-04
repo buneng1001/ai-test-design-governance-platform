@@ -391,6 +391,8 @@ def _analysis_failure_message(error_code: str | None) -> str:
         return "真实模型已响应，但返回内容不是可解析的 JSON；请确认模型支持 JSON 输出，或切换模型后重试"
     if error_code in {"timeout", "provider_timeout", "provider_http_408"}:
         return "真实模型请求超时，请检查网络或稍后重试"
+    if error_code == "provider_connection_error":
+        return "真实模型连接失败，请检查 VPN、代理、网络或 Base URL 后重试"
     if error_code in {"rate_limit", "provider_http_429"}:
         return "真实模型请求受到限流，请稍后重试或更换可用模型"
     if error_code == "provider_unavailable":

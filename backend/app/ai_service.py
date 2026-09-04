@@ -149,6 +149,10 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         if isinstance(error.reason, TimeoutError):
             return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error.reason).__name__)
         return ModelResponse(error_code="provider_response_invalid", diagnostic=type(error).__name__)
+    except OSError as error:
+        # VPN、代理或网络连接重置可能抛出 OSError，统一转换为可诊断的供应商连接错误。
+        return ModelResponse(error_code="provider_connection_error", retryable=True,
+                             diagnostic=type(error).__name__)
     except (ValueError, KeyError, IndexError, TypeError) as error:
         return ModelResponse(error_code="provider_json_invalid", diagnostic=str(error)[:160])
 

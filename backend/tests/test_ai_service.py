@@ -41,6 +41,20 @@ def test_timeout_is_retryable_and_not_reported_as_json_error(monkeypatch) -> Non
     assert response.retryable is True
 
 
+def test_connection_error_is_reported_as_provider_connection_error(monkeypatch) -> None:
+    def connection_error(*_args, **_kwargs):
+        raise ConnectionResetError("connection reset")
+
+    monkeypatch.setattr("app.ai_service.urlopen", connection_error)
+    response = OpenAICompatibleModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="test", model="m"), input_asset_versions=(),
+        scenario="normal", input_context=(), base_url="https://example.com", api_key="key",
+    ))
+    assert response.error_code == "provider_connection_error"
+    assert response.retryable is True
+
+
 def test_provider_thinking_parameters_are_disabled_for_structured_analysis() -> None:
     assert _provider_request_parameters("deepseek", "deepseek-v4-flash") == {
         "thinking": {"type": "disabled"},
