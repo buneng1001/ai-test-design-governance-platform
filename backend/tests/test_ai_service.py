@@ -2,7 +2,8 @@ import json
 
 from app.ai_service import (
     AIModelConfig, ModelRequest, OpenAICompatibleModelService, _extract_structured_content, _finish_reason,
-    _provider_request_parameters, validate_requirement_analysis_output,
+    _provider_request_parameters, _requirement_input_statistics, _requirement_prompt,
+    validate_requirement_analysis_output,
 )
 
 
@@ -92,3 +93,23 @@ def test_requirement_output_allows_unmapped_optional_finding_source() -> None:
     assert not errors
     assert output is not None
     assert output.findings[0].source_reference is None
+
+
+def test_requirement_prompt_reports_input_statistics_without_small_fixed_limits() -> None:
+    context = tuple({
+        "text": f"FR-{index:03d}：系统应支持第 {index} 项能力。",
+        "source_reference": {
+            "reference_id": f"ref-{index}", "asset_id": index, "filename": "SRS-rc.2-v2.md",
+            "locator": f"line {index}",
+        },
+    } for index in range(1, 49))
+    request = ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="test", model="m"), input_asset_versions=(),
+        scenario="normal", input_context=context, base_url="", api_key="",
+    )
+
+    prompt = _requirement_prompt(request)
+    assert "来源片段 48 个" in prompt
+    assert "需求编号 48 个" in prompt
+    assert "最多输出 12 条" not in prompt

@@ -34,7 +34,8 @@ class ModelResponse:
 
 MAX_MOCK_REQUIREMENTS = 100
 MODEL_REQUEST_TIMEOUT_SECONDS = 120
-REAL_ANALYSIS_MAX_TOKENS = 4000
+# 需求分析需覆盖中等规模文档，给结构化 JSON 留出完整输出空间。
+REAL_ANALYSIS_MAX_TOKENS = 8000
 
 
 class ModelService(Protocol):
@@ -360,10 +361,14 @@ def _prompt_for_request(request: ModelRequest) -> str:
 
 
 def _requirement_prompt(request: ModelRequest) -> str:
+    statistics = _requirement_input_statistics(request.input_context)
     context = json.dumps(request.input_context, ensure_ascii=False)
-    return ("请分析以下多文件需求资料，严格只输出紧凑的 requirement-analysis.v1 JSON，不要输出 Markdown、解释文字或思考过程。"
-            "归并同义内容，优先保证 JSON 完整；最多输出 12 条 requirements、16 条 test_items、16 条 "
-            "acceptance_criteria、12 条 findings、8 条 conflicts。每条只保留一个最相关的 source_reference，"
+    return (f"输入资料统计：{statistics}。\n"
+            "请分析以下多文件需求资料，严格只输出紧凑的 requirement-analysis.v1 JSON，不要输出 Markdown、解释文字或思考过程。"
+            "归并同义内容，优先完整覆盖统计出的需求编号，不要为了满足数量上限合并不同需求。"
+            "建议输出规模以输入统计为准；平台硬上限为 requirements 100 条、test_items 200 条、"
+            "acceptance_criteria 200 条、findings 200 条、conflicts 100 条。若内容超过单次输出能力，"
+            "优先保留全部 requirements 及其来源，再减少重复性的 findings 和 conflicts。每条只保留一个最相关的 source_reference，"
             "所有 name、statement、summary、reason、topic 使用简短中文。必须返回以下字段，数组可以为空："
             "requirements=[requirement_id,name,statement,requirement_type,module,source_references,analysis_note]；"
             "test_items=[test_item_id,name,module,requirement_ids,source_references]；"
@@ -373,6 +378,27 @@ def _requirement_prompt(request: ModelRequest) -> str:
             "affected_modules,affected_test_items]。单个需求资料没有实现规格时 conflicts 必须返回空数组。"
             "识别需求、模块、测试项、验收条件、歧义、遗漏、冲突、不可测试条件。每条语义结果必须引用输入中的完整"
             "source_reference，不得凭空创造来源。原始资料：" + context)
+
+
+def _requirement_input_statistics(context: tuple[dict[str, object], ...]) -> str:
+    """统计需求资料规模，给模型提供覆盖目标，不把需求数量写死在 Prompt 中。"""
+    filenames = {
+        source.get("filename")
+        for item in context
+        for source in [item.get("source_reference")]
+        if isinstance(source, dict) and isinstance(source.get("filename"), str)
+    }
+    text = "\n".join(str(item.get("text", "")) for item in context)
+    requirement_ids = sorted(set(re.findall(
+        r"\b(?:GOAL|SCOPE|FR|BR|EX|NFR|AC|NONTARGET)-\d+\b", text, flags=re.IGNORECASE
+    )))
+    headings = re.findall(r"^#{2,4}\s+(.+)$", text, flags=re.MULTILINE)
+    module_count = len({heading.strip() for heading in headings if heading.strip()})
+    return (
+        f"文件 {len(filenames)} 个，来源片段 {len(context)} 个，"
+        f"需求编号 {len(requirement_ids)} 个，章节/模块候选 {module_count} 个；"
+        f"需求编号示例：{', '.join(requirement_ids[:8]) or '未识别'}"
+    )
 
 
 def _conflict_pairs(context: tuple[dict[str, object], ...]) -> list[tuple[dict[str, object], dict[str, object]]]:
