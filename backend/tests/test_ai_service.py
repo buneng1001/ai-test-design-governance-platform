@@ -2,7 +2,7 @@ import json
 
 from app.ai_service import (
     AIModelConfig, ModelRequest, OpenAICompatibleModelService, _extract_structured_content, _finish_reason,
-    _provider_request_parameters, _requirement_input_statistics, _requirement_prompt,
+    _provider_request_parameters, _requirement_input_statistics, _requirement_prompt, analysis_max_tokens,
     validate_requirement_analysis_output,
 )
 
@@ -63,6 +63,11 @@ def test_provider_thinking_parameters_are_disabled_for_structured_analysis() -> 
     assert _provider_request_parameters("siliconflow", "deepseek-ai/DeepSeek-V3.2") == {
         "enable_thinking": False,
     }
+
+
+def test_requirement_analysis_reserves_large_output_budget() -> None:
+    assert analysis_max_tokens("deepseek", "deepseek-v4-flash") == 10000
+    assert analysis_max_tokens("siliconflow", "Qwen/Qwen2.5-72B-Instruct") == 10000
 
 
 def test_requirement_output_normalizes_existing_string_source_references() -> None:

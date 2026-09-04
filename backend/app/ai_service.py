@@ -34,8 +34,8 @@ class ModelResponse:
 
 MAX_MOCK_REQUIREMENTS = 100
 MODEL_REQUEST_TIMEOUT_SECONDS = 120
-# 需求分析需覆盖中等规模文档，给结构化 JSON 留出完整输出空间。
-REAL_ANALYSIS_MAX_TOKENS = 8000
+# 需求分析需要较大的结构化输出空间，但仍受供应商常见单次输出上限约束。
+REAL_ANALYSIS_MAX_TOKENS = 10000
 
 
 class ModelService(Protocol):
@@ -171,7 +171,7 @@ def _provider_request_parameters(provider: str, model: str) -> dict[str, object]
 
 def analysis_max_tokens(provider: str, model: str) -> int:
     if provider == "deepseek" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}:
-        return 8000
+        return 10000
     return REAL_ANALYSIS_MAX_TOKENS
 
 
@@ -366,9 +366,9 @@ def _requirement_prompt(request: ModelRequest) -> str:
     return (f"输入资料统计：{statistics}。\n"
             "请分析以下多文件需求资料，严格只输出紧凑的 requirement-analysis.v1 JSON，不要输出 Markdown、解释文字或思考过程。"
             "归并同义内容，优先完整覆盖统计出的需求编号，不要为了满足数量上限合并不同需求。"
-            "建议输出规模以输入统计为准；平台硬上限为 requirements 100 条、test_items 200 条、"
-            "acceptance_criteria 200 条、findings 200 条、conflicts 100 条。若内容超过单次输出能力，"
-            "优先保留全部 requirements 及其来源，再减少重复性的 findings 和 conflicts。每条只保留一个最相关的 source_reference，"
+            "输出规模按输入需求编号控制：requirements 最多 100 条，test_items 和 acceptance_criteria 各最多 2 倍需求数，"
+            "findings 最多 50 条，conflicts 最多 20 条。若内容超过单次输出能力，优先保留全部 requirements 及其来源，"
+            "再减少重复性的 findings 和 conflicts。每条只保留一个最相关的 source_reference，"
             "所有 name、statement、summary、reason、topic 使用简短中文。必须返回以下字段，数组可以为空："
             "requirements=[requirement_id,name,statement,requirement_type,module,source_references,analysis_note]；"
             "test_items=[test_item_id,name,module,requirement_ids,source_references]；"
