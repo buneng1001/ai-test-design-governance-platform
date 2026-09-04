@@ -153,9 +153,13 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
                 detail = f"{detail}（诊断：{last_diagnostic}）"
             raise HTTPException(status_code=502 if run_status == "failed" else 422,
                                 detail=validation_errors or detail)
-        requirements, test_items, criteria, atomic_requirements, findings, conflicts = (
-            semantic_output_to_analysis(version, output)
-        )
+        try:
+            requirements, test_items, criteria, atomic_requirements, findings, conflicts = (
+                semantic_output_to_analysis(version, output)
+            )
+        except Exception as exc:
+            # 模型契约校验通过后仍可能在内部对象转换阶段失败，返回可定位的业务错误。
+            raise HTTPException(status_code=422, detail=f"AI 分析结果转换失败：{exc}") from exc
         _, _, visual_inferences = build_analysis_candidates(version)
         from app.ai_schemas import AIRun
 
