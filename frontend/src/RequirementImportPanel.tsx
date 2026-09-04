@@ -13,10 +13,15 @@ import {
 
 type RequirementImportPanelProps = {
   projectId: number;
+  assetsRefreshKey?: number;
   onVersionPublished?: (versionId: number) => void;
 };
 
-export function RequirementImportPanel({ projectId, onVersionPublished }: RequirementImportPanelProps) {
+export function RequirementImportPanel({
+  projectId,
+  assetsRefreshKey = 0,
+  onVersionPublished,
+}: RequirementImportPanelProps) {
   const [assets, setAssets] = useState<Awaited<ReturnType<typeof listAssets>>>([]);
   const [selectedAssetIds, setSelectedAssetIds] = useState<number[]>([]);
   const [files, setFiles] = useState<RequirementFileInput[]>([]);
@@ -26,7 +31,7 @@ export function RequirementImportPanel({ projectId, onVersionPublished }: Requir
 
   useEffect(() => {
     void listRequirementVersions(projectId).then(setVersions).catch((reason: unknown) => setError(message(reason)));
-  }, [projectId]);
+  }, [projectId, assetsRefreshKey]);
 
   useEffect(() => {
     void listAssets(projectId).then(setAssets).catch((reason: unknown) => setError(message(reason)));

@@ -21,7 +21,12 @@ const initialInput: AssetProvenanceInput = {
   change_reason: "首次登记",
 };
 
-export function AssetProvenancePanel({ projectId }: { projectId: number }) {
+type AssetProvenancePanelProps = {
+  projectId: number;
+  onAssetRegistered?: () => void;
+};
+
+export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProvenancePanelProps) {
   const [assets, setAssets] = useState<AssetProvenanceRecord[]>([]);
   const [input, setInput] = useState(initialInput);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -46,6 +51,7 @@ export function AssetProvenancePanel({ projectId }: { projectId: number }) {
       setAssets([...assets, ...created]);
       setInput(initialInput);
       setSelectedFiles([]);
+      onAssetRegistered?.();
       setError("");
     } catch (reason) {
       setError(message(reason));

@@ -36,6 +36,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [versionRefreshKey, setVersionRefreshKey] = useState(0);
   const [newlyPublishedVersionId, setNewlyPublishedVersionId] = useState<number | null>(null);
+  const [assetsRefreshKey, setAssetsRefreshKey] = useState(0);
 
   useEffect(() => {
     const loadInitialView = async () => {
@@ -103,10 +104,13 @@ export function App() {
           {error && <p role="alert" className="error">{error}</p>}
           {saveStatus && <p role="status" className="success">{saveStatus}</p>}
         </section>
-        <AssetProvenancePanel projectId={activeProject.id} />
+        <AssetProvenancePanel projectId={activeProject.id} onAssetRegistered={() => {
+          setAssetsRefreshKey((current) => current + 1);
+        }} />
         <ModelConfigPanel />
         <AIRunPanel projectId={activeProject.id} />
-        <RequirementImportPanel projectId={activeProject.id} onVersionPublished={(versionId) => {
+        <RequirementImportPanel projectId={activeProject.id} assetsRefreshKey={assetsRefreshKey}
+          onVersionPublished={(versionId) => {
           setNewlyPublishedVersionId(versionId);
           setVersionRefreshKey((current) => current + 1);
         }} />
