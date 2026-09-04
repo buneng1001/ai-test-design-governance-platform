@@ -31,6 +31,7 @@ class ModelResponse:
 
 
 MAX_MOCK_REQUIREMENTS = 100
+MODEL_REQUEST_TIMEOUT_SECONDS = 120
 
 
 class ModelService(Protocol):
@@ -125,7 +126,7 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         method="POST",
     )
     try:
-        with urlopen(http_request, timeout=30) as response:
+        with urlopen(http_request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode("utf-8"))
         finish_reason = _finish_reason(payload)
         if finish_reason == "length":
@@ -138,7 +139,11 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         retryable = error.code == 429 or error.code >= 500
         return ModelResponse(error_code=f"provider_http_{error.code}", retryable=retryable,
                              diagnostic=f"http_status={error.code}")
-    except (URLError, TimeoutError) as error:
+    except TimeoutError as error:
+        return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error).__name__)
+    except URLError as error:
+        if isinstance(error.reason, TimeoutError):
+            return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error.reason).__name__)
         return ModelResponse(error_code="provider_response_invalid", diagnostic=type(error).__name__)
     except (ValueError, KeyError, IndexError, TypeError) as error:
         return ModelResponse(error_code="provider_json_invalid", diagnostic=str(error)[:160])

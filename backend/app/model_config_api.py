@@ -9,6 +9,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, status
 
+from app.ai_service import MODEL_REQUEST_TIMEOUT_SECONDS
+
 from app.model_config_schemas import (
     ConnectionTestResult,
     PROVIDER_DEFAULTS,
@@ -81,7 +83,7 @@ def register_model_config_routes(app: FastAPI, database_path: Path) -> None:
                 headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
                 method="POST",
             )
-            with urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             if not payload["choices"][0]["message"]["content"]:
                 raise ValueError("模型响应缺少 content")
@@ -98,6 +100,11 @@ def register_model_config_routes(app: FastAPI, database_path: Path) -> None:
                 message = f"模型服务返回 HTTP {error.code}"
             return ConnectionTestResult(
                 success=False, message=message,
+                provider=config.provider, model=config.model,
+            )
+        except TimeoutError:
+            return ConnectionTestResult(
+                success=False, message="模型连接超时，请检查网络或模型负载后重试",
                 provider=config.provider, model=config.model,
             )
         except URLError:

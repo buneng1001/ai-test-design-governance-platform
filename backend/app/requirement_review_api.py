@@ -383,7 +383,7 @@ def _analysis_failure_message(error_code: str | None) -> str:
         return "真实模型输出被截断，请减少需求资料、切换输出能力更强的模型后重试"
     if error_code in {"provider_response_invalid", "provider_json_invalid"}:
         return "真实模型已响应，但返回内容不是可解析的 JSON；请确认模型支持 JSON 输出，或切换模型后重试"
-    if error_code in {"timeout", "provider_http_408"}:
+    if error_code in {"timeout", "provider_timeout", "provider_http_408"}:
         return "真实模型请求超时，请检查网络或稍后重试"
     if error_code in {"rate_limit", "provider_http_429"}:
         return "真实模型请求受到限流，请稍后重试或更换可用模型"

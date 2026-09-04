@@ -99,7 +99,7 @@ def test_connection_test_performs_real_chat_completion(monkeypatch, client) -> N
     assert captured["body"]["messages"][-1]["content"] == "请返回连接测试 JSON。"
     assert captured["body"]["response_format"] == {"type": "json_object"}
     assert captured["authorization"] == "Bearer secret"
-    assert captured["timeout"] == 30
+    assert captured["timeout"] == 120
 
 
 def test_asset_record_includes_computed_file_size(client) -> None:
