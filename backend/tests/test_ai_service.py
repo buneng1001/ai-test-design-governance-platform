@@ -1,6 +1,8 @@
 import json
 
-from app.ai_service import AIModelConfig, ModelRequest, OpenAICompatibleModelService, _extract_structured_content, _finish_reason
+from app.ai_service import (
+    AIModelConfig, ModelRequest, OpenAICompatibleModelService, _extract_structured_content, _finish_reason,
+)
 
 
 def test_extract_structured_content_accepts_common_provider_response_formats() -> None:

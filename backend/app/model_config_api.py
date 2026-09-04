@@ -79,6 +79,9 @@ def register_model_config_routes(app: FastAPI, database_path: Path) -> None:
                     ],
                     "temperature": 0,
                     "response_format": {"type": "json_object"},
+                    **({"enable_thinking": False} if config.provider == "siliconflow" and any(
+                        marker in config.model for marker in ("Qwen3", "DeepSeek-V3.2", "DeepSeek-V3.1")
+                    ) else {}),
                 }).encode("utf-8"),
                 headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
                 method="POST",
