@@ -34,6 +34,8 @@ export function App() {
   const [error, setError] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
   const [loading, setLoading] = useState(true);
+  const [versionRefreshKey, setVersionRefreshKey] = useState(0);
+  const [newlyPublishedVersionId, setNewlyPublishedVersionId] = useState<number | null>(null);
 
   useEffect(() => {
     const loadInitialView = async () => {
@@ -104,9 +106,13 @@ export function App() {
         <AssetProvenancePanel projectId={activeProject.id} />
         <ModelConfigPanel />
         <AIRunPanel projectId={activeProject.id} />
-        <RequirementImportPanel projectId={activeProject.id} />
-        <p className="muted">发布需求版本后，可在下方输入版本编号进入需求确认。</p>
-        <RequirementReviewPanel projectId={activeProject.id} />
+        <RequirementImportPanel projectId={activeProject.id} onVersionPublished={(versionId) => {
+          setNewlyPublishedVersionId(versionId);
+          setVersionRefreshKey((current) => current + 1);
+        }} />
+        <p className="muted">发布需求版本后，可在下方选择 V1、V2 等版本进入需求确认。</p>
+        <RequirementReviewPanel projectId={activeProject.id} versionRefreshKey={versionRefreshKey}
+          newlyPublishedVersionId={newlyPublishedVersionId} />
         <TestDesignPanel projectId={activeProject.id} />
         <TemplateMappingPanel projectId={activeProject.id} />
         <CaseGenerationPanel projectId={activeProject.id} />

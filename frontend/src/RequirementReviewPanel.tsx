@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   confirmRequirementReview,
@@ -11,10 +11,23 @@ import {
   decideRequirementConflict,
   updateRequirementSelection,
 } from "./api";
+import type { RequirementVersion } from "./api_types";
 
-export function RequirementReviewPanel({ projectId }: { projectId: number }) {
+type RequirementReviewPanelProps = {
+  projectId: number;
+  versionRefreshKey?: number;
+  newlyPublishedVersionId?: number | null;
+};
+
+export function RequirementReviewPanel({
+  projectId,
+  versionRefreshKey = 0,
+  newlyPublishedVersionId = null,
+}: RequirementReviewPanelProps) {
   const [analysis, setAnalysis] = useState<RequirementAnalysis | null>(null);
-  const [version, setVersion] = useState(1);
+  const [versions, setVersions] = useState<RequirementVersion[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState("");
+  const [loadingVersions, setLoadingVersions] = useState(true);
   const [confirmerName, setConfirmerName] = useState("测试工程师");
   const [error, setError] = useState("");
   const [mode, setMode] = useState<"mock" | "real">("mock");
@@ -22,15 +35,44 @@ export function RequirementReviewPanel({ projectId }: { projectId: number }) {
   const [search, setSearch] = useState("");
   const [moduleFilter, setModuleFilter] = useState("");
   const [problemOnly, setProblemOnly] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
 
-  const runReview = async () => {
+  useEffect(() => {
+    const loadVersions = async () => {
+      try {
+        const result = await listRequirementVersions(projectId);
+        setVersions(result);
+        const preferredVersion = newlyPublishedVersionId !== null
+          ? result.find((item) => item.id === newlyPublishedVersionId)
+          : undefined;
+        if (preferredVersion) {
+          setSelectedVersionId(String(preferredVersion.id));
+        } else if (result.length > 0) {
+          setSelectedVersionId((current) => current && result.some((item) => String(item.id) === current)
+            ? current
+            : String(result[0].id));
+        }
+      } catch (reason) {
+        setError(message(reason));
+      } finally {
+        setLoadingVersions(false);
+      }
+    };
+    void loadVersions();
+  }, [projectId, versionRefreshKey, newlyPublishedVersionId]);
+
+  const runReview = async (forceNew = false) => {
+    if (isRunning) return;
     try {
-      const versions = await listRequirementVersions(projectId);
-      if (versions.length === 0) throw new Error("请先发布需求版本");
-      setAnalysis(await createRequirementReview(projectId, version, mode));
+      if (!selectedVersionId) throw new Error("请先发布并选择需求版本");
+      setIsRunning(true);
+      setError("");
+      setAnalysis(await createRequirementReview(projectId, Number(selectedVersionId), mode, forceNew));
       setError("");
     } catch (reason) {
       setError(message(reason));
+    } finally {
+      setIsRunning(false);
     }
   };
 
@@ -63,17 +105,40 @@ export function RequirementReviewPanel({ projectId }: { projectId: number }) {
       <h2>需求评审与确认</h2>
       {!analysis && <>
         <label>需求版本
-          <input type="number" min="1" value={version} onChange={(event) => setVersion(Number(event.target.value))} />
+          <select aria-label="需求版本" value={selectedVersionId}
+            disabled={loadingVersions || versions.length === 0}
+            onChange={(event) => setSelectedVersionId(event.target.value)}>
+            {versions.map((item) => <option key={item.id} value={item.id}>
+              V{item.version} · {item.name}
+            </option>)}
+          </select>
         </label>
         <label>分析方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
           <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
         </select></label>
-        <button onClick={() => void runReview()}>运行原子需求与需求评审</button>
+        <button disabled={loadingVersions || versions.length === 0 || isRunning} onClick={() => void runReview()}>
+          {isRunning ? "正在分析…" : "运行原子需求与需求评审"}
+        </button>
+        {isRunning && <p role="status" className="running-status">正在使用{mode === "real" ? "真实模型" : "Mock AI"}分析需求，
+          预计需要{mode === "real" ? "10–30 秒" : "1–3 秒"}，请勿重复点击。</p>}
+        {!loadingVersions && versions.length === 0 && <p className="muted">请先发布需求版本。</p>}
       </>}
       {error && <p role="alert" className="error">{error}</p>}
       {analysis && <>
         <p>状态：{analysis.status === "confirmed" ? "需求已确认" : "等待测试工程师处理"} · 已生成语义分析结果 ·
           {analysis.is_mock ? " Mock AI" : " 真实模型"}</p>
+        <div className="report-actions review-rerun-actions">
+          <label>重新分析方式<select value={mode}
+            disabled={isRunning}
+            onChange={(event) => setMode(event.target.value as "mock" | "real")}>
+            <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
+          </select></label>
+          <button disabled={isRunning} onClick={() => void runReview(true)}>
+            {isRunning ? "正在分析…" : "重新分析当前需求版本"}
+          </button>
+        </div>
+        {isRunning && <p role="status" className="running-status">正在使用{mode === "real" ? "真实模型" : "Mock AI"}分析需求，
+          预计需要{mode === "real" ? "10–30 秒" : "1–3 秒"}，请勿重复点击。</p>}
         <div className="requirement-summary">
           <h3>按模块归并的需求表</h3>
           {requirements.length === 0 && <p className="muted">模型没有返回需求候选，请检查输入或模型输出。</p>}

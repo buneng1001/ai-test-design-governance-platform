@@ -11,7 +11,12 @@ import {
 } from "./api";
 
 
-export function RequirementImportPanel({ projectId }: { projectId: number }) {
+type RequirementImportPanelProps = {
+  projectId: number;
+  onVersionPublished?: (versionId: number) => void;
+};
+
+export function RequirementImportPanel({ projectId, onVersionPublished }: RequirementImportPanelProps) {
   const [assets, setAssets] = useState<Awaited<ReturnType<typeof listAssets>>>([]);
   const [selectedAssetIds, setSelectedAssetIds] = useState<number[]>([]);
   const [files, setFiles] = useState<RequirementFileInput[]>([]);
@@ -49,6 +54,7 @@ export function RequirementImportPanel({ projectId }: { projectId: number }) {
       const version = await publishRequirementPackage(projectId, draft.id);
       setVersions([...versions, version]);
       setDraft({ ...draft, status: "published", published_version_id: version.id });
+      onVersionPublished?.(version.id);
       setError("");
     } catch (reason) {
       setError(message(reason));
