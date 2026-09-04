@@ -12,7 +12,7 @@ const initialInput: AssetProvenanceInput = {
   name: "",
   asset_type: "requirement_material",
   provenance_kind: "original_synthetic",
-  source: "",
+  source: "本项目原创合成",
   usage_permission: "project_owned",
   model_permission: "allowed",
   requirement_version: "V1",
@@ -30,18 +30,21 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
   const [assets, setAssets] = useState<AssetProvenanceRecord[]>([]);
   const [input, setInput] = useState(initialInput);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [sourcePreset, setSourcePreset] = useState("本项目原创合成");
   const [error, setError] = useState("");
 
   useEffect(() => {
     void listAssets(projectId).then(setAssets).catch((reason: unknown) => setError(message(reason)));
   }, [projectId]);
 
-  const selectFiles = (files: FileList | null) => setSelectedFiles(Array.from(files ?? []));
+  const selectFiles = (files: FileList | null) => setSelectedFiles((current) => [
+    ...current, ...Array.from(files ?? []),
+  ]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (selectedFiles.length === 0 || !input.source || !input.purpose) {
-      setError("请选择至少一个文件并填写来源、用途");
+    if (selectedFiles.length === 0 || !input.source) {
+      setError("请选择至少一个文件并填写来源或创建方式");
       return;
     }
     try {
@@ -50,6 +53,7 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
       })));
       setAssets([...assets, ...created]);
       setInput(initialInput);
+      setSourcePreset("本项目原创合成");
       setSelectedFiles([]);
       onAssetRegistered?.();
       setError("");
@@ -84,9 +88,19 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
           <option value="public_authorized">公开授权</option>
           <option value="prohibited">禁止使用</option>
         </select></label>
-        <label>来源或创建方式<input value={input.source} onChange={(event) => setInput({
-          ...input, source: event.target.value,
-        })} /></label>
+        <label>来源或创建方式<span className="field-help">常用选项包括原创合成、公开授权、用户提供等；没有合适选项时选择“其他”并填写。</span>
+          <select value={sourcePreset} onChange={(event) => {
+            const value = event.target.value;
+            setSourcePreset(value);
+            if (value !== "其他") setInput({ ...input, source: value });
+            else setInput({ ...input, source: "" });
+          }}>
+            <option>本项目原创合成</option><option>测试工程师创作</option><option>公开授权资料</option>
+            <option>用户提供</option><option>其他</option>
+          </select>
+          {sourcePreset === "其他" && <input aria-label="其他来源或创建方式" placeholder="请填写来源或创建方式"
+            value={input.source} onChange={(event) => setInput({ ...input, source: event.target.value })} />}
+        </label>
         <label>使用权限<select value={input.usage_permission} onChange={(event) => setInput({
           ...input,
           usage_permission: event.target.value as AssetProvenanceInput["usage_permission"],
@@ -107,7 +121,7 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
         <label>需求版本<input value={input.requirement_version} onChange={(event) => setInput({
           ...input, requirement_version: event.target.value,
         })} /></label>
-        <label>用途<input value={input.purpose} onChange={(event) => setInput({
+        <label>用途（可选）<input value={input.purpose} onChange={(event) => setInput({
           ...input, purpose: event.target.value,
         })} /></label>
         <button type="submit">登记资产来源</button>
@@ -119,7 +133,7 @@ export function AssetProvenancePanel({ projectId, onAssetRegistered }: AssetProv
           <span>{boundaryLabel(asset.boundary)} · 修订 {asset.revision}</span>
           <span>大小：{asset.size_bytes} 字节</span>
           <span>{asset.reason}</span>
-          <span>SHA-256：{asset.sha256}</span>
+          <span>内容指纹：{shortHash(asset.sha256)}</span>
         </article>)}
       </div>
     </section>
@@ -134,6 +148,8 @@ const boundaryLabel = (boundary: AssetProvenanceRecord["boundary"]): string => (
 })[boundary];
 
 const message = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";
+
+const shortHash = (hash: string): string => hash.length > 16 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash;
 
 const toBase64 = async (file: File): Promise<string> => {
   const bytes = new Uint8Array(await file.arrayBuffer());

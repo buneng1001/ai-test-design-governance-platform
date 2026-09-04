@@ -19,7 +19,7 @@ export interface AssetProvenanceInput {
   usage_permission: "project_owned" | "public_license" | "prohibited" | "unknown";
   model_permission: "allowed" | "denied" | "unknown";
   requirement_version: string;
-  purpose: string;
+  purpose?: string;
   content_base64: string;
   change_reason: string;
 }

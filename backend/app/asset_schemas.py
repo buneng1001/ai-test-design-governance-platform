@@ -31,7 +31,7 @@ class AssetProvenanceInput(BaseModel):
     usage_permission: UsagePermission
     model_permission: ModelPermission
     requirement_version: NonEmptyText
-    purpose: NonEmptyText
+    purpose: Annotated[str, Field(max_length=500)] = ""
     content_base64: str
     change_reason: NonEmptyText
 
