@@ -16,7 +16,7 @@ function formatErrorDetail(detail: unknown): string {
   if (typeof detail === "string") return detail;
   if (!Array.isArray(detail)) return "请求未完成，请检查填写内容";
   if (detail.every((item) => typeof item === "string")) {
-    return "AI 分析结果格式不符合要求（不是项目字段错误），请确认需求资料已解析成功后重试；若仍失败，请切换分析方式";
+    return `AI 输出字段校验失败：${detail.slice(0, 3).join("；")}`;
   }
   return detail.map((error: ValidationError) => {
     const field = String(error.loc?.at(-1) ?? "项目字段");

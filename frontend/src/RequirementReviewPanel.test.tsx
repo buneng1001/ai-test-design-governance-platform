@@ -67,7 +67,7 @@ test("模型输出校验失败时不应误提示项目字段填写不正确", as
   await user.click(await screen.findByRole("button", { name: "运行原子需求与需求评审" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "AI 分析结果格式不符合要求（不是项目字段错误），请确认需求资料已解析成功后重试；若仍失败，请切换分析方式",
+    "AI 输出字段校验失败：模型输出缺少必填字段",
   );
   expect(screen.queryByText("项目字段填写不正确")).not.toBeInTheDocument();
 });

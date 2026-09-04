@@ -6,6 +6,8 @@ from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from typing import Protocol
 
+from pydantic import ValidationError
+
 from app.ai_schemas import AIModelConfig, AIOutputEnvelope, AITaskType, MockScenario
 from app.review_schemas import StructuredAnalysisOutput
 
@@ -223,8 +225,11 @@ def validate_output(raw_output: object) -> tuple[dict | None, list[str]]:
 def validate_requirement_analysis_output(raw_output: object) -> tuple[StructuredAnalysisOutput | None, list[str]]:
     try:
         return StructuredAnalysisOutput.model_validate(raw_output), []
-    except Exception as error:
-        return None, [str(error)]
+    except ValidationError as error:
+        return None, [
+            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+            for item in error.errors()[:10]
+        ]
 
 
 def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
@@ -292,7 +297,13 @@ def _requirement_prompt(request: ModelRequest) -> str:
     return ("请分析以下多文件需求资料，严格只输出紧凑的 requirement-analysis.v1 JSON，不要输出 Markdown、解释文字或思考过程。"
             "归并同义内容，优先保证 JSON 完整；最多输出 12 条 requirements、16 条 test_items、16 条 "
             "acceptance_criteria、12 条 findings、8 条 conflicts。每条只保留一个最相关的 source_reference，"
-            "所有 name、statement、summary、reason、topic 使用简短中文。"
+            "所有 name、statement、summary、reason、topic 使用简短中文。必须返回以下字段，数组可以为空："
+            "requirements=[requirement_id,name,statement,requirement_type,module,source_references,analysis_note]；"
+            "test_items=[test_item_id,name,module,requirement_ids,source_references]；"
+            "acceptance_criteria=[criterion_id,statement,requirement_id,source_references]；"
+            "findings=[finding_id,finding_type,summary,reason,source_reference]；"
+            "conflicts=[conflict_id,topic,srs_text,srs_source,implementation_text,implementation_source,"
+            "affected_modules,affected_test_items]。单个需求资料没有实现规格时 conflicts 必须返回空数组。"
             "识别需求、模块、测试项、验收条件、歧义、遗漏、冲突、不可测试条件。每条语义结果必须引用输入中的完整"
             "source_reference，不得凭空创造来源。原始资料：" + context)
 
