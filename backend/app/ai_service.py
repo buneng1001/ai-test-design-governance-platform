@@ -141,7 +141,7 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
     except (URLError, TimeoutError) as error:
         return ModelResponse(error_code="provider_response_invalid", diagnostic=type(error).__name__)
     except (ValueError, KeyError, IndexError, TypeError) as error:
-        return ModelResponse(error_code="provider_json_invalid", diagnostic=type(error).__name__)
+        return ModelResponse(error_code="provider_json_invalid", diagnostic=str(error)[:160])
 
 
 def _finish_reason(payload: object) -> str | None:
@@ -171,6 +171,9 @@ def _extract_structured_content(payload: object) -> object:
         content = "".join(
             part.get("text", "") for part in content if isinstance(part, dict) and isinstance(part.get("text"), str)
         )
+    if not content and isinstance(message.get("reasoning_content"), str):
+        # 部分思考模型会把最终结构化结果放在 reasoning_content。
+        content = message["reasoning_content"]
     if not isinstance(content, str):
         raise ValueError("模型响应缺少可解析 content")
     text = content.strip()

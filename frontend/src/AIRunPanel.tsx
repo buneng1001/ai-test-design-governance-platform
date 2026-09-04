@@ -28,6 +28,9 @@ export function AIRunPanel({ projectId }: AIRunPanelProps) {
               <span>{run.is_mock ? "Mock AI 运行" : "真实模型运行"}</span>
               <span>状态：{run.status} / 校验：{run.validation_status}</span>
               <span>尝试次数：{run.attempts.length} · Prompt 版本：{run.prompt_version}</span>
+              {run.attempts.some((attempt) => attempt.diagnostic) && (
+                <span>诊断：{run.attempts.find((attempt) => attempt.diagnostic)?.diagnostic}</span>
+              )}
             </article>
           ))}
         </div>

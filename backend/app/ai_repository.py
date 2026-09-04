@@ -99,10 +99,10 @@ class AIRunRepository:
     @staticmethod
     def _insert_attempt(connection: sqlite3.Connection, run_id: int, attempt: AIAttempt) -> None:
         connection.execute(
-            "INSERT INTO ai_run_attempts(run_id, attempt, started_at, elapsed_ms, status, error_code, retryable) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO ai_run_attempts(run_id, attempt, started_at, elapsed_ms, status, error_code, retryable, diagnostic) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (run_id, attempt.attempt, attempt.started_at.isoformat(), attempt.elapsed_ms, attempt.status,
-             attempt.error_code, attempt.retryable),
+             attempt.error_code, attempt.retryable, attempt.diagnostic),
         )
 
     @staticmethod

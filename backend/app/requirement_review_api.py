@@ -101,12 +101,14 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         last_error_code: str | None = None
         run_status = "failed"
         validation_status = "not_run"
+        last_diagnostic: str | None = None
         for attempt_number in range(1, analysis_input.max_retries + 2):
             started_at = datetime.now(UTC)
             response = selected_model_service.complete(request)
             elapsed_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
             if response.error_code:
                 last_error_code = response.error_code
+                last_diagnostic = response.diagnostic
                 attempts.append(AIAttempt(
                     attempt=attempt_number,
                     started_at=started_at,
@@ -144,8 +146,11 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             ))
             break
         if output is None:
+            detail = _analysis_failure_message(last_error_code)
+            if last_diagnostic:
+                detail = f"{detail}（诊断：{last_diagnostic}）"
             raise HTTPException(status_code=502 if run_status == "failed" else 422,
-                                detail=validation_errors or _analysis_failure_message(last_error_code))
+                                detail=validation_errors or detail)
         requirements, test_items, criteria, atomic_requirements, findings, conflicts = (
             semantic_output_to_analysis(version, output)
         )

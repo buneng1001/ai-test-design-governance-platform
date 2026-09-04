@@ -13,6 +13,9 @@ def test_extract_structured_content_accepts_common_provider_response_formats() -
     assert _extract_structured_content({
         "choices": [{"message": {"content": f"<think>分析需求</think>\n{json.dumps(expected)}"}}],
     }) == expected
+    assert _extract_structured_content({
+        "choices": [{"message": {"content": None, "reasoning_content": json.dumps(expected)}}],
+    }) == expected
 
 
 def test_finish_reason_identifies_truncated_provider_output() -> None:

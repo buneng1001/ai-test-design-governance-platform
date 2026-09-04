@@ -10,6 +10,6 @@ export interface AIRun {
   status: "succeeded" | "validation_failed" | "failed";
   validation_status: "passed" | "failed" | "not_run";
   is_mock: boolean;
-  attempts: Array<{ attempt: number; status: string; error_code: string | null }>;
+  attempts: Array<{ attempt: number; status: string; error_code: string | null; diagnostic?: string | null }>;
   disposition: { decision: string; reason: string } | null;
 }
