@@ -118,3 +118,25 @@ def test_requirement_prompt_reports_input_statistics_without_small_fixed_limits(
     assert "来源片段 48 个" in prompt
     assert "需求编号 48 个" in prompt
     assert "最多输出 12 条" not in prompt
+    assert "[S1] FR-001：系统应支持第 1 项能力。" in prompt
+    assert '"reference_id": "ref-1"' not in prompt
+
+
+def test_requirement_output_resolves_compact_source_aliases() -> None:
+    context = tuple({
+        "text": f"FR-{index}：需求内容。",
+        "source_reference": {
+            "reference_id": f"ref-{index}", "asset_id": 7, "filename": "SRS.md",
+            "locator": f"line {index}",
+        },
+    } for index in range(1, 3))
+    output, errors = validate_requirement_analysis_output({
+        "requirements": [{
+            "requirement_id": "REQ-1", "name": "需求", "statement": "系统应工作",
+            "requirement_type": "functional", "module": "核心", "source_references": ["S2"],
+            "analysis_note": "来源可追溯",
+        }], "test_items": [], "acceptance_criteria": [], "findings": [], "conflicts": [],
+    }, context)
+    assert not errors
+    assert output is not None
+    assert output.requirements[0].source_references[0].reference_id == "ref-2"

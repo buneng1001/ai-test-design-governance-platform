@@ -278,19 +278,26 @@ def _normalize_output_item(
         if field in normalized:
             value = normalized[field]
             if field == "source_references" and isinstance(value, list):
-                normalized[field] = [_resolve_source_reference(item, references) for item in value]
+                normalized[field] = [
+                    _resolve_source_reference(item, references, index)
+                    for index, item in enumerate(value)
+                ]
             else:
                 resolved = _resolve_source_reference(value, references)
                 normalized[field] = None if optional_finding_source and resolved is value else resolved
     return normalized
 
 
-def _resolve_source_reference(value: object, references: list[object]) -> object:
+def _resolve_source_reference(value: object, references: list[object], field_index: int | None = None) -> object:
     if isinstance(value, dict) and {"reference_id", "asset_id", "filename", "locator"}.issubset(value):
         return value
     text = str(value).strip() if isinstance(value, (str, int)) else ""
     if not text:
         return value
+    if text.startswith("S") and text[1:].isdigit():
+        reference_index = int(text[1:]) - 1
+        if 0 <= reference_index < len(references):
+            return references[reference_index]
     for reference in references:
         if not isinstance(reference, dict):
             continue
@@ -362,14 +369,25 @@ def _prompt_for_request(request: ModelRequest) -> str:
 
 def _requirement_prompt(request: ModelRequest) -> str:
     statistics = _requirement_input_statistics(request.input_context)
-    context = json.dumps(request.input_context, ensure_ascii=False)
+    source_catalog = "; ".join(
+        f"S{index}: {source.get('filename', '未知文件')} {source.get('locator', '')}"
+        for index, item in enumerate(request.input_context, start=1)
+        for source in [item.get("source_reference", {})]
+        if isinstance(source, dict)
+    )
+    context = "\n".join(
+        f"[S{index}] {str(item.get('text', '')).strip()}"
+        for index, item in enumerate(request.input_context, start=1)
+    )
     return (f"输入资料统计：{statistics}。\n"
+            f"来源目录（输出来源时只写 S 编号）：{source_catalog}\n"
             "请分析以下多文件需求资料，严格只输出紧凑的 requirement-analysis.v1 JSON，不要输出 Markdown、解释文字或思考过程。"
             "归并同义内容，优先完整覆盖统计出的需求编号，不要为了满足数量上限合并不同需求。"
             "输出规模按输入需求编号控制：requirements 最多 100 条，test_items 和 acceptance_criteria 各最多 2 倍需求数，"
             "findings 最多 50 条，conflicts 最多 20 条。若内容超过单次输出能力，优先保留全部 requirements 及其来源，"
             "再减少重复性的 findings 和 conflicts。每条只保留一个最相关的 source_reference，"
-            "所有 name、statement、summary、reason、topic 使用简短中文。必须返回以下字段，数组可以为空："
+            "所有 name、statement、summary、reason、topic 使用简短中文；source_references、source_reference、"
+            "srs_source、implementation_source 只填写来源编号（如 S3），不要复制来源对象。必须返回以下字段，数组可以为空："
             "requirements=[requirement_id,name,statement,requirement_type,module,source_references,analysis_note]；"
             "test_items=[test_item_id,name,module,requirement_ids,source_references]；"
             "acceptance_criteria=[criterion_id,statement,requirement_id,source_references]；"
