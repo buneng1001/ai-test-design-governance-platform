@@ -22,10 +22,17 @@ export const updateAtomicRequirement = (projectId: number, analysisId: number, c
   request(`/api/projects/${projectId}/requirement-reviews/${analysisId}/atomic-requirements/${candidateId}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
   });
+export const bulkConfirmAtomicRequirements = (projectId: number, analysisId: number,
+  candidateIds: string[]): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/atomic-requirements/bulk-confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidate_ids: candidateIds }),
+  });
 export const updateFinding = (projectId: number, analysisId: number, findingId: string,
-  status: string): Promise<RequirementAnalysis> =>
+  status: string, summary?: string, reason?: string): Promise<RequirementAnalysis> =>
   request(`/api/projects/${projectId}/requirement-reviews/${analysisId}/findings/${findingId}`, {
-    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, ...(summary ? { summary } : {}), ...(reason ? { reason } : {}) }),
   });
 export const updateVisualInference = (projectId: number, analysisId: number, inferenceId: string,
   decision: "accepted" | "rejected"): Promise<RequirementAnalysis> =>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   confirmRequirementReview,
+  bulkConfirmAtomicRequirements,
   createRequirementReview,
   listRequirementVersions,
   RequirementAnalysis,
@@ -36,6 +37,7 @@ export function RequirementReviewPanel({
   const [moduleFilter, setModuleFilter] = useState("");
   const [problemOnly, setProblemOnly] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [findingDrafts, setFindingDrafts] = useState<Record<string, { summary: string; reason: string }>>({});
 
   useEffect(() => {
     const loadVersions = async () => {
@@ -146,9 +148,11 @@ export function RequirementReviewPanel({
           <label>模块筛选<select value={moduleFilter} onChange={(event) => { setModuleFilter(event.target.value); setPage(1); }}>
             <option value="">全部模块</option>{modules.map((module) => <option key={module} value={module}>{module}</option>)}
           </select></label>
-          <label><input type="checkbox" checked={problemOnly} onChange={(event) => setProblemOnly(event.target.checked)} /> 仅显示有问题标记</label>
-          <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, []))}>批量取消当前选择</button>
-          <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, requirements.map((item) => item.requirement_id)))}>全选筛选结果</button>
+          <label className="checkbox-label"><input type="checkbox" checked={problemOnly} onChange={(event) => setProblemOnly(event.target.checked)} /><span>仅显示有问题标记</span></label>
+          <div className="button-group">
+            <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, []))}>批量取消当前选择</button>
+            <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, requirements.map((item) => item.requirement_id)))}>全选筛选结果</button>
+          </div>
           {groupByModule(pageItems).map(([module, moduleRequirements]) => <article key={module}>
             <strong>{module}</strong>
             <table><thead><tr><th>名称</th><th>类型</th><th>需求</th><th>来源</th></tr></thead>
@@ -184,6 +188,12 @@ export function RequirementReviewPanel({
               <option value="awaiting_external_confirmation">待外部确认</option></select>}
           </article>)}
           <h3>原子需求候选</h3>
+          {analysis.atomic_requirements.some((item) => item.decision === "pending_confirmation") &&
+            <button onClick={() => refresh(bulkConfirmAtomicRequirements(
+              projectId, analysis.id,
+              analysis.atomic_requirements.filter((item) => item.decision === "pending_confirmation")
+                .map((item) => item.candidate_id),
+            ))}>一键确认全部原子需求候选</button>}
           {analysis.atomic_requirements.map((candidate) => <article key={candidate.candidate_id}>
             <span>{candidate.statement}</span>
             <small>来源：{candidate.source_reference.filename} {candidate.source_reference.locator}</small>
@@ -199,14 +209,32 @@ export function RequirementReviewPanel({
           </article>)}
           <h3>需求评审发现</h3>
           {analysis.findings.map((finding) => <article key={finding.finding_id}>
-            <span>{finding.summary}（{finding.finding_type}）</span>
-            <small>{finding.reason} {finding.source_reference?.locator}</small>
+            {finding.status === "pending_confirmation" ? <>
+              <label>问题描述<textarea value={findingDrafts[finding.finding_id]?.summary ?? finding.summary}
+                onChange={(event) => setFindingDrafts((current) => ({ ...current,
+                  [finding.finding_id]: { summary: event.target.value,
+                    reason: current[finding.finding_id]?.reason ?? finding.reason },
+                }))} /></label>
+              <label>修改原因<textarea value={findingDrafts[finding.finding_id]?.reason ?? finding.reason}
+                onChange={(event) => setFindingDrafts((current) => ({ ...current,
+                  [finding.finding_id]: { summary: current[finding.finding_id]?.summary ?? finding.summary,
+                    reason: event.target.value },
+                }))} /></label>
+            </> : <span>{finding.summary}（{finding.finding_type}）</span>}
+            <small>{finding.reason} {finding.source_reference?.locator ?? "来源待补充"}</small>
             {finding.status === "pending_confirmation" && <div>
+              <button onClick={() => {
+                const draft = findingDrafts[finding.finding_id] ?? { summary: finding.summary, reason: finding.reason };
+                refresh(updateFinding(projectId, analysis.id, finding.finding_id, "pending_confirmation",
+                  draft.summary, draft.reason));
+              }}>保存修改</button>
               <button onClick={() => refresh(updateFinding(
                 projectId, analysis.id, finding.finding_id, "resolved",
+                findingDrafts[finding.finding_id]?.summary, findingDrafts[finding.finding_id]?.reason,
               ))}>标记已解决</button>
               <button onClick={() => refresh(updateFinding(
                 projectId, analysis.id, finding.finding_id, "rejected",
+                findingDrafts[finding.finding_id]?.summary, findingDrafts[finding.finding_id]?.reason,
               ))}>拒绝发现</button>
             </div>}
           </article>)}

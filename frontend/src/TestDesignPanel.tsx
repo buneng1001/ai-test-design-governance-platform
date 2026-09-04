@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   addTestDimension,
@@ -6,19 +6,30 @@ import {
   confirmTestDesign,
   createTestDesign,
   decideAutomation,
+  listRequirementVersions,
   TestDesign,
 } from "./api";
+import type { RequirementVersion } from "./api_types";
 
 export function TestDesignPanel({ projectId }: { projectId: number }) {
-  const [versionId, setVersionId] = useState(1);
+  const [versionId, setVersionId] = useState("");
+  const [versions, setVersions] = useState<RequirementVersion[]>([]);
   const [confirmerName, setConfirmerName] = useState("测试工程师");
   const [design, setDesign] = useState<TestDesign | null>(null);
   const [error, setError] = useState("");
   const [dimensionName, setDimensionName] = useState("");
 
+  useEffect(() => {
+    void listRequirementVersions(projectId).then((items) => {
+      setVersions(items);
+      if (items.length > 0) setVersionId(String(items[0].id));
+    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "需求版本加载失败"));
+  }, [projectId]);
+
   const create = async () => {
     try {
-      setDesign(await createTestDesign(projectId, versionId));
+      if (!versionId) throw new Error("请先选择已确认的需求版本");
+      setDesign(await createTestDesign(projectId, Number(versionId)));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "测试设计创建失败");
@@ -45,15 +56,12 @@ export function TestDesignPanel({ projectId }: { projectId: number }) {
     <section className="panel">
       <h2>测试维度、范围、风险与自动化</h2>
       {!design && <>
-        <label>已确认需求版本
-          <input
-            type="number"
-            min="1"
-            value={versionId}
-            onChange={(event) => setVersionId(Number(event.target.value))}
-          />
+        <label>已确认需求版本（选择 V1、V2；系统内部使用对应 ID）
+          <select value={versionId} onChange={(event) => setVersionId(event.target.value)} disabled={versions.length === 0}>
+            {versions.map((version) => <option key={version.id} value={version.id}>V{version.version} · {version.name}</option>)}
+          </select>
         </label>
-        <button onClick={() => void create()}>生成测试设计候选</button>
+        <button disabled={!versionId} onClick={() => void create()}>生成测试设计候选</button>
       </>}
       {error && <p role="alert" className="error">{error}</p>}
       {design && <>

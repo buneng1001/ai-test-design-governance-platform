@@ -15,6 +15,9 @@ const analysis = {
 test("测试工程师可以确认 V1→V2 变更并确认回归选择", async () => {
   const user = userEvent.setup();
   const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify([
+      { id: 1, version: 1, name: "V1 需求" }, { id: 2, version: 2, name: "V2 需求" },
+    ]), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 201 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ ...analysis, status: "confirmed" }), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ id: 8, analysis_id: 4, status: "pending_confirmation",
@@ -25,12 +28,12 @@ test("测试工程师可以确认 V1→V2 变更并确认回归选择", async ()
       { status: 200 }));
 
   render(<ChangeImpactPanel projectId={1} />);
-  await user.type(screen.getByLabelText("V1 版本 ID"), "1");
-  await user.type(screen.getByLabelText("V2 版本 ID"), "2");
+  await user.selectOptions(await screen.findByLabelText("V1 版本 ID"), "1");
+  await user.selectOptions(await screen.findByLabelText("V2 版本 ID"), "2");
   await user.click(screen.getByRole("button", { name: "分析需求变更" }));
   await user.click(await screen.findByRole("button", { name: "确认需求变更" }));
   await user.click(await screen.findByRole("button", { name: "生成回归候选" }));
   await user.click(await screen.findByRole("button", { name: "确认回归选择" }));
   expect(await screen.findByText("回归选择已由测试工程师确认。")).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(4);
+  expect(fetchMock).toHaveBeenCalledTimes(5);
 });

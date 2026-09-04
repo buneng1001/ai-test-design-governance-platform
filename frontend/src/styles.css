@@ -35,6 +35,14 @@ input, textarea, select {
 textarea { min-height: 96px; resize: vertical; }
 button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; background: #255b43; font-weight: 700; }
 .project-form button { justify-self: start; }
+.panel > label { display: grid; gap: 8px; margin: 12px 0; font-weight: 650; }
+.checkbox-label { display: inline-flex !important; grid-template-columns: none !important; align-items: center; gap: 8px; font-weight: 400 !important; }
+.checkbox-label input, input[type="checkbox"] { width: auto; }
+.button-group { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+.inline-form label { display: grid; gap: 8px; min-width: 260px; font-weight: 650; }
+.field-help { color: #657169; font-size: 13px; font-weight: 400; }
+.inline-form button { min-height: 48px; }
 .link-button { padding-left: 0; color: #37644f; background: transparent; }
 .error { color: #a32525; }
 .success { color: #187044; }
@@ -76,6 +84,9 @@ button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; backgro
 .muted { color: #657169; }
 .case-table-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 20px 0 12px; }
 .case-table-toolbar label { display: grid; gap: 6px; min-width: 180px; }
+.case-generation-options { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+.case-generation-options > label { display: grid; gap: 8px; min-width: 260px; font-weight: 650; }
+.case-generation-options .checkbox-label { min-width: auto; }
 .case-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
 .case-table th, .case-table td { padding: 10px; border-bottom: 1px solid #d8dfd9; text-align: left; vertical-align: top; }
 .case-table td { white-space: pre-line; }

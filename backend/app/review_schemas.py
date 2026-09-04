@@ -182,7 +182,14 @@ class FindingUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: ReviewFindingStatus
+    summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)] | None = None
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)] | None = None
+
+
+class AtomicRequirementBulkConfirmationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_ids: list[str] = Field(min_length=1)
 
 
 class VisualInferenceUpdate(BaseModel):

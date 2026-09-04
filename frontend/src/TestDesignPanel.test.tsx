@@ -7,6 +7,7 @@ import { TestDesignPanel } from "./TestDesignPanel";
 test("测试工程师可以创建并确认测试设计", async () => {
   const user = userEvent.setup();
   vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 1, version: 1, name: "V1 需求" }]), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       id: 1,
       requirement_version_id: 1,
@@ -47,7 +48,7 @@ test("测试工程师可以创建并确认测试设计", async () => {
     }), { status: 200 }));
 
   render(<TestDesignPanel projectId={1} />);
-  await user.click(screen.getByRole("button", { name: "生成测试设计候选" }));
+  await user.click(await screen.findByRole("button", { name: "生成测试设计候选" }));
   expect(await screen.findByText(/设备保存状态/)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "确认测试设计" }));
   expect(await screen.findByText("状态：设计已确认")).toBeInTheDocument();

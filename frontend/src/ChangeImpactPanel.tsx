@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   ChangeImpactAnalysis, confirmChangeImpact, confirmRegressionSelection, createChangeImpact,
   createRegressionSelection, RegressionSelection,
+  listRequirementVersions,
 } from "./api";
+import type { RequirementVersion } from "./api_types";
 
 export function ChangeImpactPanel({ projectId }: { projectId: number }) {
   const [baseVersionId, setBaseVersionId] = useState("");
@@ -11,6 +13,12 @@ export function ChangeImpactPanel({ projectId }: { projectId: number }) {
   const [analysis, setAnalysis] = useState<ChangeImpactAnalysis | null>(null);
   const [selection, setSelection] = useState<RegressionSelection | null>(null);
   const [error, setError] = useState("");
+  const [versions, setVersions] = useState<RequirementVersion[]>([]);
+
+  useEffect(() => {
+    void listRequirementVersions(projectId).then(setVersions).catch((reason: unknown) =>
+      setError(reason instanceof Error ? reason.message : "需求版本加载失败"));
+  }, [projectId]);
 
   const analyze = async () => {
     try {
@@ -38,12 +46,16 @@ export function ChangeImpactPanel({ projectId }: { projectId: number }) {
   return <section className="panel" aria-label="V1 到 V2 变更影响和回归治理">
     <h2>V1→V2 变更影响与回归治理</h2>
     <div className="inline-form">
-      <label>V1 版本 ID<input value={baseVersionId} onChange={(event) => setBaseVersionId(event.target.value)} /></label>
+      <label>V1 版本 ID<span className="field-help">页面显示 V1/V2，系统自动使用对应内部 ID</span><select aria-label="V1 版本 ID" value={baseVersionId} onChange={(event) => setBaseVersionId(event.target.value)}>
+        <option value="">请选择</option>{versions.map((version) => <option key={version.id} value={version.id}>V{version.version} · {version.name}</option>)}
+      </select></label>
       <label>
-        V2 版本 ID
-        <input value={targetVersionId} onChange={(event) => setTargetVersionId(event.target.value)} />
+        V2 版本 ID<span className="field-help">页面显示 V1/V2，系统自动使用对应内部 ID</span>
+        <select aria-label="V2 版本 ID" value={targetVersionId} onChange={(event) => setTargetVersionId(event.target.value)}>
+          <option value="">请选择</option>{versions.map((version) => <option key={version.id} value={version.id}>V{version.version} · {version.name}</option>)}
+        </select>
       </label>
-      <button onClick={() => void analyze()}>分析需求变更</button>
+      <button disabled={!baseVersionId || !targetVersionId} onClick={() => void analyze()}>分析需求变更</button>
     </div>
     {error && <p role="alert" className="error">{error}</p>}
     {analysis && <>

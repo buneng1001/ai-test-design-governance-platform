@@ -34,8 +34,9 @@ export function CoveragePanel({ projectId }: Props) {
   return <section className="panel">
     <h2>治理指标与缺口</h2>
     <p className="muted">指标只统计已确认追踪关系；选择指标可展开未覆盖项、质量问题和执行证据。</p>
+    <p className="field-help">这里的需求版本、测试设计、用例评审批次和执行批次 ID 都是前序模块生成的内部 ID，不需要重新命名。</p>
     <form className="project-form" onSubmit={loadCoverage}>
-      <label>需求版本 ID<input value={versionId} onChange={(event) => setVersionId(event.target.value)} required /></label>
+      <label>需求版本 ID<span className="field-help">沿用已发布版本的内部 ID，不填写 V1/V2</span><input aria-label="需求版本 ID" value={versionId} onChange={(event) => setVersionId(event.target.value)} required /></label>
       <label>测试设计 ID<input value={designId} onChange={(event) => setDesignId(event.target.value)} required /></label>
       <label>
         用例评审批次 ID

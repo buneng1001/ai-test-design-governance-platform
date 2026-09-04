@@ -80,6 +80,7 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
 
   return <section className="panel" aria-label="候选测试用例生成">
     <h2>生成可追踪的候选测试用例</h2>
+    <p className="field-help">测试设计编号由“测试维度、范围、风险与自动化”生成；模板映射编号由模板上传后生成。两者都是系统内部 ID，不是 V1/V2。</p>
     <label>已确认测试设计编号
       <input type="number" min="1" value={designId} onChange={(event) => setDesignId(Number(event.target.value))} />
     </label>
@@ -90,8 +91,10 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
       <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
     </select></label>
     <button onClick={() => void generate()}>生成候选测试用例</button>
-    <label><input type="checkbox" checked={strictConflicts} onChange={(event) => setStrictConflicts(event.target.checked)} /> 整批严格模式</label>
-    <label>局部生成模块（逗号分隔）<input value={modules} onChange={(event) => setModules(event.target.value)} /></label>
+    <div className="case-generation-options">
+      <label className="checkbox-label"><input type="checkbox" checked={strictConflicts} onChange={(event) => setStrictConflicts(event.target.checked)} /><span>整批严格模式</span></label>
+      <label>局部生成模块（逗号分隔）<input value={modules} onChange={(event) => setModules(event.target.value)} /></label>
+    </div>
     {error && <p role="alert" className="error">{error}</p>}
     {generation && <div>
       <p role="status">

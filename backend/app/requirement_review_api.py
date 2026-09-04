@@ -11,6 +11,7 @@ from app.requirement_repository import RequirementRepository
 from app.requirement_schemas import RequirementVersion
 from app.review_repository import RequirementReviewRepository
 from app.review_schemas import (
+    AtomicRequirementBulkConfirmationInput,
     AtomicRequirementUpdate,
     FindingUpdate,
     RequirementAnalysis,
@@ -283,6 +284,29 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         candidate.updated_at = now
         return review_repository.save(analysis, "atomic_requirement_updated")
 
+    @app.post(
+        "/api/projects/{project_id}/requirement-reviews/{analysis_id}/atomic-requirements/bulk-confirm",
+        response_model=RequirementAnalysis,
+    )
+    def bulk_confirm_atomic_requirements(
+        project_id: int, analysis_id: int, input_data: AtomicRequirementBulkConfirmationInput
+    ) -> RequirementAnalysis:
+        analysis = require_review(repository, review_repository, project_id, analysis_id)
+        if analysis.status == "confirmed":
+            raise HTTPException(status_code=409, detail="需求确认后不能修改原子需求")
+        selected_ids = set(input_data.candidate_ids)
+        candidates = {item.candidate_id: item for item in analysis.atomic_requirements}
+        if any(candidate_id not in candidates for candidate_id in selected_ids):
+            raise HTTPException(status_code=422, detail="批量确认中包含不存在的原子需求候选")
+        now = datetime.now(UTC)
+        for candidate_id in selected_ids:
+            candidate = candidates[candidate_id]
+            candidate.decision = "accepted"
+            if candidate.stable_requirement_id is None:
+                candidate.stable_requirement_id = f"REQ-{candidate.candidate_id.removeprefix('candidate-')}"
+            candidate.updated_at = now
+        return review_repository.save(analysis, "atomic_requirements_bulk_confirmed")
+
     @app.patch(
         "/api/projects/{project_id}/requirement-reviews/{analysis_id}/findings/{finding_id}",
         response_model=RequirementAnalysis,
@@ -296,6 +320,8 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             raise HTTPException(status_code=404, detail="需求评审发现不存在")
         if analysis.status == "confirmed":
             raise HTTPException(status_code=409, detail="需求确认后不能修改评审发现")
+        if update.summary is not None:
+            finding.summary = update.summary
         finding.status = update.status
         if update.reason is not None:
             finding.reason = update.reason

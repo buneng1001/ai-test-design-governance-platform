@@ -33,12 +33,13 @@ export function TaskPublicationPanel({ projectId }: Props) {
     <section className="panel">
       <h2>发布测试任务</h2>
       <p className="muted">仅能发布已完成用例确认的评审批次；目标扩展由执行适配器负责。</p>
+      <p className="field-help">评审批次 ID 和稳定用例 ID 都来自前一步生成结果；这里不新建编号，也不填写 V1/V2。</p>
       <form className="project-form" onSubmit={submit}>
         <label>
-          评审批次 ID
-          <input value={batchId} onChange={(event) => setBatchId(event.target.value)} required />
+          评审批次 ID<span className="field-help">沿用用例评审结果，不填写 V1/V2</span>
+          <input aria-label="评审批次 ID" value={batchId} onChange={(event) => setBatchId(event.target.value)} required />
         </label>
-        <label>稳定用例 ID<input value={caseId} onChange={(event) => setCaseId(event.target.value)} required /></label>
+        <label>稳定用例 ID<span className="field-help">沿用用例确认结果，不重新创建</span><input aria-label="稳定用例 ID" value={caseId} onChange={(event) => setCaseId(event.target.value)} required /></label>
         <label>执行目标
           <select value={target} onChange={(event) => setTarget(event.target.value as TestTask["execution_target"])}>
             <option value="unspecified">暂未指定</option>

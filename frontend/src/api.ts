@@ -18,7 +18,7 @@ export {
 } from "./asset_api";
 export {
   createRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview,
-  updateAtomicRequirement, updateFinding, updateVisualInference, confirmRequirementReview,
+  updateAtomicRequirement, bulkConfirmAtomicRequirements, updateFinding, updateVisualInference, confirmRequirementReview,
   updateRequirementSelection, decideRequirementConflict,
 } from "./requirement_api";
 export {
