@@ -28,14 +28,27 @@ export function RequirementImportPanel({
   const [draft, setDraft] = useState<RequirementPackage | null>(null);
   const [versions, setVersions] = useState<RequirementVersion[]>([]);
   const [error, setError] = useState("");
+  const [loadingAssets, setLoadingAssets] = useState(false);
+
+  const refreshAssets = async () => {
+    setLoadingAssets(true);
+    try {
+      setAssets(await listAssets(projectId));
+      setError("");
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setLoadingAssets(false);
+    }
+  };
 
   useEffect(() => {
     void listRequirementVersions(projectId).then(setVersions).catch((reason: unknown) => setError(message(reason)));
-  }, [projectId, assetsRefreshKey]);
+  }, [projectId]);
 
   useEffect(() => {
-    void listAssets(projectId).then(setAssets).catch((reason: unknown) => setError(message(reason)));
-  }, [projectId]);
+    void refreshAssets();
+  }, [projectId, assetsRefreshKey]);
 
   const inspect = async (event: FormEvent) => {
     event.preventDefault();
@@ -73,6 +86,9 @@ export function RequirementImportPanel({
       <form className="project-form" onSubmit={inspect}>
         <label>
           当前任务使用的文件
+          <button type="button" onClick={() => void refreshAssets()} disabled={loadingAssets}>
+            {loadingAssets ? "正在刷新…" : "刷新已登记文件"}
+          </button>
           <span className="asset-checklist">{assets
             .filter((asset) => asset.asset_type === "requirement_material" && asset.can_enter_requirement_package)
             .map((asset) => <label key={asset.id}><input type="checkbox" checked={selectedAssetIds.includes(asset.id)}
