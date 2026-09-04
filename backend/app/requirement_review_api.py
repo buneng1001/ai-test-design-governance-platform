@@ -83,7 +83,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             provider=session_config.provider if session_config else "mock",
             model=session_config.model if session_config else "deterministic-v1",
             # 真实模型先控制单次输出规模，避免小模型长时间生成大型 JSON。
-            max_tokens=6000 if analysis_input.mode == "real" else 1200,
+            max_tokens=4000 if analysis_input.mode == "real" else 1200,
         )
         request = ModelRequest(
             task_type="requirement_review",
