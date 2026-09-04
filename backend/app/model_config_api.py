@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, status
 
-from app.ai_service import MODEL_REQUEST_TIMEOUT_SECONDS
+from app.ai_service import MODEL_REQUEST_TIMEOUT_SECONDS, _provider_request_parameters
 
 from app.model_config_schemas import (
     ConnectionTestResult,
@@ -79,6 +79,7 @@ def register_model_config_routes(app: FastAPI, database_path: Path) -> None:
                     ],
                     "temperature": 0,
                     "response_format": {"type": "json_object"},
+                    **_provider_request_parameters(config.provider, config.model),
                     **({"enable_thinking": False} if config.provider == "siliconflow" and any(
                         marker in config.model for marker in ("Qwen3", "DeepSeek-V3.2", "DeepSeek-V3.1")
                     ) else {}),

@@ -2,6 +2,7 @@ import json
 
 from app.ai_service import (
     AIModelConfig, ModelRequest, OpenAICompatibleModelService, _extract_structured_content, _finish_reason,
+    _provider_request_parameters,
 )
 
 
@@ -38,3 +39,12 @@ def test_timeout_is_retryable_and_not_reported_as_json_error(monkeypatch) -> Non
     ))
     assert response.error_code == "provider_timeout"
     assert response.retryable is True
+
+
+def test_provider_thinking_parameters_are_disabled_for_structured_analysis() -> None:
+    assert _provider_request_parameters("deepseek", "deepseek-v4-flash") == {
+        "thinking": {"type": "disabled"},
+    }
+    assert _provider_request_parameters("siliconflow", "deepseek-ai/DeepSeek-V3.2") == {
+        "enable_thinking": False,
+    }

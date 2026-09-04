@@ -86,7 +86,7 @@ def test_connection_test_performs_real_chat_completion(monkeypatch, client) -> N
     response = client.post(
         "/api/ai-session-config/test",
         json={
-            "provider": "siliconflow", "model": "Qwen/Qwen2.5-72B-Instruct",
+            "provider": "siliconflow", "model": "deepseek-ai/DeepSeek-V3.2",
             "base_url": "https://api.siliconflow.cn/v1", "api_key": "secret",
         },
         headers={"X-Session-ID": "test-session"},
@@ -95,9 +95,10 @@ def test_connection_test_performs_real_chat_completion(monkeypatch, client) -> N
     assert response.json()["success"] is True
     assert captured["url"].endswith("/v1/chat/completions")
     assert captured["method"] == "POST"
-    assert captured["body"]["model"] == "Qwen/Qwen2.5-72B-Instruct"
+    assert captured["body"]["model"] == "deepseek-ai/DeepSeek-V3.2"
     assert captured["body"]["messages"][-1]["content"] == "请返回连接测试 JSON。"
     assert captured["body"]["response_format"] == {"type": "json_object"}
+    assert captured["body"]["enable_thinking"] is False
     assert captured["authorization"] == "Bearer secret"
     assert captured["timeout"] == 120
 

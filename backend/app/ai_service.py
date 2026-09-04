@@ -116,9 +116,7 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         "max_tokens": request.model_parameters.max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
-    if _should_disable_thinking(request):
-        # 结构化需求分析优先保证响应速度和 JSON 完整性。
-        body_data["enable_thinking"] = False
+    body_data.update(_provider_request_parameters(request.model_parameters.provider, request.model_parameters.model))
     if include_response_format:
         body_data["response_format"] = {"type": "json_object"}
     body = json.dumps(body_data).encode("utf-8")
@@ -152,10 +150,15 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         return ModelResponse(error_code="provider_json_invalid", diagnostic=str(error)[:160])
 
 
-def _should_disable_thinking(request: ModelRequest) -> bool:
-    return request.model_parameters.provider == "siliconflow" and any(
-        marker in request.model_parameters.model for marker in ("Qwen3", "DeepSeek-V3.2", "DeepSeek-V3.1")
-    )
+def _provider_request_parameters(provider: str, model: str) -> dict[str, object]:
+    """返回供应商专用参数，结构化需求分析默认关闭思考模式。"""
+    if provider == "siliconflow" and any(
+        marker in model for marker in ("Qwen3", "DeepSeek-V3.2", "DeepSeek-V3.1")
+    ):
+        return {"enable_thinking": False}
+    if provider == "deepseek" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}:
+        return {"thinking": {"type": "disabled"}}
+    return {}
 
 
 def _finish_reason(payload: object) -> str | None:
