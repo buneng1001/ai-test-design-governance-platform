@@ -41,6 +41,20 @@ pnpm dev
 浏览器访问 `http://127.0.0.1:5174`。SQLite 数据默认保存在 `data/app.db`；可通过后端环境变量
 `APP_DATABASE_PATH` 指定其他路径。
 
+### 本地 AI 模型密钥
+
+项目本地模型密钥文件位于项目根目录 `.env.local`，该文件已被 `.gitignore` 排除，不得提交、截图、
+写入日志或复制到前端环境变量。支持的独立变量为：
+
+- `SILICONFLOW_API_KEY`
+- `DEEPSEEK_API_KEY`
+- `KIMI_API_KEY`
+- `GLM_API_KEY`
+
+不要为这些变量添加 `VITE_` 前缀，否则 Vite 可能把它们暴露到浏览器构建中。当前 rc.2 后端仍使用页面
+会话模型配置，尚不会自动加载 `.env.local`；v0.2.0 模型接入完成后由本地后端读取，并按“临时 Key →
+已记忆本地 Key → 项目默认环境变量”的优先级解析，前端只接收 Key 来源和配置状态。
+
 ## 测试与构建
 
 ```powershell
