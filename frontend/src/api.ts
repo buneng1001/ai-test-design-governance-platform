@@ -18,7 +18,7 @@ export {
   listAssets, createAsset, deleteAsset,
 } from "./asset_api";
 export {
-  createRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview,
+  createRequirementPackage, reparseRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview,
   updateAtomicRequirement, bulkConfirmAtomicRequirements, updateFinding, updateVisualInference, confirmRequirementReview,
   updateRequirementSelection, decideRequirementConflict,
 } from "./requirement_api";

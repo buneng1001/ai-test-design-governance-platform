@@ -47,7 +47,7 @@ def import_file(client: TestClient, project_id: int, name: str, content: bytes, 
 def docx_content() -> bytes:
     document = '''<?xml version="1.0" encoding="UTF-8"?>
     <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-      <w:body><w:p><w:r><w:t>DOCX 正文需求</w:t></w:r></w:p>
+      <w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>DOCX 正文需求</w:t></w:r></w:p>
       <w:tbl><w:tr><w:tc><w:p><w:r><w:t>表格规则</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body>
     </w:document>'''.encode()
     output = BytesIO()
@@ -81,7 +81,9 @@ def test_docx_pdf_and_image_materials_keep_sources_and_image_inference_state(cli
     materials = response.json()["materials"]
     assert [item["format"] for item in materials] == ["docx", "pdf", "png"]
     assert materials[0]["fragments"][0]["source_reference"]["locator"] == "paragraph:1"
+    assert materials[0]["fragments"][0]["kind"] == "heading"
     assert materials[0]["fragments"][1]["source_reference"]["locator"] == "table:1:row:1:cell:1"
+    assert materials[0]["fragments"][1]["kind"] == "table_cell"
     assert materials[1]["fragments"][0]["text"] == "PDF requirement"
     assert materials[2]["fragments"] == []
     assert materials[2]["visual_inferences"][0]["status"] == "pending_confirmation"

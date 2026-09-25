@@ -121,6 +121,7 @@ def test_partial_failure_and_unsafe_assets_return_explicit_diagnostics(client: T
         "failed",
         "rejected",
     ]
+    assert [item["format"] for item in package["materials"]] == ["text", "json", "unsupported", "markdown"]
     assert {item["code"] for item in package["diagnostics"]} == {
         "malformed_content",
         "unsupported_format",
@@ -150,6 +151,7 @@ def test_oversized_and_unreadable_files_are_diagnosed_without_silent_completion(
         "unreadable_content",
     }
     assert response.json()["materials"][0]["content_base64"] == ""
+    assert response.json()["materials"][0]["size_bytes"] == len(oversized_content)
 
 
 def test_partially_extractable_openapi_is_preserved_with_warning(client: TestClient) -> None:
@@ -232,3 +234,48 @@ def test_empty_or_fully_failed_package_cannot_be_published(client: TestClient) -
 
     assert response.status_code == 409
     assert response.json() == {"detail": "需求资料包没有可发布的完整解析结果"}
+
+
+def test_failed_file_can_be_reparsed_without_replacing_successful_materials(client: TestClient) -> None:
+    project_id = create_project(client)
+    valid = import_file(client, project_id, "available.md", b"# Available\n\nKeep this material.")
+    broken = import_file(client, project_id, "broken.json", b'{"missing":', "application/json")
+    package = client.post(
+        f"/api/projects/{project_id}/requirement-packages",
+        json={"name": "可局部重试资料包", "files": [valid, broken]},
+    ).json()
+
+    retry = client.post(
+        f"/api/projects/{project_id}/requirement-packages/{package['id']}/reparse",
+        json={"asset_ids": [broken["asset_id"]]},
+    )
+    rebuild = client.post(
+        f"/api/projects/{project_id}/requirement-packages/{package['id']}/reparse",
+        json={"asset_ids": [valid["asset_id"], broken["asset_id"]]},
+    )
+
+    assert retry.status_code == 201
+    assert retry.json()["id"] != package["id"]
+    assert [item["parse_status"] for item in retry.json()["materials"]] == ["complete", "failed"]
+    assert rebuild.status_code == 201
+    assert [item["parse_status"] for item in rebuild.json()["materials"]] == ["complete", "failed"]
+    original = client.get(f"/api/projects/{project_id}/requirement-packages/{package['id']}")
+    assert [item["parse_status"] for item in original.json()["materials"]] == ["complete", "failed"]
+
+
+def test_reparse_rejects_file_outside_the_original_material_baseline(client: TestClient) -> None:
+    project_id = create_project(client)
+    package_file = import_file(client, project_id, "included.txt", b"Included material.")
+    outsider = import_file(client, project_id, "other.txt", b"Other material.")
+    package = client.post(
+        f"/api/projects/{project_id}/requirement-packages",
+        json={"name": "受保护资料包", "files": [package_file]},
+    ).json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/requirement-packages/{package['id']}/reparse",
+        json={"asset_ids": [outsider["asset_id"]]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "重试文件不属于当前需求资料包"

@@ -61,10 +61,12 @@ export interface RequirementMaterial {
   media_type: string;
   format: "markdown" | "text" | "json" | "yaml" | "openapi" | "docx" | "pdf" | "png" | "jpg" | "unsupported";
   sha256: string;
+  size_bytes: number;
   content_base64: string;
   parse_status: "complete" | "partial" | "failed" | "rejected";
   fragments: Array<{
     text: string;
+    kind: "content" | "heading" | "table_cell";
     source_reference: { reference_id: string; asset_id: number; filename: string; locator: string };
   }>;
   visual_inferences: Array<{

@@ -2,7 +2,12 @@ import base64
 from datetime import UTC, datetime
 
 from app.asset_repository import AssetRepository
-from app.requirement_parser import RequirementParseError, openapi_is_partial, parse_requirement
+from app.requirement_parser import (
+    RequirementParseError,
+    openapi_is_partial,
+    parse_requirement,
+    requirement_format_for_filename,
+)
 from app.requirement_schemas import (
     ParseDiagnostic,
     ParseStatus,
@@ -40,15 +45,24 @@ def build_material(
 ) -> RequirementMaterial:
     asset = asset_repository.get(project_id, file_input.asset_id)
     if asset is None:
-        return _failed_material(file_input, "asset_not_found", "资产来源记录不存在", "rejected")
+        return _failed_material(
+            file_input, "asset_not_found", "资产来源记录不存在", "rejected",
+            format_name=requirement_format_for_filename(file_input.filename),
+        )
     if not asset.can_enter_requirement_package:
-        return _failed_material(file_input, "asset_not_allowed", asset.reason, "rejected", asset.revision, asset.sha256)
+        return _failed_material(
+            file_input, "asset_not_allowed", asset.reason, "rejected", asset.revision, asset.sha256, asset.size_bytes,
+            requirement_format_for_filename(file_input.filename),
+        )
     content_base64 = file_input.content_base64 or (asset_repository.content(project_id, asset.id) or "")
     file_input = file_input.model_copy(update={"content_base64": content_base64})
     try:
         content = base64.b64decode(content_base64, validate=True)
     except ValueError:
-        return _failed_material(file_input, "unreadable_content", "文件内容不是有效的 Base64", "failed")
+        return _failed_material(
+            file_input, "unreadable_content", "文件内容不是有效的 Base64", "failed", asset.revision, asset.sha256,
+            asset.size_bytes, requirement_format_for_filename(file_input.filename),
+        )
     actual_sha256 = asset_repository.hash_content(content_base64)
     if actual_sha256 != asset.sha256:
         return _failed_material(
@@ -58,6 +72,8 @@ def build_material(
             "rejected",
             asset.revision,
             asset.sha256,
+            asset.size_bytes,
+            requirement_format_for_filename(file_input.filename),
         )
     if len(content) > MAX_REQUIREMENT_FILE_SIZE:
         return _failed_material(
@@ -67,6 +83,8 @@ def build_material(
             "rejected",
             asset.revision,
             asset.sha256,
+            asset.size_bytes,
+            requirement_format_for_filename(file_input.filename),
         )
     try:
         parsed = parse_requirement(asset.id, file_input.filename, content, asset.sha256)
@@ -78,6 +96,8 @@ def build_material(
             "failed",
             asset.revision,
             asset.sha256,
+            asset.size_bytes,
+            requirement_format_for_filename(file_input.filename),
         )
     diagnostics = parsed.diagnostics
     parse_status = parsed.parse_status
@@ -97,6 +117,7 @@ def build_material(
         media_type=file_input.media_type,
         format=parsed.format,
         sha256=asset.sha256,
+        size_bytes=asset.size_bytes,
         content_base64=file_input.content_base64,
         parse_status=parse_status,
         fragments=parsed.fragments,
@@ -112,6 +133,8 @@ def _failed_material(
     status: ParseStatus,
     asset_revision: int = 0,
     sha256: str = "",
+    size_bytes: int = 0,
+    format_name: str = "unsupported",
 ) -> RequirementMaterial:
     diagnostic = ParseDiagnostic(
         asset_id=file_input.asset_id,
@@ -124,8 +147,9 @@ def _failed_material(
         asset_revision=asset_revision,
         filename=file_input.filename,
         media_type=file_input.media_type,
-        format="unsupported",
+        format=format_name,
         sha256=sha256,
+        size_bytes=size_bytes,
         content_base64="" if status == "rejected" else file_input.content_base64,
         parse_status=status,
         fragments=[],

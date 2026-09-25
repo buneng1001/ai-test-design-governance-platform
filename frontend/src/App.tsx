@@ -97,7 +97,8 @@ export function App() {
           {error && <p role="alert" className="error">{error}</p>}
           {saveStatus && <p role="status" className="success">{saveStatus}</p>}
         </section>
-        <WorkflowShell projectId={activeProject.id} />
+        <WorkflowShell projectId={activeProject.id} testObject={activeProject.test_object}
+          softwareVersion={activeProject.software_version} />
       </main>
     );
   }

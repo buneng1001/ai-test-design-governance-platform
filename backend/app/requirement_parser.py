@@ -6,6 +6,7 @@ import zipfile
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from xml.etree import ElementTree
 
 import yaml
@@ -20,6 +21,14 @@ from app.requirement_schemas import (
 
 
 SUPPORTED_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".docx", ".pdf", ".png", ".jpg", ".jpeg"}
+
+
+def requirement_format_for_filename(filename: str) -> RequirementFormat:
+    """解析失败时仍返回文件声明格式，避免页面把损坏的已支持文件误报为不支持。"""
+    return {
+        ".md": "markdown", ".txt": "text", ".json": "json", ".yaml": "yaml", ".yml": "yaml",
+        ".docx": "docx", ".pdf": "pdf", ".png": "png", ".jpg": "jpg", ".jpeg": "jpg",
+    }.get(Path(filename).suffix.lower(), "unsupported")
 
 
 @dataclass(frozen=True)
@@ -92,7 +101,10 @@ def _parse_docx(asset_id: int, filename: str, content: bytes, sha256: str) -> Pa
     for paragraph_number, paragraph in enumerate(root.findall(".//w:body/w:p", namespace), start=1):
         text = "".join(node.text or "" for node in paragraph.findall(".//w:t", namespace)).strip()
         if text:
-            fragments.append(_fragment(asset_id, filename, text, f"paragraph:{paragraph_number}", sha256))
+            style = paragraph.find("./w:pPr/w:pStyle", namespace)
+            style_name = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "") if style is not None else ""
+            kind = "heading" if style_name.lower().startswith(("heading", "title")) or "标题" in style_name else "content"
+            fragments.append(_fragment(asset_id, filename, text, f"paragraph:{paragraph_number}", sha256, kind))
     for table_number, table in enumerate(root.findall(".//w:body/w:tbl", namespace), start=1):
         for row_number, row in enumerate(table.findall("./w:tr", namespace), start=1):
             for cell_number, cell in enumerate(row.findall("./w:tc", namespace), start=1):
@@ -103,7 +115,7 @@ def _parse_docx(asset_id: int, filename: str, content: bytes, sha256: str) -> Pa
                 ).strip()
                 if text:
                     locator = f"table:{table_number}:row:{row_number}:cell:{cell_number}"
-                    fragments.append(_fragment(asset_id, filename, text, locator, sha256))
+                    fragments.append(_fragment(asset_id, filename, text, locator, sha256, "table_cell"))
     if not fragments:
         raise RequirementParseError("empty_content", "DOCX 没有可提取的正文或表格内容")
     return ParsedRequirement("docx", fragments, [], [])
@@ -223,7 +235,8 @@ def _line_fragments(asset_id: int, filename: str, text: str, sha256: str) -> lis
         normalized = line.strip()
         if not normalized:
             continue
-        fragments.append(_fragment(asset_id, filename, normalized, f"lines:{line_number}-{line_number}", sha256))
+        kind = "heading" if re.match(r"^#{1,6}\s+", normalized) else "content"
+        fragments.append(_fragment(asset_id, filename, normalized, f"lines:{line_number}-{line_number}", sha256, kind))
     return fragments
 
 
@@ -252,10 +265,18 @@ def _structured_fragments(
     return fragments
 
 
-def _fragment(asset_id: int, filename: str, text: str, locator: str, sha256: str) -> ParsedFragment:
+def _fragment(
+    asset_id: int,
+    filename: str,
+    text: str,
+    locator: str,
+    sha256: str,
+    kind: Literal["content", "heading", "table_cell"] = "content",
+) -> ParsedFragment:
     return ParsedFragment(
         text=text,
         source_reference=_source_reference(asset_id, filename, locator, sha256),
+        kind=kind,
     )
 
 

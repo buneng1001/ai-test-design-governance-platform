@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { getProjectWorkflow, ProjectWorkflowView } from "./api";
 import { ModelConfigPanel } from "./ModelConfigPanel";
+import { RequirementImportPanel } from "./RequirementImportPanel";
 
 const pageDescriptions: Record<ProjectWorkflowView["tabs"][number]["id"], string> = {
   upload: "上传当前任务需要的需求资料，并查看文件解析状态与诊断。",
@@ -11,21 +12,32 @@ const pageDescriptions: Record<ProjectWorkflowView["tabs"][number]["id"], string
   cases: "根据已确认范围生成、评审和管理可追溯的测试用例。",
 };
 
-export function WorkflowShell({ projectId }: { projectId: number }) {
+export function WorkflowShell({ projectId, testObject, softwareVersion }: {
+  projectId: number;
+  testObject: string;
+  softwareVersion: string;
+}) {
   const [workflow, setWorkflow] = useState<ProjectWorkflowView | null>(null);
   const [activeTab, setActiveTab] = useState<ProjectWorkflowView["tabs"][number]["id"]>("upload");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    void getProjectWorkflow(projectId).then((view) => {
+  const refreshWorkflow = useCallback(async () => {
+    try {
+      const view = await getProjectWorkflow(projectId);
       if (!Array.isArray(view.tabs) || view.tabs.length !== 5) {
         throw new Error("工作流状态格式不完整，请刷新后重试");
       }
       setWorkflow(view);
       setActiveTab(view.current_step);
       setError("");
-    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "工作流状态加载失败"));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "工作流状态加载失败");
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    void refreshWorkflow();
+  }, [refreshWorkflow]);
 
   if (!workflow) return error
     ? <p role="alert" className="error">{error}</p>
@@ -71,7 +83,9 @@ export function WorkflowShell({ projectId }: { projectId: number }) {
         <p className="workflow-action">下一步操作：{workflow.next_action.target_tab === active.id
           ? workflow.next_action.label : "请按左侧步骤完成当前依赖。"}</p>
         {active.blocked_reason && <p role="status" className="error">{active.blocked_reason}</p>}
-        <p className="muted">此页签保留为主流程入口；具体阶段命令继续使用各自明确的 API，避免一个万能更新接口。</p>
+        {active.id === "upload" ? <RequirementImportPanel projectId={projectId} testObject={testObject}
+          softwareVersion={softwareVersion} onVersionPublished={() => void refreshWorkflow()} />
+          : <p className="muted">此页签保留为主流程入口；具体阶段命令继续使用各自明确的 API，避免一个万能更新接口。</p>}
       </article>
       {error && <p role="alert" className="error">{error}</p>}
     </section>
