@@ -1,7 +1,8 @@
 // API 类型兼容门面，保持旧的统一导入路径。
 export type { ProjectSettings, ProjectInput, Project } from "./api_types_project";
 export type {
-  ModelProviderId, ModelProviderOption, SessionModelConfig, SessionModelConfigStatus,
+  ConnectionTestResult, ModelDiscoveryResult, ModelOption, ModelProviderId, ModelProviderOption, ModelServiceError,
+  SessionModelConfig, SessionModelConfigStatus,
 } from "./api_types_ai";
 
 export interface AssetProvenanceInput {

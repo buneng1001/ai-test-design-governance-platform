@@ -6,6 +6,7 @@ from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIRun, AIModelConfig
 from app.ai_service import ModelRequest, MockModelService, OpenAICompatibleModelService, validate_output
 from app.model_config_api import get_session_model_config
+from app.model_config_service import provider_error_type, service_error
 from app.case_lifecycle_service import default_template
 from app.case_repository import CaseGenerationRepository
 from app.case_schemas import CaseGeneration, CaseGenerationInput
@@ -104,9 +105,14 @@ def register_case_routes(
             created_at=datetime.now(UTC), attempts=attempts,
         ))
         if run_status == "validation_failed":
-            raise HTTPException(status_code=422, detail={"code": "ai_output_invalid", "ai_run_id": run.id})
+            raise HTTPException(status_code=422, detail=service_error(
+                "model_call", model_parameters.provider, model_parameters.model, "invalid_response", "schema_invalid",
+            ).model_dump(mode="json") | {"ai_run_id": run.id})
         if run_status == "failed":
-            raise HTTPException(status_code=503, detail={"code": "ai_run_failed", "ai_run_id": run.id})
+            error_code = next((item.error_code for item in reversed(attempts) if item.error_code), None)
+            raise HTTPException(status_code=503, detail=service_error(
+                "model_call", model_parameters.provider, model_parameters.model, provider_error_type(error_code),
+            ).model_dump(mode="json") | {"ai_run_id": run.id})
         generation = CaseGeneration(
             id=0, project_id=project_id, design_id=design_id, requirement_version_id=design.requirement_version_id,
             template_mapping_id=mapping.id, ai_run_id=run.id, ai_run_status=run.status, is_mock=run.is_mock,

@@ -19,6 +19,12 @@ function formatErrorDetail(detail: unknown, fallback = "请求失败，请查看
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object" && !Array.isArray(detail)) {
     const error = detail as ValidationError;
+    if ("user_message" in error && typeof (error as { user_message?: unknown }).user_message === "string") {
+      const modelError = error as { user_message: string; suggested_action?: unknown; retryable?: unknown };
+      const retryable = modelError.retryable === true ? "（可重试）" : "";
+      const suggestion = typeof modelError.suggested_action === "string" ? "。建议：" + modelError.suggested_action : "";
+      return modelError.user_message + suggestion + retryable;
+    }
     if (typeof error.message === "string") return error.message;
     if (typeof error.msg === "string") return error.msg;
     if (error.detail !== undefined) return formatErrorDetail(error.detail);

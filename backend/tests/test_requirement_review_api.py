@@ -185,6 +185,26 @@ def test_real_analysis_requires_a_session_model_configuration(client: TestClient
     assert "未配置真实模型" in response.json()["detail"]
 
 
+def test_unexpected_real_model_error_is_redacted_from_response(monkeypatch, client: TestClient) -> None:
+    project_id, version_id = setup_version(client)
+    client.put("/api/ai-session-config", headers={"X-Session-ID": "redaction"}, json={
+        "provider": "deepseek", "model": "deepseek-chat", "base_url": "https://api.deepseek.com",
+        "api_key": "secret-key",
+    })
+
+    def raise_sensitive_error(*_args, **_kwargs):
+        raise RuntimeError("Authorization: Bearer secret-key")
+
+    monkeypatch.setattr("app.ai_service.OpenAICompatibleModelService.complete", raise_sensitive_error)
+    response = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        json={"mode": "real"}, headers={"X-Session-ID": "redaction"},
+    )
+    assert response.status_code == 502
+    assert "secret-key" not in response.text
+    assert response.json()["detail"]["detail"] == "RuntimeError"
+
+
 def test_candidate_edit_rejects_unknown_source_reference_and_supports_split(client: TestClient) -> None:
     project_id, version_id = setup_version(client)
     analysis = client.post(

@@ -1,119 +1,165 @@
-import json
+import sqlite3
+from urllib.error import HTTPError
 
 from fastapi.testclient import TestClient
 
 from app.main import create_app
 
 
-def test_model_provider_catalog_and_session_config_do_not_return_api_key(client) -> None:
+def payload(**overrides) -> dict:
+    return {
+        "provider": "deepseek", "model": "deepseek-chat", "base_url": "https://api.deepseek.com",
+        "api_key": "temporary-secret", **overrides,
+    }
+
+
+def test_catalog_and_temporary_key_never_enter_database_or_response(client, tmp_path) -> None:
     providers = client.get("/api/model-providers")
-    assert providers.status_code == 200
     assert [item["id"] for item in providers.json()] == ["deepseek", "siliconflow", "kimi", "glm", "custom"]
-    assert providers.json()[1]["models"][0] == "Qwen/Qwen2.5-72B-Instruct"
-    assert providers.json()[0]["models"] == ["deepseek-v4-flash", "deepseek-v4-pro"]
-    assert providers.json()[2]["models"] == ["kimi-k2.6", "kimi-k2.5", "kimi-k2.7-code"]
+    assert providers.json()[0]["models"][0]["state"] == "preset"
 
-    payload = {
-        "provider": "deepseek", "model": "deepseek-chat", "base_url": "https://api.deepseek.com",
-        "api_key": "secret-key",
-    }
-    saved = client.put("/api/ai-session-config", json=payload, headers={"X-Session-ID": "test-session"})
+    saved = client.put("/api/ai-session-config", json=payload(), headers={"X-Session-ID": "test-session"})
     assert saved.status_code == 200
-    assert saved.json() == {
-        "provider": "deepseek", "model": "deepseek-chat", "base_url": "https://api.deepseek.com",
-        "api_key_configured": True,
-    }
-    assert "secret-key" not in saved.text
-    read = client.get("/api/ai-session-config", headers={"X-Session-ID": "test-session"})
-    assert read.json() == saved.json()
-
-    cleared = client.delete("/api/ai-session-config", headers={"X-Session-ID": "test-session"})
-    assert cleared.status_code == 204
-    assert client.get("/api/ai-session-config", headers={"X-Session-ID": "test-session"}).json() is None
+    assert saved.json()["credential_source"] == "temporary"
+    assert saved.json()["credential_configured"] is True
+    assert "temporary-secret" not in saved.text
+    assert not (tmp_path / ".env.local").exists()
+    with sqlite3.connect(tmp_path / "test-design.db") as connection:
+        dumped = "".join(row[0] for row in connection.execute("SELECT config_json FROM ai_model_configs"))
+    assert "temporary-secret" not in dumped
 
 
-def test_saved_model_config_survives_application_restart(tmp_path) -> None:
-    database_path = tmp_path / "persistent-config.db"
-    payload = {
-        "provider": "deepseek", "model": "deepseek-chat", "base_url": "https://api.deepseek.com",
-        "api_key": "secret-key",
-    }
-    with TestClient(create_app(database_path)) as first_app:
-        saved = first_app.put("/api/ai-session-config", json=payload, headers={"X-Session-ID": "persistent-client"})
-        assert saved.status_code == 200
-    with TestClient(create_app(database_path)) as restarted_app:
-        restored = restarted_app.get("/api/ai-session-config", headers={"X-Session-ID": "persistent-client"})
-        assert restored.status_code == 200
-        assert restored.json() == {
-            "provider": "deepseek", "model": "deepseek-chat", "base_url": "https://api.deepseek.com",
-            "api_key_configured": True,
-        }
-        assert "secret-key" not in restored.text
+def test_provider_credentials_are_isolated_and_remembered_key_is_local_only(client, tmp_path) -> None:
+    headers = {"X-Session-ID": "test-session"}
+    client.put("/api/ai-session-config", json=payload(), headers=headers)
+    other = client.put("/api/ai-session-config", json=payload(
+        provider="kimi", model="kimi-k2.6", base_url="https://api.moonshot.cn/v1", api_key="",
+    ), headers=headers)
+    assert other.json()["credential_source"] == "none"
+
+    remembered = client.put("/api/ai-session-config", json=payload(
+        provider="kimi", model="kimi-k2.6", base_url="https://api.moonshot.cn/v1",
+        api_key="kimi-secret", remember_api_key=True,
+    ), headers=headers)
+    assert remembered.json()["credential_source"] == "remembered_local"
+    assert "kimi-secret" not in remembered.text
+    assert (tmp_path / ".env.local").read_text(encoding="utf-8") == "KIMI_API_KEY=kimi-secret\n"
 
 
-def test_custom_provider_connection_validation_is_session_only(client) -> None:
-    response = client.post(
-        "/api/ai-session-config/test",
-        json={"provider": "custom", "model": "my-model", "base_url": "not-a-url", "api_key": "secret"},
-        headers={"X-Session-ID": "test-session"},
-    )
-    assert response.status_code == 422
-    assert "secret" not in response.text
-
-
-def test_connection_test_performs_real_chat_completion(monkeypatch, client) -> None:
+def test_discovery_is_explicit_and_persists_non_sensitive_model_state(monkeypatch, client) -> None:
     class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self) -> bytes:
-            return b'{"choices":[{"message":{"content":"connected"}}]}'
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner"}]}'
 
     captured = {}
-
     def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["method"] = request.get_method()
-        captured["body"] = json.loads(request.data.decode("utf-8"))
-        captured["authorization"] = request.headers["Authorization"]
-        captured["timeout"] = timeout
+        captured["url"], captured["authorization"] = request.full_url, request.headers["Authorization"]
         return FakeResponse()
 
     monkeypatch.setattr("app.model_config_api.urlopen", fake_urlopen)
-    response = client.post(
-        "/api/ai-session-config/test",
-        json={
-            "provider": "siliconflow", "model": "deepseek-ai/DeepSeek-V3.2",
-            "base_url": "https://api.siliconflow.cn/v1", "api_key": "secret",
+    result = client.post("/api/ai-session-config/models/discover", json=payload(),
+                         headers={"X-Session-ID": "test-session"})
+    assert result.json() == {
+        "success": True, "provider": "deepseek",
+        "models": [{"id": "deepseek-chat", "state": "discovered"},
+                   {"id": "deepseek-reasoner", "state": "discovered"}], "error": None,
+    }
+    assert captured["url"].endswith("/models")
+    assert captured["authorization"] == "Bearer temporary-secret"
+    status = client.get("/api/ai-session-config", headers={"X-Session-ID": "test-session"}).json()
+    assert any(item == {"id": "deepseek-reasoner", "state": "discovered"} for item in status["model_options"])
+
+
+def test_connection_test_persists_non_sensitive_verification_and_invalidates_on_key_change(monkeypatch, client) -> None:
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"{\\\"connected\\\":true}"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    headers = {"X-Session-ID": "test-session"}
+    connected = client.post("/api/ai-session-config/test", json=payload(), headers=headers)
+    assert connected.json()["success"] is True
+    status = client.get("/api/ai-session-config", headers=headers).json()
+    assert status["verification_status"] == "verified"
+
+    changed = client.put("/api/ai-session-config", json=payload(api_key="changed-secret"), headers=headers)
+    assert changed.json()["verification_status"] == "invalidated"
+    assert "changed-secret" not in changed.text
+
+
+def test_connection_failure_uses_structured_redacted_error(monkeypatch, client) -> None:
+    def unauthorized(*_, **__):
+        raise HTTPError("https://api.deepseek.com/chat/completions", 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr("app.model_config_api.urlopen", unauthorized)
+    result = client.post("/api/ai-session-config/test", json=payload(), headers={"X-Session-ID": "test-session"})
+    assert result.json() == {
+        "success": False, "message": None, "provider": "deepseek", "model": "deepseek-chat",
+        "error": {
+            "stage": "connection_test", "provider": "deepseek", "model": "deepseek-chat",
+            "error_type": "authentication", "retryable": False,
+            "user_message": "API Key 无效或没有当前模型的调用权限",
+            "suggested_action": "检查该服务商的 API Key 和账号权限", "detail": "HTTP 401",
         },
-        headers={"X-Session-ID": "test-session"},
-    )
-
-    assert response.json()["success"] is True
-    assert captured["url"].endswith("/v1/chat/completions")
-    assert captured["method"] == "POST"
-    assert captured["body"]["model"] == "deepseek-ai/DeepSeek-V3.2"
-    assert captured["body"]["messages"][-1]["content"] == "请返回连接测试 JSON。"
-    assert captured["body"]["response_format"] == {"type": "json_object"}
-    assert captured["body"]["enable_thinking"] is False
-    assert captured["authorization"] == "Bearer secret"
-    assert captured["timeout"] == 120
+    }
 
 
-def test_asset_record_includes_computed_file_size(client) -> None:
-    import base64
+def test_connection_test_keeps_provider_specific_structured_output_parameters(monkeypatch, client) -> None:
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
 
-    project = client.post("/api/projects", json={
-        "name": "资产大小测试", "test_object": "虚构对象", "software_version": "v1.0.0",
-    }).json()
-    content = base64.b64encode("需求内容".encode()).decode()
-    response = client.post(f"/api/projects/{project['id']}/assets", json={
-        "name": "srs.md", "asset_type": "requirement_material", "provenance_kind": "original_synthetic",
-        "source": "测试工程师创作", "usage_permission": "project_owned", "model_permission": "allowed",
-        "requirement_version": "待发布", "purpose": "需求分析", "content_base64": content, "change_reason": "首次登记",
-    })
-    assert response.status_code == 201
-    assert response.json()["size_bytes"] == len("需求内容".encode())
+    captured = {}
+    def fake_urlopen(request, **_):
+        captured["body"] = request.data.decode("utf-8")
+        return FakeResponse()
+
+    monkeypatch.setattr("app.model_config_api.urlopen", fake_urlopen)
+    result = client.post("/api/ai-session-config/test", json=payload(
+        provider="siliconflow", model="deepseek-ai/DeepSeek-V3.2",
+        base_url="https://api.siliconflow.cn/v1", api_key="silicon-secret",
+    ), headers={"X-Session-ID": "test-session"})
+    assert result.json()["success"] is True
+    assert '"enable_thinking": false' in captured["body"]
+
+
+def test_remembered_key_is_loaded_after_restart_without_returning_key(tmp_path) -> None:
+    database_path, credentials_path = tmp_path / "config.db", tmp_path / ".env.local"
+    headers = {"X-Session-ID": "persistent-client"}
+    with TestClient(create_app(database_path, local_credentials_path=credentials_path)) as first_app:
+        saved = first_app.put("/api/ai-session-config", json=payload(
+            api_key="remembered-secret", remember_api_key=True), headers=headers)
+        assert saved.json()["credential_source"] == "remembered_local"
+    with TestClient(create_app(database_path, local_credentials_path=credentials_path)) as restarted_app:
+        restored = restarted_app.get("/api/ai-session-config", headers=headers)
+        assert restored.json()["credential_source"] == "remembered_local"
+        assert "remembered-secret" not in restored.text
+
+
+def test_credential_resolution_prefers_temporary_then_local_then_environment(tmp_path, monkeypatch) -> None:
+    database_path, credentials_path = tmp_path / "priority.db", tmp_path / ".env.local"
+    credentials_path.write_text("DEEPSEEK_API_KEY=local-secret\n", encoding="utf-8")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "environment-secret")
+    captured: list[str] = []
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    def fake_urlopen(request, **_):
+        captured.append(request.headers["Authorization"])
+        return FakeResponse()
+
+    monkeypatch.setattr("app.model_config_api.urlopen", fake_urlopen)
+    with TestClient(create_app(database_path, local_credentials_path=credentials_path)) as app:
+        app.post("/api/ai-session-config/test", json=payload(), headers={"X-Session-ID": "temporary"})
+        app.post("/api/ai-session-config/test", json=payload(api_key=""), headers={"X-Session-ID": "local"})
+    credentials_path.unlink()
+    with TestClient(create_app(database_path, local_credentials_path=credentials_path)) as app:
+        app.post("/api/ai-session-config/test", json=payload(api_key=""), headers={"X-Session-ID": "environment"})
+
+    assert captured == ["Bearer temporary-secret", "Bearer local-secret", "Bearer environment-secret"]

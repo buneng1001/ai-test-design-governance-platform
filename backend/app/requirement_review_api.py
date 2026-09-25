@@ -6,6 +6,7 @@ from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIAttempt, AIModelConfig
 from app.ai_service import ModelRequest, analysis_max_tokens, validate_requirement_analysis_output
 from app.main_route_context import AppRouteContext
+from app.model_config_service import provider_error_type, service_error
 from app.project_asset_api import require_project
 from app.requirement_repository import RequirementRepository
 from app.requirement_schemas import RequirementVersion
@@ -114,7 +115,8 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
                 # 供应商适配器的未知异常也必须转成可诊断的业务错误，避免直接返回裸 500。
                 response = None
                 last_error_code = "provider_unexpected_error"
-                last_diagnostic = f"{type(exc).__name__}: {str(exc)[:160]}"
+                # 异常字符串可能包含底层请求或授权信息；公开响应仅保留可定位的异常类型。
+                last_diagnostic = type(exc).__name__
                 attempts.append(AIAttempt(
                     attempt=attempt_number,
                     started_at=started_at,
@@ -166,11 +168,12 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             ))
             break
         if output is None:
-            detail = _analysis_failure_message(last_error_code)
-            if last_diagnostic:
-                detail = f"{detail}（诊断：{last_diagnostic}）"
-            raise HTTPException(status_code=502 if run_status == "failed" else 422,
-                                detail=validation_errors or detail)
+            error_type = "invalid_response" if run_status == "validation_failed" else provider_error_type(last_error_code)
+            detail = service_error(
+                "model_call", model_parameters.provider, model_parameters.model, error_type,
+                "schema_invalid" if run_status == "validation_failed" else last_diagnostic,
+            ).model_dump(mode="json")
+            raise HTTPException(status_code=502 if run_status == "failed" else 422, detail=detail)
         try:
             requirements, test_items, criteria, atomic_requirements, findings, conflicts = (
                 semantic_output_to_analysis(version, output)

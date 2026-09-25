@@ -1,7 +1,7 @@
 // API 公共兼容门面，保持组件原有的统一导入方式。
 export type { ProjectSettings, ProjectInput, Project } from "./api_types_project";
-export type { ModelProviderId, ModelProviderOption, SessionModelConfig, SessionModelConfigStatus,
-  AIRun } from "./api_types_ai";
+export type { ConnectionTestResult, ModelDiscoveryResult, ModelOption, ModelProviderId, ModelProviderOption,
+  ModelServiceError, SessionModelConfig, SessionModelConfigStatus, AIRun } from "./api_types_ai";
 export type {
   AssetProvenanceInput, AssetProvenanceRecord, RequirementFileInput, ParseDiagnostic, RequirementMaterial,
   RequirementPackage, RequirementVersion, RequirementAnalysis, TestDesign, TemplateColumn, TemplateSheet,
@@ -22,7 +22,7 @@ export {
   updateRequirementSelection, decideRequirementConflict,
 } from "./requirement_api";
 export {
-  readStoredSessionModelConfig, listModelProviders, getSessionModelConfig, saveSessionModelConfig,
+  listModelProviders, getSessionModelConfig, saveSessionModelConfig, discoverSessionModels,
   testSessionModelConfig, clearSessionModelConfig, listAIRuns,
 } from "./ai_api";
 export {

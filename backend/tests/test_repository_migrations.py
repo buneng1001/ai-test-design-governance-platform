@@ -25,3 +25,25 @@ def test_migrate_applies_new_diagnostic_column_to_previous_schema(tmp_path) -> N
     with sqlite3.connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(ai_run_attempts)")}
     assert "diagnostic" in columns
+
+
+def test_migrate_removes_legacy_plaintext_model_keys(tmp_path) -> None:
+    database_path = tmp_path / "legacy-model-config.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(MIGRATIONS[0])
+        for version, migration in enumerate(MIGRATIONS[1:-1], start=1):
+            connection.executescript(migration)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (version, "2026-01-01T00:00:00+00:00"),
+            )
+        connection.execute(
+            "INSERT INTO ai_model_configs(client_id, config_json, updated_at) VALUES (?, ?, ?)",
+            ("legacy", '{"api_key":"legacy-secret"}', "2026-01-01T00:00:00+00:00"),
+        )
+
+    ProjectRepository(database_path).migrate()
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("SELECT config_json FROM ai_model_configs").fetchall() == []
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name = 'ai_model_connection_records'").fetchone()
