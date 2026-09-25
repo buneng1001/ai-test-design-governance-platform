@@ -1,73 +1,56 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { RequirementReviewPanel } from "./RequirementReviewPanel";
 
+afterEach(() => vi.restoreAllMocks());
+
 const analysis = {
-  id: 1,
-  requirement_version_id: 1,
-  status: "draft" as const,
-  atomic_requirements: [{
-    candidate_id: "candidate-1",
-    stable_requirement_id: null,
-    statement: "设备必须保存状态。",
-    source_reference: { locator: "lines:1-1", filename: "requirements.md" },
-    decision: "pending_confirmation" as const,
+  id: 1, requirement_version_id: 42, status: "draft", is_mock: true,
+  analysis_batches: [{ batch_number: 1, source_reference_ids: ["source-1"], status: "completed", ai_run_id: 8 }],
+  requirements: [{
+    requirement_id: "requirement-1", name: "保存状态", statement: "设备必须保存状态。",
+    requirement_type: "functional", module: "状态管理", analysis_status: "ready",
+    source_references: [{ reference_id: "source-1", filename: "requirements.md", locator: "lines:1-1" }],
+    analysis_note: "状态变化应可追溯。",
   }],
-  findings: [{
-    finding_id: "finding-1",
-    finding_type: "missing_acceptance_criteria",
-    summary: "需要明确验收标准",
-    reason: "约束缺少可验证标准",
-    status: "pending_confirmation",
-    source_reference: { locator: "lines:1-1", filename: "requirements.md" },
-  }],
-  visual_inferences: [{
-    inference_id: "visual-1",
-    description: "页面存在状态徽标",
-    source_reference: { locator: "image:1", filename: "screen.png" },
-    decision: "pending_confirmation" as const,
-  }],
-  confirmed_by: null,
+  selected_requirement_ids: ["requirement-1"], conflicts: [], test_items: [],
+  acceptance_criteria: [{ criterion_id: "criterion-1", requirement_id: "requirement-1", statement: "状态会被保存" }],
+  atomic_requirements: [{ candidate_id: "requirement-1", stable_requirement_id: null, statement: "设备必须保存状态。", source_reference: { locator: "lines:1-1", filename: "requirements.md" }, decision: "pending_confirmation" }],
+  findings: [], visual_inferences: [], confirmed_by: null,
 };
 
-test("测试工程师可以处理原子需求、评审发现和视觉推断后完成需求确认", async () => {
+test("结构预览只使用一张需求确认表，并在展开详情中展示验收条件和来源", async () => {
+  const user = userEvent.setup();
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 42, version: 1, name: "当前任务" }]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 201 }));
+
+  render(<RequirementReviewPanel projectId={1} />);
+  await user.click(await screen.findByRole("button", { name: "生成结构预览" }));
+
+  expect(await screen.findByText("需求确认表")).toBeInTheDocument();
+  expect(screen.getAllByRole("table")).toHaveLength(1);
+  expect(screen.getByText("模块：状态管理")).toBeInTheDocument();
+  expect(screen.queryByText("原子需求候选")).not.toBeInTheDocument();
+  expect(screen.getByText("已选 1 · 未选 0 · 阻塞问题 0")).toBeInTheDocument();
+  await user.click(screen.getByText("展开详情"));
+  expect(screen.getByText("验收条件：状态会被保存")).toBeInTheDocument();
+  expect(screen.getByText("来源：requirements.md lines:1-1")).toBeInTheDocument();
+});
+
+test("取消当前筛选结果只提交筛选后的选择集合", async () => {
   const user = userEvent.setup();
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 42, version: 1, name: "当前任务" }]), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 201 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 200 }))
-    .mockResolvedValue(new Response(JSON.stringify({ ...analysis, status: "confirmed" }), { status: 200 }));
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...analysis, selected_requirement_ids: [] }), { status: 200 }));
 
   render(<RequirementReviewPanel projectId={1} />);
-  expect(await screen.findByRole("option", { name: "V1 · 当前任务" })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "运行原子需求与需求评审" }));
-  expect(fetchMock.mock.calls[1]?.[0]).toContain("/requirement-versions/42/requirement-review");
-  expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({ "Content-Type": "application/json" });
-  expect(await screen.findByText("设备必须保存状态。", { exact: false })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "接受并获得稳定需求 ID" }));
-  await user.click(screen.getByRole("button", { name: "标记已解决" }));
-  await user.click(screen.getByRole("button", { name: "接受为需求事实" }));
-  await user.click(screen.getByRole("button", { name: "完成需求确认" }));
-  expect(await screen.findByText((_, element) =>
-    element?.tagName === "P" && (element.textContent?.includes("需求已确认") ?? false)
-  )).toBeInTheDocument();
-});
+  await user.click(await screen.findByRole("button", { name: "生成结构预览" }));
+  await user.click(await screen.findByRole("button", { name: "取消当前筛选结果" }));
 
-test("模型输出校验失败时不应误提示项目字段填写不正确", async () => {
-  const user = userEvent.setup();
-  vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 42, version: 1, name: "当前任务" }]), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: ["模型输出缺少必填字段"] }), { status: 422 }));
-
-  render(<RequirementReviewPanel projectId={1} />);
-  await user.click(await screen.findByRole("button", { name: "运行原子需求与需求评审" }));
-
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "AI 输出字段校验失败：模型输出缺少必填字段",
-  );
-  expect(screen.queryByText("项目字段填写不正确")).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls[2]?.[0]).toContain("/requirement-reviews/1/selection");
+  expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(JSON.stringify({ selected_requirement_ids: [] }));
 });

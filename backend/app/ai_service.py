@@ -338,7 +338,9 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
     for index, item in enumerate(bounded_context, start=1):
         source = item["source_reference"]
         source_reference = source if isinstance(source, dict) else {}
-        requirement_id = f"REQ-CANDIDATE-{index}"
+        reference_id = str(source_reference.get("reference_id", index))
+        identifier = hashlib.sha256(reference_id.encode("utf-8")).hexdigest()[:12]
+        requirement_id = f"REQ-CANDIDATE-{identifier}"
         requirements.append({
             "requirement_id": requirement_id,
             "name": f"需求 {index}",
@@ -349,21 +351,24 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
             "analysis_note": "Mock 根据原始来源片段生成的确定性语义候选。",
         })
         test_items.append({
-            "test_item_id": f"TEST-ITEM-{index}", "name": f"验证需求 {index}",
+            "test_item_id": f"TEST-ITEM-{identifier}", "name": f"验证需求 {index}",
             "module": "未分类模块", "requirement_ids": [requirement_id],
             "source_references": [source_reference],
         })
         if any(marker in str(item["text"]) for marker in ("必须", "应当", "不得")):
-            criterion_id = f"AC-{index}"
+            criterion_id = f"AC-{identifier}"
             criteria.append({"criterion_id": criterion_id, "statement": str(item["text"]),
                              "requirement_id": requirement_id, "source_references": [source_reference]})
             findings.append({
-                "finding_id": f"FINDING-{index}", "finding_type": "missing_acceptance_criteria",
+                "finding_id": f"FINDING-{identifier}", "finding_type": "missing_acceptance_criteria",
                 "summary": "该约束需要明确可验证的验收标准",
                 "reason": "Mock 识别到约束性表述，但不会替测试工程师补写验收标准。",
                 "source_reference": source_reference,
             })
     for first, second in _conflict_pairs(bounded_context)[:MAX_MOCK_REQUIREMENTS]:
+        first_source = first["source_reference"]
+        first_reference_id = str(first_source.get("reference_id", "")) if isinstance(first_source, dict) else ""
+        first_identifier = hashlib.sha256(first_reference_id.encode("utf-8")).hexdigest()[:12]
         conflict_id = "CONFLICT-" + hashlib.sha256(
             f"{first['text']}\n{second['text']}".encode("utf-8")
         ).hexdigest()[:12]
@@ -371,7 +376,7 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
             "conflict_id": conflict_id, "topic": "同一能力的资料描述不一致",
             "srs_text": str(first["text"]), "srs_source": first["source_reference"],
             "implementation_text": str(second["text"]), "implementation_source": second["source_reference"],
-            "affected_modules": ["未分类模块"], "affected_test_items": ["TEST-ITEM-1"],
+            "affected_modules": ["未分类模块"], "affected_test_items": [f"TEST-ITEM-{first_identifier}"],
         })
     return {"contract_version": "requirement-analysis.v1", "requirements": requirements,
             "test_items": test_items, "acceptance_criteria": criteria, "findings": findings,

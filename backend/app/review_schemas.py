@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.requirement_schemas import SourceReference
 from app.ai_schemas import MockScenario
@@ -82,6 +82,7 @@ class AnalyzedRequirement(BaseModel):
     module: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     source_references: list[SourceReference] = Field(min_length=1, max_length=20)
     analysis_note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+    analysis_status: Literal["ready", "blocked"] = "ready"
 
 
 class RequirementConflict(BaseModel):
@@ -144,6 +145,43 @@ class StructuredAnalysisOutput(BaseModel):
     findings: list[AnalysisFindingOutput] = Field(max_length=200)
     conflicts: list[RequirementConflict] = Field(default_factory=list, max_length=100)
 
+    @model_validator(mode="after")
+    def validate_unique_relationships(self) -> "StructuredAnalysisOutput":
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        test_item_ids = [item.test_item_id for item in self.test_items]
+        criterion_ids = [item.criterion_id for item in self.acceptance_criteria]
+        finding_ids = [item.finding_id for item in self.findings]
+        conflict_ids = [item.conflict_id for item in self.conflicts]
+        collections = {
+            "需求": requirement_ids,
+            "测试项": test_item_ids,
+            "验收条件": criterion_ids,
+            "评审发现": finding_ids,
+            "冲突": conflict_ids,
+        }
+        for label, identifiers in collections.items():
+            if len(identifiers) != len(set(identifiers)):
+                raise ValueError(f"{label} ID 必须唯一")
+        known_requirement_ids = set(requirement_ids)
+        if any(not set(item.requirement_ids).issubset(known_requirement_ids) for item in self.test_items):
+            raise ValueError("测试项只能关联同批有效需求")
+        if any(item.requirement_id not in known_requirement_ids for item in self.acceptance_criteria):
+            raise ValueError("验收条件只能关联同批有效需求")
+        if any(not set(item.affected_test_items).issubset(set(test_item_ids)) for item in self.conflicts):
+            raise ValueError("冲突只能关联同批有效测试项")
+        return self
+
+
+class AnalysisBatch(BaseModel):
+    """单个受控分析批次的结果摘要，诊断细节保留在对应 AI 运行中。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch_number: int = Field(ge=1)
+    source_reference_ids: list[str] = Field(min_length=1)
+    status: Literal["completed"]
+    ai_run_id: int
+
 
 class RequirementAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -160,6 +198,7 @@ class RequirementAnalysis(BaseModel):
     selected_requirement_ids: list[str] = Field(default_factory=list)
     test_items: list[AnalyzedTestItem] = Field(default_factory=list)
     acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
+    analysis_batches: list[AnalysisBatch] = Field(default_factory=list)
     ai_run_id: int | None = None
     is_mock: bool = True
     confirmed_by: str | None = None
@@ -224,4 +263,5 @@ class RequirementAnalysisInput(BaseModel):
     mode: Literal["mock", "real"] = "mock"
     scenario: MockScenario = "normal"
     max_retries: int = Field(default=2, ge=0, le=2)
+    batch_size: int = Field(default=25, ge=1, le=50)
     force_new: bool = False

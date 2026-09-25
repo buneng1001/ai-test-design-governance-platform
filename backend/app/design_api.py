@@ -301,7 +301,9 @@ def _scopes(review: RequirementAnalysis, dimension_id: str) -> list[TestScopeIte
             description=item.statement, requirement_ids=[item.stable_requirement_id or item.candidate_id],
             primary_dimension_id=dimension_id,
         )
-        for item in review.atomic_requirements if item.decision == "accepted"
+        for item in review.atomic_requirements
+        if item.decision == "accepted" and item.stable_requirement_id
+        and item.candidate_id in set(review.selected_requirement_ids)
     ]
 
 
