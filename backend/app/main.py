@@ -58,6 +58,7 @@ from app.task_repository import TestTaskRepository
 from app.template_api import register_template_routes
 from app.template_repository import TemplateMappingRepository
 from app.ai_run_api import register_ai_run_routes as _register_ai_run_routes
+from app.workflow_api import register_workflow_routes
 
 
 def create_app(database_path: Path | None = None, local_credentials_path: Path | None = None) -> FastAPI:
@@ -119,7 +120,9 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
         app, repository, case_generation_repository, case_review_repository, ai_run_repository,
         requirement_repository, template_repository, model_service, real_model_service,
     )
-    register_task_routes(app, repository, case_review_repository, task_repository)
+    register_task_routes(
+        app, repository, case_review_repository, task_repository, case_generation_repository, requirement_repository
+    )
     register_execution_batch_routes(
         app, repository, task_repository, case_review_repository, case_generation_repository,
         design_repository, execution_batch_repository,
@@ -149,6 +152,7 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
     _register_project_asset_routes(app, context)
     _register_requirement_routes(app, context)
     _register_requirement_review_routes(app, context)
+    register_workflow_routes(app, context)
     register_design_routes(
         app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
     )

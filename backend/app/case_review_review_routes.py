@@ -28,6 +28,7 @@ def register_review_routes(router: APIRouter, deps: CaseReviewRouteDependencies)
         generation = deps.generations.get(project_id, generation_id)
         if generation is None or not generation.candidates:
             raise HTTPException(status_code=409, detail="存在候选测试用例后才能发起评审")
+        _require_current_generation(deps, project_id, generation.requirement_version_id)
         version = deps.requirements.get_version(project_id, generation.requirement_version_id)
         if version is None:
             raise HTTPException(status_code=409, detail="候选测试用例缺少需求版本上下文")
@@ -114,6 +115,7 @@ def register_review_routes(router: APIRouter, deps: CaseReviewRouteDependencies)
             raise HTTPException(status_code=422, detail="修改建议只能调整用例公开文本字段")
         generation = deps.generations.get(project_id, batch.generation_id)
         assert generation is not None
+        _require_current_generation(deps, project_id, generation.requirement_version_id)
         candidate_revision = max(
             (item for item in batch.revisions if item.candidate_id == suggestion.candidate_id),
             key=lambda item: item.revision, default=None,
@@ -144,6 +146,7 @@ def register_review_routes(router: APIRouter, deps: CaseReviewRouteDependencies)
             raise HTTPException(status_code=422, detail="必须为每个候选测试用例提供用例纳入决定")
         generation = deps.generations.get(project_id, batch.generation_id)
         assert generation is not None
+        _require_current_generation(deps, project_id, generation.requirement_version_id)
         for candidate in generation.candidates:
             stable_case_id = stable_id("case", candidate.id)
             candidate_revisions = [item for item in batch.revisions if item.candidate_id == candidate.id]
@@ -186,3 +189,11 @@ def register_review_routes(router: APIRouter, deps: CaseReviewRouteDependencies)
 def _require_project(deps: CaseReviewRouteDependencies, project_id: int) -> None:
     if deps.projects.get(project_id) is None:
         raise HTTPException(status_code=404, detail="测试设计项目不存在")
+
+
+def _require_current_generation(
+    deps: CaseReviewRouteDependencies, project_id: int, requirement_version_id: int,
+) -> None:
+    versions = deps.requirements.list_versions(project_id)
+    if not versions or versions[-1].id != requirement_version_id:
+        raise HTTPException(status_code=409, detail="需求版本已更新，请基于当前版本重新生成并评审测试用例")

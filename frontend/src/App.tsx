@@ -1,20 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { createProject, deleteProject, getProject, listProjects, Project, ProjectInput, updateProject } from "./api";
-import { AssetProvenancePanel } from "./AssetProvenancePanel";
-import { AIRunPanel } from "./AIRunPanel";
-import { RequirementImportPanel } from "./RequirementImportPanel";
-import { RequirementReviewPanel } from "./RequirementReviewPanel";
-import { TestDesignPanel } from "./TestDesignPanel";
-import { TemplateMappingPanel } from "./TemplateMappingPanel";
-import { TaskPublicationPanel } from "./TaskPublicationPanel";
-import { ExecutionBatchPanel } from "./ExecutionBatchPanel";
-import { ExecutionResultPanel } from "./ExecutionResultPanel";
-import { CoveragePanel } from "./CoveragePanel";
-import { ChangeImpactPanel } from "./ChangeImpactPanel";
-import { CaseGenerationPanel } from "./CaseGenerationPanel";
-import { ReportsPanel } from "./ReportsPanel";
-import { ModelConfigPanel } from "./ModelConfigPanel";
+import { WorkflowShell } from "./WorkflowShell";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
@@ -34,9 +21,6 @@ export function App() {
   const [error, setError] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
   const [loading, setLoading] = useState(true);
-  const [versionRefreshKey, setVersionRefreshKey] = useState(0);
-  const [newlyPublishedVersionId, setNewlyPublishedVersionId] = useState<number | null>(null);
-  const [assetsRefreshKey, setAssetsRefreshKey] = useState(0);
 
   useEffect(() => {
     const loadInitialView = async () => {
@@ -98,11 +82,8 @@ export function App() {
         <h1>{activeProject.name}</h1>
         <p className="object-name">测试对象：{activeProject.test_object}</p>
         <p className="object-name">软件版本：{activeProject.software_version}</p>
-        <div className="workspace-layout">
-          <WorkspaceNavigation />
-          <div className="workspace-content">
-          <section className="panel" id="project-info">
-          <h2 id="project-info-title">项目信息</h2>
+        <section className="project-context">
+          <h2>项目上下文</h2>
           <ProjectForm input={projectInput} setInput={setProjectInput} submitLabel="保存修改" onSubmit={submitUpdate} />
           <button type="button" className="danger-button" onClick={async () => {
             if (!window.confirm(`确定删除项目“${activeProject.name}”及其全部数据吗？此操作不可恢复。`)) return;
@@ -115,31 +96,8 @@ export function App() {
           }}>删除项目及全部数据</button>
           {error && <p role="alert" className="error">{error}</p>}
           {saveStatus && <p role="status" className="success">{saveStatus}</p>}
-          </section>
-        <AssetProvenancePanel projectId={activeProject.id} onAssetRegistered={() => {
-          setAssetsRefreshKey((current) => current + 1);
-        }} />
-        <ModelConfigPanel />
-        <AIRunPanel projectId={activeProject.id} />
-        <RequirementImportPanel projectId={activeProject.id} assetsRefreshKey={assetsRefreshKey}
-          onVersionPublished={(versionId) => {
-          setNewlyPublishedVersionId(versionId);
-          setVersionRefreshKey((current) => current + 1);
-        }} />
-        <p className="muted">发布需求版本后，可在下方选择 V1、V2 等版本进入需求确认。</p>
-        <RequirementReviewPanel projectId={activeProject.id} versionRefreshKey={versionRefreshKey}
-          newlyPublishedVersionId={newlyPublishedVersionId} />
-        <TestDesignPanel projectId={activeProject.id} />
-        <TemplateMappingPanel projectId={activeProject.id} />
-        <CaseGenerationPanel projectId={activeProject.id} />
-        <TaskPublicationPanel projectId={activeProject.id} />
-        <ExecutionBatchPanel projectId={activeProject.id} />
-        <ExecutionResultPanel projectId={activeProject.id} />
-        <CoveragePanel projectId={activeProject.id} />
-        <ChangeImpactPanel projectId={activeProject.id} />
-        <ReportsPanel projectId={activeProject.id} />
-          </div>
-        </div>
+        </section>
+        <WorkflowShell projectId={activeProject.id} />
       </main>
     );
   }
@@ -185,56 +143,6 @@ export function App() {
         ))}
       </section>
     </main>
-  );
-}
-
-const navigationItems = [
-  { id: "project-info", label: "项目信息" },
-  { id: "asset-provenance", label: "资产来源记录" },
-  { id: "model-config", label: "模型配置" },
-  {
-    id: "requirement-import",
-    label: "导入需求资料",
-    children: [{ id: "requirement-package-list", label: "发布前资料包清单" }],
-  },
-  {
-    id: "requirement-review",
-    label: "需求评审与确认",
-    children: [
-      { id: "grouped-requirements", label: "按模块归并的需求表" },
-      { id: "requirement-conflicts", label: "需求冲突表" },
-      { id: "atomic-requirements", label: "原子需求候选" },
-      { id: "review-findings", label: "需求评审发现" },
-    ],
-  },
-  { id: "test-design", label: "测试维度、范围、风险与自动化" },
-  { id: "case-generation", label: "生成可追踪的候选测试用例" },
-  { id: "template-mapping", label: "用例模板映射" },
-  { id: "case-review", label: "三角色 AI 评审与用例确认" },
-  { id: "task-publication", label: "发布测试任务" },
-  { id: "execution-batch", label: "创建执行批次" },
-  { id: "execution-results", label: "导入运行结果" },
-  { id: "coverage", label: "治理指标与缺口" },
-  { id: "change-impact", label: "变更影响与回归治理" },
-  { id: "reports-title", label: "报告与审计包" },
-  { id: "ai-run-audit", label: "AI 运行审计" },
-] as const;
-
-function WorkspaceNavigation() {
-  return (
-    <nav className="workspace-navigation" aria-label="项目工作台导航">
-      <p className="workspace-navigation-title">项目导航</p>
-      <ul>
-        {navigationItems.map((item) => (
-          <li key={item.id}>
-            <a href={`#${item.id}`}>{item.label}</a>
-            {"children" in item && <ul>
-              {item.children.map((child) => <li key={child.id}><a href={`#${child.id}`}>{child.label}</a></li>)}
-            </ul>}
-          </li>
-        ))}
-      </ul>
-    </nav>
   );
 }
 
