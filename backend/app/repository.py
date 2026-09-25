@@ -307,6 +307,29 @@ MIGRATIONS = (
     """
     ALTER TABLE ai_run_attempts ADD COLUMN diagnostic TEXT;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_model_connection_records (
+        client_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        model TEXT NOT NULL,
+        status TEXT NOT NULL,
+        credential_source TEXT NOT NULL,
+        validated_at TEXT,
+        error_type TEXT,
+        detail TEXT,
+        PRIMARY KEY (client_id, provider)
+    );
+    CREATE TABLE IF NOT EXISTS ai_model_discoveries (
+        client_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        models_json TEXT NOT NULL,
+        discovered_at TEXT NOT NULL,
+        PRIMARY KEY (client_id, provider, base_url)
+    );
+    DELETE FROM ai_model_configs;
+    """,
 )
 
 

@@ -12,6 +12,7 @@ from app.case_review_schemas import (
 from app.case_review_service import ROLES, build_review_batch, create_revision
 from app.design_service import stable_id
 from app.model_config_api import get_session_model_config
+from app.model_config_service import provider_error_type, service_error
 
 
 def register_review_routes(router: APIRouter, deps: CaseReviewRouteDependencies) -> None:
@@ -73,7 +74,10 @@ def register_review_routes(router: APIRouter, deps: CaseReviewRouteDependencies)
             if run_status != "succeeded":
                 raise HTTPException(
                     status_code=422 if errors else 503,
-                    detail={"code": "review_ai_failed", "ai_run_id": run.id},
+                    detail=service_error(
+                        "model_call", model_parameters.provider, model_parameters.model,
+                        "invalid_response" if errors else provider_error_type(response.error_code),
+                    ).model_dump(mode="json") | {"ai_run_id": run.id},
                 )
             created_runs[role] = run.id
         batch = build_review_batch(0, project_id, generation_id, generation.candidates, created_runs)

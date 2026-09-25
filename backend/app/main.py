@@ -60,7 +60,7 @@ from app.template_repository import TemplateMappingRepository
 from app.ai_run_api import register_ai_run_routes as _register_ai_run_routes
 
 
-def create_app(database_path: Path | None = None) -> FastAPI:
+def create_app(database_path: Path | None = None, local_credentials_path: Path | None = None) -> FastAPI:
     """创建应用并按历史顺序组装所有依赖和路由。"""
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -139,7 +139,8 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     register_evaluation_routes(
         app, repository, asset_repository, ai_run_repository, evaluation_repository
     )
-    register_model_config_routes(app, resolved_database_path)
+    credentials_path = local_credentials_path or Path(__file__).resolve().parents[2] / ".env.local"
+    register_model_config_routes(app, resolved_database_path, credentials_path)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
