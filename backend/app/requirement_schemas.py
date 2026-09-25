@@ -27,6 +27,14 @@ class RequirementPackageInput(BaseModel):
     files: Annotated[list[RequirementFileInput], Field(min_length=1, max_length=20)]
 
 
+class RequirementPackageReparseInput(BaseModel):
+    """从既有资料包中选择文件，重新建立一份可审计的解析草稿。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    asset_ids: Annotated[list[int], Field(min_length=1, max_length=20)]
+
+
 class SourceReference(BaseModel):
     reference_id: str
     asset_id: int
@@ -37,6 +45,7 @@ class SourceReference(BaseModel):
 class ParsedFragment(BaseModel):
     text: str
     source_reference: SourceReference
+    kind: Literal["content", "heading", "table_cell"] = "content"
 
 
 class VisualInferenceCandidate(BaseModel):
@@ -62,6 +71,7 @@ class RequirementMaterial(BaseModel):
     media_type: str
     format: RequirementFormat
     sha256: str
+    size_bytes: int = Field(ge=0, default=0)
     content_base64: str
     parse_status: ParseStatus
     fragments: list[ParsedFragment]

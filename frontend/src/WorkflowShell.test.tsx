@@ -21,7 +21,7 @@ afterEach(() => vi.restoreAllMocks());
 
 test("默认只呈现五页签，并显示持久化工作流给出的解锁原因", async () => {
   mockRequests(initialWorkflow);
-  render(<WorkflowShell projectId={1} />);
+  render(<WorkflowShell projectId={1} testObject="虚构设备" softwareVersion="v1.0.0" />);
 
   expect(await screen.findByText("下一步：上传并发布需求资料")).toBeInTheDocument();
   expect(screen.getAllByRole("tab")).toHaveLength(5);
@@ -38,7 +38,7 @@ test("刷新恢复上游变更后的重新确认状态", async () => {
     next_action: { label: "重新确认受影响的下游草稿", target_tab: "suggestions" },
     invalidated_draft_ids: [7],
   });
-  render(<WorkflowShell projectId={1} />);
+  render(<WorkflowShell projectId={1} testObject="虚构设备" softwareVersion="v1.0.0" />);
 
   expect(await screen.findByText("上游内容已更新；1 个下游草稿需要重新确认。")).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "新增建议" })).toHaveAttribute("aria-selected", "true");
@@ -47,7 +47,7 @@ test("刷新恢复上游变更后的重新确认状态", async () => {
 
 test("工作流查询失败时显示可理解错误", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("服务不可用", { status: 503 }));
-  render(<WorkflowShell projectId={1} />);
+  render(<WorkflowShell projectId={1} testObject="虚构设备" softwareVersion="v1.0.0" />);
 
   expect(await screen.findByRole("alert")).toHaveTextContent("服务不可用");
 });
@@ -57,6 +57,7 @@ function mockRequests(workflow: object) {
     const url = String(input);
     if (url.includes("/workflow")) return new Response(JSON.stringify(workflow), { status: 200 });
     if (url.includes("/model-providers")) return new Response(JSON.stringify([]), { status: 200 });
+    if (url.includes("/requirement-versions")) return new Response(JSON.stringify([]), { status: 200 });
     return new Response("null", { status: 200 });
   });
 }

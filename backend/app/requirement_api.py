@@ -1,10 +1,18 @@
+from datetime import UTC, datetime
+
 from fastapi import FastAPI, HTTPException, status
 
 from app.asset_repository import AssetRepository
 from app.main_route_context import AppRouteContext
 from app.requirement_repository import RequirementRepository
-from app.requirement_schemas import RequirementPackage, RequirementPackageInput, RequirementVersion
-from app.requirement_service import build_requirement_package
+from app.requirement_schemas import (
+    RequirementFileInput,
+    RequirementPackage,
+    RequirementPackageInput,
+    RequirementPackageReparseInput,
+    RequirementVersion,
+)
+from app.requirement_service import build_material, build_requirement_package
 from app.repository import ProjectRepository
 from app.schemas import Project
 from app.project_asset_api import require_project
@@ -36,6 +44,49 @@ def register_requirement_routes(app: FastAPI, context: AppRouteContext) -> None:
         if package is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="需求资料包不存在")
         return package
+
+    @app.post(
+        "/api/projects/{project_id}/requirement-packages/{package_id}/reparse",
+        response_model=RequirementPackage,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def reparse_requirement_package(
+        project_id: int,
+        package_id: int,
+        reparse_input: RequirementPackageReparseInput,
+    ) -> RequirementPackage:
+        """仅重试选定文件，或用原材料集合重新建立一个 Step 00 草稿。"""
+        require_project(repository.get(project_id))
+        package = requirement_repository.get_package(project_id, package_id)
+        if package is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="需求资料包不存在")
+        materials_by_asset_id = {material.asset_id: material for material in package.materials}
+        missing_asset_ids = [asset_id for asset_id in reparse_input.asset_ids if asset_id not in materials_by_asset_id]
+        if missing_asset_ids:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="重试文件不属于当前需求资料包")
+        retry_asset_ids = set(reparse_input.asset_ids)
+        materials = [
+            build_material(
+                project_id,
+                RequirementFileInput(
+                    asset_id=material.asset_id,
+                    filename=material.filename,
+                    media_type=material.media_type,
+                ),
+                asset_repository,
+            ) if material.asset_id in retry_asset_ids else material.model_copy(deep=True)
+            for material in package.materials
+        ]
+        retry_package = RequirementPackage(
+            id=0,
+            project_id=project_id,
+            name=package.name,
+            status="draft",
+            materials=materials,
+            diagnostics=[diagnostic for material in materials for diagnostic in material.diagnostics],
+            created_at=datetime.now(UTC),
+        )
+        return requirement_repository.create_package(retry_package)
 
     @app.post(
         "/api/projects/{project_id}/requirement-packages/{package_id}/publish",

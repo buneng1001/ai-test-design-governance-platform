@@ -7,6 +7,12 @@ export const createRequirementPackage = (projectId: number, name: string,
   request(`/api/projects/${projectId}/requirement-packages`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, files }),
   });
+export const reparseRequirementPackage = (projectId: number, packageId: number,
+  assetIds: number[]): Promise<RequirementPackage> => request(
+  `/api/projects/${projectId}/requirement-packages/${packageId}/reparse`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ asset_ids: assetIds }),
+  },
+);
 export const publishRequirementPackage = (projectId: number, packageId: number): Promise<RequirementVersion> =>
   request(`/api/projects/${projectId}/requirement-packages/${packageId}/publish`, { method: "POST" });
 export const listRequirementVersions = (projectId: number): Promise<RequirementVersion[]> =>
