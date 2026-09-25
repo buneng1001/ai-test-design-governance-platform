@@ -243,6 +243,9 @@ def register_design_routes(
     @router.post("/api/projects/{project_id}/test-designs/{design_id}/confirm", response_model=DesignAsset)
     def confirm_design(project_id: int, design_id: int, data: DesignConfirmationInput) -> DesignAsset:
         design = _draft(repository, design_repository, project_id, design_id)
+        versions = requirement_repository.list_versions(project_id)
+        if not versions or versions[-1].id != design.requirement_version_id:
+            raise HTTPException(status_code=409, detail="需求版本已更新，请基于当前版本重新建立并确认测试设计")
         ids = {item.id for item in design.scope_items}
         if (
             not ids

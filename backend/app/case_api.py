@@ -40,6 +40,9 @@ def register_case_routes(
             raise HTTPException(status_code=404, detail="测试设计不存在")
         if design.status != "confirmed":
             raise HTTPException(status_code=409, detail="测试设计确认后才能生成候选测试用例")
+        versions = requirements.list_versions(project_id)
+        if not versions or versions[-1].id != design.requirement_version_id:
+            raise HTTPException(status_code=409, detail="需求版本已更新，请基于当前版本重新确认测试设计后生成用例")
         version = requirements.get_version(project_id, design.requirement_version_id)
         review = reviews.latest_for_version(project_id, design.requirement_version_id)
         mapping_id = data.template_mapping_id

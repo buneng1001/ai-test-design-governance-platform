@@ -448,3 +448,26 @@ export interface ReportDocument {
   metrics: Record<string, unknown>;
   evidence: Record<string, unknown>;
 }
+
+export interface ProjectWorkflowView {
+  project_id: number;
+  current_step: "upload" | "preview" | "suggestions" | "review" | "cases";
+  progress: number;
+  tabs: Array<{
+    id: ProjectWorkflowView["current_step"];
+    label: string;
+    stage_ids: string[];
+    status: "locked" | "current" | "completed" | "needs_reconfirmation";
+    blocked_reason: string | null;
+  }>;
+  blockers: string[];
+  next_action: { label: string; target_tab: ProjectWorkflowView["current_step"] };
+  asset_ids: {
+    requirement_version_id: number | null;
+    requirement_analysis_id: number | null;
+    test_design_id: number | null;
+    case_generation_id: number | null;
+    case_review_batch_id: number | null;
+  };
+  invalidated_draft_ids: number[];
+}

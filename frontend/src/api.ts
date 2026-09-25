@@ -8,6 +8,7 @@ export type {
   TemplateMappingVersion, CandidateTestCase, CaseGeneration, CaseReviewSuggestion, CaseReviewBatch, TestTask,
   ExecutionBatch, ExecutionResultStatus, ExecutionResultRecord, ExecutionBatchResults, CoverageMetric,
   CoverageSummary, ChangeImpactAnalysis, RegressionCandidate, RegressionSelection, ReportDocument,
+  ProjectWorkflowView,
 } from "./api_types";
 
 export {
@@ -41,3 +42,4 @@ export {
   getCoverage, createChangeImpact, confirmChangeImpact, createRegressionSelection,
   confirmRegressionSelection, getAuditPackage,
 } from "./governance_api";
+export { getProjectWorkflow } from "./workflow_api";

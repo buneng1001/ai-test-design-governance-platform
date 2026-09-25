@@ -51,6 +51,13 @@ class DesignRepository:
             ).fetchone()
         return DesignAsset.model_validate_json(row["payload_json"]) if row else None
 
+    def list_for_project(self, project_id: int) -> list[DesignAsset]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM test_designs WHERE project_id = ? ORDER BY id DESC", (project_id,)
+            ).fetchall()
+        return [DesignAsset.model_validate_json(row["payload_json"]) for row in rows]
+
     def save(self, design: DesignAsset, event: str) -> DesignAsset:
         with self.connect() as connection:
             connection.execute(

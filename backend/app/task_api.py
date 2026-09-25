@@ -6,8 +6,10 @@ import yaml
 from fastapi import APIRouter, FastAPI, HTTPException, Response, status
 
 from app.case_review_repository import CaseReviewRepository
+from app.case_repository import CaseGenerationRepository
 from app.case_review_schemas import CaseReviewBatch, CaseRevision
 from app.repository import ProjectRepository
+from app.requirement_repository import RequirementRepository
 from app.task_adapter import from_test_execution_result, to_test_execution_task, validate_target_extension
 from app.task_repository import TestTaskRepository
 from app.task_schemas import (
@@ -21,7 +23,8 @@ from app.task_schemas import (
 
 
 def register_task_routes(
-    app: FastAPI, projects: ProjectRepository, reviews: CaseReviewRepository, tasks: TestTaskRepository
+    app: FastAPI, projects: ProjectRepository, reviews: CaseReviewRepository, tasks: TestTaskRepository,
+    generations: CaseGenerationRepository, requirements: RequirementRepository,
 ) -> None:
     router = APIRouter()
 
@@ -37,6 +40,12 @@ def register_task_routes(
             raise HTTPException(status_code=404, detail="评审批次不存在")
         if batch.status != "confirmed":
             raise HTTPException(status_code=409, detail="用例确认后才能完成发布确认")
+        generation = generations.get(project_id, batch.generation_id)
+        if generation is None:
+            raise HTTPException(status_code=409, detail="评审批次缺少候选测试用例上下文")
+        versions = requirements.list_versions(project_id)
+        if not versions or versions[-1].id != generation.requirement_version_id:
+            raise HTTPException(status_code=409, detail="需求版本已更新，请基于当前版本重新确认用例后发布任务")
         validate_target_extension(data.execution_target, data.target_extension)
         selected = _selected_cases(batch, data.stable_case_ids)
         task_id = "task-" + hashlib.sha256(
