@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { getProjectWorkflow, ProjectWorkflowView } from "./api";
 import { ModelConfigPanel } from "./ModelConfigPanel";
 import { RequirementImportPanel } from "./RequirementImportPanel";
+import { RequirementReviewPanel } from "./RequirementReviewPanel";
+import { ReviewSuggestionsPanel } from "./ReviewSuggestionsPanel";
 
 const pageDescriptions: Record<ProjectWorkflowView["tabs"][number]["id"], string> = {
   upload: "上传当前任务需要的需求资料，并查看文件解析状态与诊断。",
@@ -83,9 +85,14 @@ export function WorkflowShell({ projectId, testObject, softwareVersion }: {
         <p className="workflow-action">下一步操作：{workflow.next_action.target_tab === active.id
           ? workflow.next_action.label : "请按左侧步骤完成当前依赖。"}</p>
         {active.blocked_reason && <p role="status" className="error">{active.blocked_reason}</p>}
-        {active.id === "upload" ? <RequirementImportPanel projectId={projectId} testObject={testObject}
-          softwareVersion={softwareVersion} onVersionPublished={() => void refreshWorkflow()} />
-          : <p className="muted">此页签保留为主流程入口；具体阶段命令继续使用各自明确的 API，避免一个万能更新接口。</p>}
+        {active.id === "upload" && <RequirementImportPanel projectId={projectId} testObject={testObject}
+          softwareVersion={softwareVersion} onVersionPublished={() => void refreshWorkflow()} />}
+        {active.id === "preview" && <RequirementReviewPanel projectId={projectId}
+          onWorkflowChanged={() => void refreshWorkflow()} />}
+        {active.id === "suggestions" && <ReviewSuggestionsPanel projectId={projectId}
+          analysisId={workflow.asset_ids.requirement_analysis_id} onWorkflowChanged={() => void refreshWorkflow()} />}
+        {active.id === "review" && <p className="muted">测试点审核与范围选择将在后续步骤提供。</p>}
+        {active.id === "cases" && <p className="muted">请先在审核页确认测试点与生成范围。</p>}
       </article>
       {error && <p role="alert" className="error">{error}</p>}
     </section>

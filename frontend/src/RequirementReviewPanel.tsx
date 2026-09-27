@@ -6,9 +6,16 @@ import {
 } from "./api";
 import type { RequirementVersion } from "./api_types";
 
-type RequirementReviewPanelProps = { projectId: number; versionRefreshKey?: number; newlyPublishedVersionId?: number | null };
+type RequirementReviewPanelProps = {
+  projectId: number;
+  versionRefreshKey?: number;
+  newlyPublishedVersionId?: number | null;
+  onWorkflowChanged?: () => void;
+};
 
-export function RequirementReviewPanel({ projectId, versionRefreshKey = 0, newlyPublishedVersionId = null }: RequirementReviewPanelProps) {
+export function RequirementReviewPanel({
+  projectId, versionRefreshKey = 0, newlyPublishedVersionId = null, onWorkflowChanged,
+}: RequirementReviewPanelProps) {
   const [analysis, setAnalysis] = useState<RequirementAnalysis | null>(null);
   const [versions, setVersions] = useState<RequirementVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState("");
@@ -40,7 +47,11 @@ export function RequirementReviewPanel({ projectId, versionRefreshKey = 0, newly
     } catch (reason) { setError(message(reason)); } finally { setIsRunning(false); }
   };
   const refresh = (request: Promise<RequirementAnalysis>) => {
-    void request.then((result) => { setAnalysis(result); setError(""); }).catch((reason: unknown) => setError(message(reason)));
+    void request.then((result) => {
+      setAnalysis(result);
+      setError("");
+      if (result.status === "confirmed") onWorkflowChanged?.();
+    }).catch((reason: unknown) => setError(message(reason)));
   };
 
   const modules = useMemo(() => [...new Set((analysis?.requirements ?? []).map((item) => item.module))], [analysis]);

@@ -155,6 +155,26 @@ export interface RequirementAnalysis {
     source_reference: { locator: string; filename: string; reference_id: string };
     decision: "pending_confirmation" | "accepted" | "rejected";
   }>;
+  suggestions: Array<{
+    suggestion_id: string;
+    direction: "normal" | "exception" | "boundary" | "risk";
+    problem_type: string;
+    statement: string;
+    source_type: "material_explicit" | "human_confirmed" | "analysis_inference" | "awaiting_confirmation";
+    source_references: Array<{ filename: string; locator: string; reference_id: string }>;
+    related_requirement_ids: string[];
+    impact_scope: string;
+    proposed_requirement_statement: string | null;
+    disposition: "pending_confirmation" | "accepted" | "rejected" | "modified" | "awaiting_external_confirmation";
+  }>;
+  supplemental_requirement_candidates: Array<{
+    candidate_id: string;
+    statement: string;
+    source_references: Array<{ filename: string; locator: string; reference_id: string }>;
+    related_requirement_ids: string[];
+    decision: "pending_confirmation" | "confirmed";
+    stable_requirement_id: string | null;
+  }>;
   confirmed_by: string | null;
 }
 

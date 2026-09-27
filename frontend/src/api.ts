@@ -18,9 +18,10 @@ export {
   listAssets, createAsset, deleteAsset,
 } from "./asset_api";
 export {
-  createRequirementPackage, reparseRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview,
+  createRequirementPackage, reparseRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview, getRequirementReview,
   updateAtomicRequirement, bulkConfirmAtomicRequirements, updateFinding, updateVisualInference, confirmRequirementReview,
-  updateRequirementSelection, decideRequirementConflict,
+  updateRequirementSelection, decideRequirementConflict, generateReviewSuggestions, disposeReviewSuggestion,
+  confirmSupplementalRequirements,
 } from "./requirement_api";
 export {
   listModelProviders, getSessionModelConfig, saveSessionModelConfig, discoverSessionModels,

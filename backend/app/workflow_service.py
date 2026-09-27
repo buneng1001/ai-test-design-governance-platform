@@ -31,6 +31,11 @@ def build_project_workflow_view(
     version = versions[-1] if versions else None
     analysis = reviews.latest_for_version(project_id, version.id) if version else None
     selected = bool(analysis and analysis.selected_requirement_ids)
+    pending_suggestions = [
+        item for item in analysis.suggestions
+        if item.disposition == "pending_confirmation"
+    ] if analysis else []
+    suggestions_completed = bool(analysis and analysis.suggestions and not pending_suggestions)
     design = designs.latest_for_version(project_id, version.id) if version else None
     generation = next((item for item in generations.list(project_id) if design and item.design_id == design.id), None)
     batch = case_reviews.latest_for_generation(project_id, generation.id) if generation else None
@@ -46,14 +51,15 @@ def build_project_workflow_view(
         ),
         WorkflowTab(
             id="suggestions", label="新增建议", stage_ids=TAB_STAGE_IDS["suggestions"],
-            status="current" if analysis and analysis.status == "confirmed" and selected else "locked",
-            blocked_reason=None if analysis and analysis.status == "confirmed" and selected
+            status="completed" if suggestions_completed else "current" if analysis and analysis.status == "confirmed" and selected else "locked",
+            blocked_reason="仍有待处置新增建议；它们只影响关联需求或模块。" if pending_suggestions
+            else None if analysis and analysis.status == "confirmed" and selected
             else "请先确认结构预览中的需求，并至少选择一项进入分析范围。",
         ),
         WorkflowTab(
             id="review", label="审核", stage_ids=TAB_STAGE_IDS["review"],
-            status="locked",
-            blocked_reason="请先完成 S03–S06 新增建议处置，再审核测试点与覆盖。",
+            status="current" if suggestions_completed else "locked",
+            blocked_reason=None if suggestions_completed else "请先完成 S03–S06 新增建议处置，再审核测试点与覆盖。",
         ),
         WorkflowTab(
             id="cases", label="测试用例", stage_ids=TAB_STAGE_IDS["cases"],
