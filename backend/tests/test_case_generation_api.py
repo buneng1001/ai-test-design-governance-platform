@@ -44,6 +44,25 @@ def _setup(
         f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/confirm",
         json={"confirmer_name": "测试工程师"},
     )
+    suggestions = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/suggestions/generate"
+    ).json()
+    for suggestion in suggestions["suggestions"]:
+        client.patch(
+            f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}"
+            f"/suggestions/{suggestion['suggestion_id']}", json={"disposition": "rejected"},
+        )
+    review = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/test-point-review"
+    ).json()["test_point_review"]
+    client.patch(
+        f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/test-point-review/selection",
+        json={"test_item_ids": [item["test_item_id"] for item in review["test_items"]]},
+    )
+    client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{analysis['id']}/test-point-review/confirm",
+        json={"confirmer_name": "测试工程师"},
+    )
     design = client.post(
         f"/api/projects/{project['id']}/requirement-versions/{version['id']}/test-designs", json={}
     ).json()
@@ -93,7 +112,7 @@ def test_generation_keeps_traceability_granularity_and_internal_basis(client: Te
     assert response.status_code == 201
     generation = response.json()
     assert generation["status"] == "succeeded"
-    assert len(generation["candidates"]) == 2
+    assert len(generation["candidates"]) == 4
     first = generation["candidates"][0]
     assert first["requirement_ids"] and first["requirement_references"]
     assert first["scope_item_id"] and first["risk_item_id"] and first["priority"]

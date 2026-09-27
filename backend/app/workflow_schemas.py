@@ -30,6 +30,7 @@ class WorkflowAssetIds(BaseModel):
 
     requirement_version_id: int | None = None
     requirement_analysis_id: int | None = None
+    test_point_review_id: str | None = None
     test_design_id: int | None = None
     case_generation_id: int | None = None
     case_review_batch_id: int | None = None

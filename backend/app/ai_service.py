@@ -385,9 +385,15 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
 
 def _prompt_for_request(request: ModelRequest) -> str:
     if request.task_type != "requirement_review":
+        scope = ""
+        if request.task_type == "case_generation" and request.input_context:
+            scope = (
+                "生成范围仅限以下已确认测试点；不得引用清单外的需求、测试项或规则："
+                + json.dumps(request.input_context, ensure_ascii=False, separators=(",", ":"))
+            )
         return (
             "请针对当前测试设计任务输出 ai-output.v1 JSON。只输出 contract_version 和 items，"
-            "每项包含 candidate_id、summary、source_asset_ids。不得输出 Markdown 或 API Key。"
+            "每项包含 candidate_id、summary、source_asset_ids。不得输出 Markdown 或 API Key。" + scope
         )
     return _requirement_prompt(request)
 

@@ -97,7 +97,8 @@ def test_disposition_creates_immutable_revision_and_confirmation_gate(client) ->
     assert len(revised["revisions"]) == len(batch["suggestions"])
     assert revised["revisions"][0]["candidate"]["title"] == "测试工程师修改后的用例标题"
     confirmed_response = client.post(
-        confirm_url, json={"confirmer_name": "测试工程师", "inclusion": {candidate_id: True}},
+        confirm_url, json={"confirmer_name": "测试工程师", "inclusion": {
+            item["candidate_id"]: True for item in batch["suggestions"]}},
     )
     assert confirmed_response.status_code == 200
     confirmed = client.get(f"/api/projects/{project_id}/case-review-batches/{batch['id']}").json()
@@ -121,9 +122,10 @@ def test_case_lifecycle_and_template_export_keep_public_fields_only(client) -> N
     candidate_id = batch["suggestions"][0]["candidate_id"]
     confirmed = client.post(
         f"/api/projects/{project_id}/case-review-batches/{batch['id']}/confirm",
-        json={"confirmer_name": "测试工程师", "inclusion": {candidate_id: True}},
+        json={"confirmer_name": "测试工程师", "inclusion": {
+            item["candidate_id"]: item["candidate_id"] == candidate_id for item in batch["suggestions"]}},
     ).json()
-    revision = confirmed["revisions"][-1]
+    revision = next(item for item in reversed(confirmed["revisions"]) if item["candidate_id"] == candidate_id)
     assert revision["stable_case_id"]
     assert revision["lifecycle_status"] == "effective"
     assert revision["participation_status"] == "included"
@@ -172,7 +174,8 @@ def test_case_export_round_trips_xlsx_sheets(client) -> None:
     candidate_id = batch["suggestions"][0]["candidate_id"]
     confirmed = client.post(
         f"/api/projects/{project_id}/case-review-batches/{batch['id']}/confirm",
-        json={"confirmer_name": "测试工程师", "inclusion": {candidate_id: True}},
+        json={"confirmer_name": "测试工程师", "inclusion": {
+            item["candidate_id"]: True for item in batch["suggestions"]}},
     )
     stable_case_id = confirmed.json()["revisions"][-1]["stable_case_id"]
     exported = client.post(
@@ -220,7 +223,8 @@ def test_standard_template_export_drops_parent_and_keeps_16_columns(client) -> N
         )
     confirmed = client.post(
         f"/api/projects/{project_id}/case-review-batches/{batch['id']}/confirm",
-        json={"confirmer_name": "测试工程师", "inclusion": {batch["suggestions"][0]["candidate_id"]: True}},
+        json={"confirmer_name": "测试工程师", "inclusion": {
+            item["candidate_id"]: True for item in batch["suggestions"]}},
     )
     assert confirmed.status_code == 200
     exported = client.post(

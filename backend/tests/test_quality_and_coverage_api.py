@@ -20,7 +20,7 @@ def _confirmed_design(client) -> tuple[int, int, int, dict]:
         f"/api/projects/{project_id}/case-review-batches/{review_batch['id']}/confirm",
         json={
             "confirmer_name": "测试工程师",
-            "inclusion": {review_batch["suggestions"][0]["candidate_id"]: True},
+            "inclusion": {item["candidate_id"]: True for item in review_batch["suggestions"]},
         },
     ).json()
     version_id = client.get(f"/api/projects/{project_id}/requirement-versions").json()[0]["id"]

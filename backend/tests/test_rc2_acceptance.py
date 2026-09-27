@@ -120,6 +120,25 @@ def test_mock_rc2_full_acceptance_flow(client: TestClient) -> None:
     )
     assert resolved.status_code == 200
     confirmed_review = _confirm_requirements(client, project["id"], resolved.json())
+    suggestions = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/suggestions/generate"
+    ).json()
+    for suggestion in suggestions["suggestions"]:
+        assert client.patch(
+            f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}"
+            f"/suggestions/{suggestion['suggestion_id']}", json={"disposition": "rejected"},
+        ).status_code == 200
+    point_review = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review"
+    ).json()["test_point_review"]
+    assert client.patch(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review/selection",
+        json={"test_item_ids": [item["test_item_id"] for item in point_review["test_items"]]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review/confirm",
+        json={"confirmer_name": "测试工程师"},
+    ).status_code == 200
     design = client.post(
         f"/api/projects/{project['id']}/requirement-versions/{version['id']}/test-designs",
         json={"dimension_names": ["功能"]},

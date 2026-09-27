@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from app.requirement_schemas import SourceReference
 from app.ai_schemas import MockScenario
+from app.test_point_review_schemas import TestPointReview
 
 
 ReviewFindingType = Literal[
@@ -242,6 +243,7 @@ class RequirementAnalysis(BaseModel):
     acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
     suggestions: list[ReviewSuggestion] = Field(default_factory=list)
     supplemental_requirement_candidates: list[SupplementalRequirementCandidate] = Field(default_factory=list)
+    test_point_review: TestPointReview | None = None
     analysis_batches: list[AnalysisBatch] = Field(default_factory=list)
     ai_run_id: int | None = None
     is_mock: bool = True

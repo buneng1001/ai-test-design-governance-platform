@@ -130,7 +130,7 @@ def test_stale_case_review_cannot_be_confirmed_after_new_requirement_version(cli
     _publish_version(client, project_id, "V2")
 
     response = client.post(f"/api/projects/{project_id}/case-review-batches/{batch['id']}/confirm", json={
-        "confirmer_name": "测试工程师", "inclusion": {batch["suggestions"][0]["candidate_id"]: True},
+        "confirmer_name": "测试工程师", "inclusion": {candidate["id"]: True for candidate in generation["candidates"]},
     })
 
     assert response.status_code == 409

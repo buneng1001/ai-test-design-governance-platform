@@ -176,6 +176,44 @@ export interface RequirementAnalysis {
     stable_requirement_id: string | null;
   }>;
   confirmed_by: string | null;
+  test_point_review: TestPointReview | null;
+}
+
+export interface TestPointReview {
+  review_id: string;
+  status: "draft" | "confirmed";
+  modules: string[];
+  test_items: Array<{
+    test_item_id: string;
+    name: string;
+    module: string;
+    stable_requirement_ids: string[];
+    source_references: Array<{ filename: string; locator: string; reference_id: string }>;
+  }>;
+  test_points: Array<{
+    skill_test_point_id: string;
+    platform_test_point_id: string;
+    test_item_id: string;
+    stable_requirement_ids: string[];
+    rule_ids: string[];
+    source_references: Array<{ filename: string; locator: string; reference_id: string }>;
+    direction: "normal" | "exception" | "boundary" | "risk" | "permission";
+    objective: string;
+  }>;
+  coverage_check: {
+    passed: boolean;
+    total_confirmed_requirement_count: number;
+    covered_requirement_count: number;
+    uncovered_requirement_ids: string[];
+    isolated_test_point_ids: string[];
+    missing_test_item_ids: string[];
+    direction_gaps: Record<string, string[]>;
+  };
+  selected_test_item_ids: string[];
+  selected_test_point_ids: string[];
+  handoff_version: string | null;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
 }
 
 export interface AIRun {
@@ -275,6 +313,8 @@ export interface CandidateTestCase {
   test_item?: string;
   pre_test_notes?: string;
   software_version?: string;
+  platform_test_point_id?: string | null;
+  skill_test_point_id?: string | null;
 }
 
 export interface CaseGeneration {
@@ -495,6 +535,7 @@ export interface ProjectWorkflowView {
   asset_ids: {
     requirement_version_id: number | null;
     requirement_analysis_id: number | null;
+    test_point_review_id: string | null;
     test_design_id: number | null;
     case_generation_id: number | null;
     case_review_batch_id: number | null;

@@ -58,6 +58,7 @@ from app.task_api import register_task_routes
 from app.task_repository import TestTaskRepository
 from app.template_api import register_template_routes
 from app.template_repository import TemplateMappingRepository
+from app.test_point_review_api import register_test_point_review_routes
 from app.ai_run_api import register_ai_run_routes as _register_ai_run_routes
 from app.workflow_api import register_workflow_routes
 
@@ -154,6 +155,7 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
     _register_requirement_routes(app, context)
     _register_requirement_review_routes(app, context)
     register_review_suggestion_routes(app, context)
+    register_test_point_review_routes(app, context)
     register_workflow_routes(app, context)
     register_design_routes(
         app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
