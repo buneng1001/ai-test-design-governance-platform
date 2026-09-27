@@ -31,7 +31,7 @@ def test_migrate_removes_legacy_plaintext_model_keys(tmp_path) -> None:
     database_path = tmp_path / "legacy-model-config.sqlite3"
     with sqlite3.connect(database_path) as connection:
         connection.executescript(MIGRATIONS[0])
-        for version, migration in enumerate(MIGRATIONS[1:-1], start=1):
+        for version, migration in enumerate(MIGRATIONS[1:-2], start=1):
             connection.executescript(migration)
             connection.execute(
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
@@ -47,3 +47,22 @@ def test_migrate_removes_legacy_plaintext_model_keys(tmp_path) -> None:
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT config_json FROM ai_model_configs").fetchall() == []
         assert connection.execute("SELECT name FROM sqlite_master WHERE name = 'ai_model_connection_records'").fetchone()
+
+
+def test_migrate_adds_candidate_history_to_previous_schema(tmp_path) -> None:
+    database_path = tmp_path / "legacy-case-generation.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(MIGRATIONS[0])
+        for version, migration in enumerate(MIGRATIONS[1:-1], start=1):
+            connection.executescript(migration)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (version, "2026-01-01T00:00:00+00:00"),
+            )
+
+    ProjectRepository(database_path).migrate()
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'case_generation_history'"
+        ).fetchone()

@@ -9,6 +9,7 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from app.ai_schemas import AIModelConfig, AIOutputEnvelope, AITaskType, MockScenario
+from app.case_generation_contract import build_mock_case_generation, case_generation_prompt
 from app.review_schemas import StructuredAnalysisOutput
 
 
@@ -71,6 +72,8 @@ class MockModelService:
             return ModelResponse(raw_output={"contract_version": "ai-output.v1", "items": []})
         if request.task_type == "requirement_review" and request.input_context:
             return ModelResponse(raw_output=_mock_requirement_analysis(request))
+        if request.task_type == "case_generation" and request.input_context:
+            return ModelResponse(raw_output=build_mock_case_generation(request.input_context))
         seed = json.dumps(
             {
                 "task_type": request.task_type,
@@ -384,6 +387,8 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
 
 
 def _prompt_for_request(request: ModelRequest) -> str:
+    if request.task_type == "case_generation":
+        return case_generation_prompt(request.input_context)
     if request.task_type != "requirement_review":
         scope = ""
         if request.task_type == "case_generation" and request.input_context:

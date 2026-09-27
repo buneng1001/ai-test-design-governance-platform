@@ -291,6 +291,7 @@ export interface TemplateMappingVersion {
 
 export interface CandidateTestCase {
   id: string;
+  candidate_key: string;
   title: string;
   objective: string;
   variant: string;
@@ -315,6 +316,7 @@ export interface CandidateTestCase {
   software_version?: string;
   platform_test_point_id?: string | null;
   skill_test_point_id?: string | null;
+  pending_confirmations: string[];
 }
 
 export interface CaseGeneration {
@@ -325,6 +327,7 @@ export interface CaseGeneration {
   status: "succeeded" | "empty" | "validation_failed" | "failed" | "needs_confirmation";
   template_diagnostics: Array<{ code: string; message: string }>;
   candidates: CandidateTestCase[];
+  removed_candidate_ids: string[];
 }
 
 export interface CaseReviewSuggestion {

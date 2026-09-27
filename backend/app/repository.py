@@ -330,6 +330,15 @@ MIGRATIONS = (
     );
     DELETE FROM ai_model_configs;
     """,
+    """
+    CREATE TABLE IF NOT EXISTS case_generation_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        generation_id INTEGER NOT NULL REFERENCES case_generations(id),
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

@@ -9,7 +9,7 @@ export const generateCases = (projectId: number, designId: number, templateMappi
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       ...(templateMappingId > 0 ? { template_mapping_id: templateMappingId } : {}),
         accept_template_limitations: acceptTemplateLimitations,
-      variants: ["normal", "boundary", "invalid"], strict_conflicts: strictConflicts, modules, mode,
+      variants: ["normal", "boundary", "invalid", "scenario"], strict_conflicts: strictConflicts, modules, mode,
     }),
   },
 );
@@ -52,6 +52,20 @@ export const editCase = (projectId: number, batchId: number, caseId: string, fie
   unknown>): Promise<CaseReviewBatch> => request(
   `/api/projects/${projectId}/case-review-batches/${batchId}/cases/${caseId}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields),
+  },
+);
+export const editGeneratedCase = (projectId: number, generationId: number, candidateId: string,
+  fields: Record<string, unknown>): Promise<CaseGeneration> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}/candidates/${candidateId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields),
+  },
+);
+export const setGeneratedCaseRemoved = (projectId: number, generationId: number, candidateId: string,
+  removed: boolean): Promise<CaseGeneration> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}/candidates/${candidateId}/removal`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      removed, reason: removed ? "测试工程师移除候选用例" : "测试工程师恢复候选用例",
+    }),
   },
 );
 export const changeCaseStatuses = (projectId: number, batchId: number, stableCaseIds: string[],

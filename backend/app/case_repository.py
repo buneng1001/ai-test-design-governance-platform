@@ -24,6 +24,8 @@ class CaseGenerationRepository:
 
     def create(self, generation: CaseGeneration) -> CaseGeneration:
         with self.connect() as connection:
+            if not generation.original_candidates:
+                generation.original_candidates = [item.model_copy(deep=True) for item in generation.candidates]
             cursor = connection.execute(
                 "INSERT INTO case_generations(project_id, design_id, payload_json, created_at) VALUES (?, ?, ?, ?)",
                 (
@@ -34,9 +36,24 @@ class CaseGenerationRepository:
             generation.id = cursor.lastrowid or 0
             for candidate in generation.candidates:
                 candidate.generation_id = generation.id
+            for candidate in generation.original_candidates:
+                candidate.generation_id = generation.id
             connection.execute(
                 "UPDATE case_generations SET payload_json = ? WHERE id = ?",
                 (generation.model_dump_json(), generation.id),
+            )
+        return generation
+
+    def save(self, generation: CaseGeneration, event_type: str) -> CaseGeneration:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE case_generations SET payload_json = ? WHERE id = ? AND project_id = ?",
+                (generation.model_dump_json(), generation.id, generation.project_id),
+            )
+            connection.execute(
+                "INSERT INTO case_generation_history(generation_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (generation.id, event_type, generation.model_dump_json(), datetime.now(UTC).isoformat()),
             )
         return generation
 

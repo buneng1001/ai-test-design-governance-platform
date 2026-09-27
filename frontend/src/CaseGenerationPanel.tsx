@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 
-import { CandidateTestCase, CaseGeneration, editCase, generateCases } from "./api";
+import {
+  CandidateTestCase, CaseGeneration, editGeneratedCase, generateCases, setGeneratedCaseRemoved,
+} from "./api";
 import { CaseReviewPanel } from "./CaseReviewPanel";
 
-export function CaseGenerationPanel({ projectId }: { projectId: number }) {
-  const [designId, setDesignId] = useState(1);
-  const [mappingId, setMappingId] = useState(0);
+export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: number; designId?: number }) {
   const [generation, setGeneration] = useState<CaseGeneration | null>(null);
   const [error, setError] = useState("");
   const [strictConflicts, setStrictConflicts] = useState(false);
@@ -13,7 +13,6 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const [search, setSearch] = useState("");
   const [priority, setPriority] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
-  const [removed, setRemoved] = useState<string[]>([]);
   const [editedIds, setEditedIds] = useState<string[]>([]);
   const [moduleFilter, setModuleFilter] = useState("all");
   const [testItemFilter, setTestItemFilter] = useState("all");
@@ -24,7 +23,7 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const generate = async () => {
     try {
       const created = await generateCases(
-        projectId, designId, mappingId, false, strictConflicts,
+        projectId, designId, 0, false, strictConflicts,
         modules.split(",").map((item) => item.trim()).filter(Boolean), mode,
       );
       setGeneration(created);
@@ -37,12 +36,12 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const filteredCandidates = useMemo(() => (generation?.candidates ?? []).filter((candidate) => {
     const matchesSearch = !search || `${candidate.title} ${candidate.module ?? ""} ${candidate.test_item ?? ""}`
       .toLowerCase().includes(search.toLowerCase());
-    const isRemoved = removed.includes(candidate.id);
+    const isRemoved = (generation?.removed_candidate_ids ?? []).includes(candidate.id);
     return matchesSearch && (priority === "all" || candidate.priority === priority)
       && (moduleFilter === "all" || candidate.module === moduleFilter)
       && (testItemFilter === "all" || candidate.test_item === testItemFilter)
       && (statusFilter === "all" || (statusFilter === "removed") === isRemoved);
-  }), [generation, moduleFilter, priority, removed, search, statusFilter, testItemFilter]);
+  }), [generation, moduleFilter, priority, search, statusFilter, testItemFilter]);
   const visibleCandidates = filteredCandidates.slice((page - 1) * 10, page * 10);
   const modulesForFilter = [...new Set((generation?.candidates ?? []).map((candidate) => candidate.module).filter(Boolean))];
   const testItemsForFilter = [...new Set((generation?.candidates ?? []).map((candidate) => candidate.test_item).filter(Boolean))];
@@ -73,20 +72,47 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
   const toggleSelected = (candidateId: string) => setSelected((current) => current.includes(candidateId)
     ? current.filter((id) => id !== candidateId) : [...current, candidateId]);
 
-  const removeSelected = () => {
-    setRemoved((current) => [...new Set([...current, ...selected])]);
-    setSelected([]);
+  const saveEdits = async () => {
+    if (!generation || editedIds.length === 0) return;
+    try {
+      let updated = generation;
+      for (const candidateId of editedIds) {
+        const candidate = updated.candidates.find((item) => item.id === candidateId);
+        if (!candidate) continue;
+        updated = await editGeneratedCase(projectId, updated.id, candidateId, {
+          title: candidate.title, priority: candidate.priority, preconditions: candidate.preconditions,
+          input: candidate.input, steps: candidate.steps, overall_expectation: candidate.overall_expectation,
+          test_type: candidate.test_type, module: candidate.module, test_item: candidate.test_item,
+          pre_test_notes: candidate.pre_test_notes, software_version: candidate.software_version,
+          reason: "生成预览中的人工修改",
+        });
+      }
+      setGeneration(updated);
+      setEditedIds([]);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "候选用例编辑保存失败");
+    }
+  };
+
+  const setSelectedRemoval = async (removed: boolean, candidateIds = selected) => {
+    if (!generation || candidateIds.length === 0) return;
+    try {
+      let updated = generation;
+      for (const candidateId of candidateIds) {
+        updated = await setGeneratedCaseRemoved(projectId, updated.id, candidateId, removed);
+      }
+      setGeneration(updated);
+      setSelected([]);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "候选用例移除状态保存失败");
+    }
   };
 
   return <section className="panel" aria-label="候选测试用例生成">
     <h2 id="case-generation">生成可追踪的候选测试用例</h2>
-    <p className="field-help">测试设计编号由“测试维度、范围、风险与自动化”生成；模板映射编号由模板上传后生成。两者都是系统内部 ID，不是 V1/V2。</p>
-    <label>已确认测试设计编号
-      <input type="number" min="1" value={designId} onChange={(event) => setDesignId(Number(event.target.value))} />
-    </label>
-    <label>模板映射编号（留空使用默认 XLSX 模板）
-      <input type="number" min="1" value={mappingId} onChange={(event) => setMappingId(Number(event.target.value))} />
-    </label>
+    <p className="field-help">当前已确认测试设计将使用默认 XLSX 用例模板；用例内容由模型根据已确认测试点生成。</p>
     <label>生成方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
       <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
     </select></label>
@@ -117,10 +143,13 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
           <option value="included">当前纳入</option><option value="removed">已移除</option><option value="all">全部状态</option>
         </select></label>
         <button onClick={() => setSelected(visibleCandidates.map((candidate) => candidate.id))}>全选当前结果</button>
-        <button onClick={removeSelected} disabled={selected.length === 0}>批量移除</button>
-        {removed.length > 0 && <button onClick={() => setRemoved([])}>恢复已移除用例</button>}
+        <button onClick={() => void saveEdits()} disabled={editedIds.length === 0}>保存候选编辑</button>
+        <button onClick={() => void setSelectedRemoval(true)} disabled={selected.length === 0}>批量移除</button>
+        {(generation.removed_candidate_ids ?? []).length > 0 && <button onClick={() => void setSelectedRemoval(
+          false, generation.removed_candidate_ids ?? [],
+        )}>恢复已移除用例</button>}
       </div>
-      <p>用例表预览：显示 {visibleCandidates.length} / {filteredCandidates.length} 条，已移除 {removed.length} 条</p>
+      <p>用例表预览：显示 {visibleCandidates.length} / {filteredCandidates.length} 条，已移除 {(generation.removed_candidate_ids ?? []).length} 条</p>
       <table className="case-table"><thead><tr><th>选择</th><th>测试用例标题</th><th>优先级</th><th>预置条件</th><th>操作步骤</th><th>预期结果</th><th>软件版本</th></tr></thead>
         <tbody>{visibleCandidates.map((candidate) => <tr key={candidate.id}>
           <td><input type="checkbox" aria-label={`选择-${candidate.id}`} checked={selected.includes(candidate.id)} onChange={() => toggleSelected(candidate.id)} /></td>
@@ -151,15 +180,15 @@ export function CaseGenerationPanel({ projectId }: { projectId: number }) {
           <p>目标：{candidate.objective}</p>
           <p>追踪：需求 {candidate.requirement_ids.join("、")}；范围 {candidate.scope_item_id}； 风险 {candidate.risk_item_id}；{candidate.priority}</p>
           <p>设计依据：{candidate.design_basis.map((basis) => basis.reason).join("；")}</p>
+          {candidate.pending_confirmations.length > 0 && <p className="error">待确认：{candidate.pending_confirmations.join("；")}</p>}
         </article>)}
       </div>
       {generation.candidates.length > 0 && <CaseReviewPanel
         projectId={projectId}
         generationId={generation.id}
         candidateIds={generation.candidates.map((candidate) => candidate.id)}
-        excludedCandidateIds={removed}
+        excludedCandidateIds={generation.removed_candidate_ids ?? []}
         candidates={generation.candidates}
-        editedIds={editedIds}
         mode={mode}
       />}
     </div>}
