@@ -101,5 +101,5 @@ export function WorkflowShell({ projectId, testObject, softwareVersion }: {
 
 function statusLabel(status: ProjectWorkflowView["tabs"][number]["status"]): string {
   return ({ locked: "未解锁", current: "当前步骤", completed: "已完成",
-    needs_reconfirmation: "需要重新确认" })[status];
+    needs_attention: "需要处置", needs_reconfirmation: "需要重新确认" })[status];
 }

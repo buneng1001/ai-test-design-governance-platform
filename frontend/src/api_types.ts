@@ -486,8 +486,9 @@ export interface ProjectWorkflowView {
     id: ProjectWorkflowView["current_step"];
     label: string;
     stage_ids: string[];
-    status: "locked" | "current" | "completed" | "needs_reconfirmation";
+    status: "locked" | "current" | "completed" | "needs_attention" | "needs_reconfirmation";
     blocked_reason: string | null;
+    blocked_requirement_ids: string[];
   }>;
   blockers: string[];
   next_action: { label: string; target_tab: ProjectWorkflowView["current_step"] };

@@ -35,6 +35,10 @@ def build_project_workflow_view(
         item for item in analysis.suggestions
         if item.disposition == "pending_confirmation"
     ] if analysis else []
+    blocked_requirement_ids = sorted({
+        requirement_id for suggestion in pending_suggestions for requirement_id in suggestion.related_requirement_ids
+    })
+    suggestions_generated = bool(analysis and analysis.suggestions)
     suggestions_completed = bool(analysis and analysis.suggestions and not pending_suggestions)
     design = designs.latest_for_version(project_id, version.id) if version else None
     generation = next((item for item in generations.list(project_id) if design and item.design_id == design.id), None)
@@ -51,15 +55,19 @@ def build_project_workflow_view(
         ),
         WorkflowTab(
             id="suggestions", label="新增建议", stage_ids=TAB_STAGE_IDS["suggestions"],
-            status="completed" if suggestions_completed else "current" if analysis and analysis.status == "confirmed" and selected else "locked",
+            status="completed" if suggestions_completed else "needs_attention" if pending_suggestions
+            else "current" if analysis and analysis.status == "confirmed" and selected else "locked",
             blocked_reason="仍有待处置新增建议；它们只影响关联需求或模块。" if pending_suggestions
             else None if analysis and analysis.status == "confirmed" and selected
             else "请先确认结构预览中的需求，并至少选择一项进入分析范围。",
+            blocked_requirement_ids=blocked_requirement_ids,
         ),
         WorkflowTab(
             id="review", label="审核", stage_ids=TAB_STAGE_IDS["review"],
-            status="current" if suggestions_completed else "locked",
-            blocked_reason=None if suggestions_completed else "请先完成 S03–S06 新增建议处置，再审核测试点与覆盖。",
+            status="current" if suggestions_generated else "locked",
+            blocked_reason="仍有待处置建议；审核时仅应排除其关联需求或模块。" if pending_suggestions
+            else None if suggestions_generated else "请先生成 S03–S06 新增建议，再审核测试点与覆盖。",
+            blocked_requirement_ids=blocked_requirement_ids,
         ),
         WorkflowTab(
             id="cases", label="测试用例", stage_ids=TAB_STAGE_IDS["cases"],

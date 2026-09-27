@@ -14,7 +14,7 @@ def build_review_suggestions(analysis: RequirementAnalysis) -> list[ReviewSugges
     now = datetime.now(UTC)
     suggestions: list[ReviewSuggestion] = []
     directions = (
-        ("normal", "missing_acceptance_criteria", "material_explicit", "补充正常场景的可验证结果，确保已确认需求在满足前置条件时可复核。", None),
+        ("normal", "missing_acceptance_criteria", "analysis_inference", "补充正常场景的可验证结果，确保已确认需求在满足前置条件时可复核。", None),
         ("exception", "missing_constraint_or_error_handling", "analysis_inference", "补充异常输入或失败处理的预期，避免异常路径只依赖隐含假设。", None),
         ("boundary", "omission", "analysis_inference", "补充边界条件的明确约束或验收标准，避免阈值和极值由测试人员猜测。", "请明确边界条件、允许值和超界后的处理规则。"),
         ("risk", "dependency_unclear", "awaiting_confirmation", "确认依赖不可用、状态中断或恢复失败时的风险处置与可观察结果。", "请明确依赖异常或恢复失败时的降级、提示和恢复要求。"),

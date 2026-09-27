@@ -9,7 +9,7 @@ from app.main_route_context import AppRouteContext
 from app.requirement_review_api import require_review
 from app.review_repository import RequirementReviewRepository
 from app.review_schemas import (
-    RequirementAnalysis, SupplementalRequirementCandidate, SupplementalRequirementConfirmationInput,
+    AtomicRequirement, RequirementAnalysis, SupplementalRequirementCandidate, SupplementalRequirementConfirmationInput,
     SuggestionDispositionInput,
 )
 from app.review_suggestion_service import build_review_suggestions
@@ -46,12 +46,18 @@ def register_review_suggestion_routes(app: FastAPI, context: AppRouteContext) ->
         suggestion = next((item for item in analysis.suggestions if item.suggestion_id == suggestion_id), None)
         if suggestion is None:
             raise HTTPException(status_code=404, detail="新增建议不存在")
+        candidate = _supplemental_candidate(analysis, suggestion_id)
+        if candidate and candidate.decision == "confirmed":
+            raise HTTPException(status_code=409, detail="补充需求已经确认，不能再改变其来源建议的处置")
         suggestion.disposition = update.disposition
         if update.statement is not None:
             suggestion.statement = update.statement
+            suggestion.source_type = "human_confirmed"
         suggestion.updated_at = datetime.now(UTC)
         if update.disposition in {"accepted", "modified"} and suggestion.proposed_requirement_statement:
             _create_supplemental_candidate(analysis, suggestion.suggestion_id, update.statement or suggestion.proposed_requirement_statement)
+        elif candidate:
+            analysis.supplemental_requirement_candidates.remove(candidate)
         return reviews.save(analysis, "review_suggestion_disposed")
 
     @app.post(
@@ -75,12 +81,25 @@ def register_review_suggestion_routes(app: FastAPI, context: AppRouteContext) ->
             candidate.confirmed_by = confirmation.confirmer_name
             candidate.confirmed_at = now
             candidate.updated_at = now
+            analysis.atomic_requirements.append(AtomicRequirement(
+                candidate_id=candidate.candidate_id,
+                stable_requirement_id=candidate.stable_requirement_id,
+                statement=candidate.statement,
+                source_reference=candidate.source_references[0],
+                decision="accepted",
+                created_at=candidate.created_at,
+                updated_at=now,
+            ))
+            analysis.selected_requirement_ids.append(candidate.candidate_id)
         return reviews.save(analysis, "supplemental_requirements_confirmed")
 
 
 def _create_supplemental_candidate(analysis: RequirementAnalysis, suggestion_id: str, statement: str) -> None:
     candidate_id = f"supplemental-{hashlib.sha256(suggestion_id.encode()).hexdigest()[:12]}"
-    if any(item.candidate_id == candidate_id for item in analysis.supplemental_requirement_candidates):
+    existing = _supplemental_candidate(analysis, suggestion_id)
+    if existing:
+        existing.statement = statement
+        existing.updated_at = datetime.now(UTC)
         return
     suggestion = next(item for item in analysis.suggestions if item.suggestion_id == suggestion_id)
     now = datetime.now(UTC)
@@ -92,3 +111,10 @@ def _create_supplemental_candidate(analysis: RequirementAnalysis, suggestion_id:
         created_at=now,
         updated_at=now,
     ))
+
+
+def _supplemental_candidate(
+    analysis: RequirementAnalysis, suggestion_id: str
+) -> SupplementalRequirementCandidate | None:
+    candidate_id = f"supplemental-{hashlib.sha256(suggestion_id.encode()).hexdigest()[:12]}"
+    return next((item for item in analysis.supplemental_requirement_candidates if item.candidate_id == candidate_id), None)
