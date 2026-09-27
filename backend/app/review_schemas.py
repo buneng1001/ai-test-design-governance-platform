@@ -30,6 +30,10 @@ RequirementType = Literal["functional", "interface", "data", "quality", "constra
 CandidateDecision = Literal["pending_confirmation", "accepted", "rejected"]
 VisualDecision = Literal["pending_confirmation", "accepted", "rejected"]
 ConflictDecision = Literal["unresolved", "srs_preferred", "implementation_preferred", "both_retained", "awaiting_external_confirmation"]
+SuggestionDirection = Literal["normal", "exception", "boundary", "risk"]
+SuggestionSourceType = Literal["material_explicit", "human_confirmed", "analysis_inference", "awaiting_confirmation"]
+SuggestionDisposition = Literal["pending_confirmation", "accepted", "rejected", "modified", "awaiting_external_confirmation"]
+SupplementalRequirementDecision = Literal["pending_confirmation", "confirmed"]
 
 
 class AtomicRequirement(BaseModel):
@@ -68,6 +72,44 @@ class VisualInference(BaseModel):
     decision: VisualDecision = "pending_confirmation"
     created_at: datetime
     updated_at: datetime
+
+
+class ReviewSuggestion(BaseModel):
+    """Step 03～06 的可处置建议；建议与需求事实保持分离。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    suggestion_id: str
+    direction: SuggestionDirection
+    problem_type: ReviewFindingType
+    statement: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    source_type: SuggestionSourceType
+    source_references: list[SourceReference] = Field(min_length=1, max_length=20)
+    related_requirement_ids: list[str] = Field(min_length=1, max_length=20)
+    impact_scope: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    proposed_requirement_statement: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
+    ] | None = None
+    disposition: SuggestionDisposition = "pending_confirmation"
+    created_at: datetime
+    updated_at: datetime
+
+
+class SupplementalRequirementCandidate(BaseModel):
+    """由已采纳建议派生，但尚未重新确认的需求候选。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    statement: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    source_references: list[SourceReference] = Field(min_length=1, max_length=20)
+    related_requirement_ids: list[str] = Field(min_length=1, max_length=20)
+    decision: SupplementalRequirementDecision = "pending_confirmation"
+    stable_requirement_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    confirmed_by: str | None = None
+    confirmed_at: datetime | None = None
 
 
 class AnalyzedRequirement(BaseModel):
@@ -198,6 +240,8 @@ class RequirementAnalysis(BaseModel):
     selected_requirement_ids: list[str] = Field(default_factory=list)
     test_items: list[AnalyzedTestItem] = Field(default_factory=list)
     acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
+    suggestions: list[ReviewSuggestion] = Field(default_factory=list)
+    supplemental_requirement_candidates: list[SupplementalRequirementCandidate] = Field(default_factory=list)
     analysis_batches: list[AnalysisBatch] = Field(default_factory=list)
     ai_run_id: int | None = None
     is_mock: bool = True
@@ -223,6 +267,26 @@ class FindingUpdate(BaseModel):
     status: ReviewFindingStatus
     summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)] | None = None
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)] | None = None
+
+
+class SuggestionDispositionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    disposition: Literal["accepted", "rejected", "modified", "awaiting_external_confirmation"]
+    statement: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)] | None = None
+
+    @model_validator(mode="after")
+    def require_text_for_modified_suggestion(self) -> "SuggestionDispositionInput":
+        if self.disposition == "modified" and self.statement is None:
+            raise ValueError("修改建议时必须提供修改后的内容")
+        return self
+
+
+class SupplementalRequirementConfirmationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_ids: list[str] = Field(min_length=1, max_length=100)
+    confirmer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
 
 class AtomicRequirementBulkConfirmationInput(BaseModel):

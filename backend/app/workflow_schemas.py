@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 WorkflowTabId = Literal["upload", "preview", "suggestions", "review", "cases"]
-WorkflowTabStatus = Literal["locked", "current", "completed", "needs_reconfirmation"]
+WorkflowTabStatus = Literal["locked", "current", "completed", "needs_attention", "needs_reconfirmation"]
 
 
 class WorkflowAction(BaseModel):
@@ -22,6 +22,7 @@ class WorkflowTab(BaseModel):
     stage_ids: list[str]
     status: WorkflowTabStatus
     blocked_reason: str | None = None
+    blocked_requirement_ids: list[str] = Field(default_factory=list)
 
 
 class WorkflowAssetIds(BaseModel):

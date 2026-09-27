@@ -41,6 +41,7 @@ from app.report_service import ReportService
 from app.requirement_api import register_requirement_routes as _register_requirement_routes
 from app.requirement_repository import RequirementRepository
 from app.requirement_review_api import register_requirement_review_routes as _register_requirement_review_routes
+from app.review_suggestion_api import register_review_suggestion_routes
 from app.requirement_review_api import require_review
 from app.requirement_service import build_requirement_package
 from app.requirement_schemas import RequirementPackage, RequirementPackageInput, RequirementVersion
@@ -152,6 +153,7 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
     _register_project_asset_routes(app, context)
     _register_requirement_routes(app, context)
     _register_requirement_review_routes(app, context)
+    register_review_suggestion_routes(app, context)
     register_workflow_routes(app, context)
     register_design_routes(
         app, repository, requirement_repository, review_repository, design_repository, ai_run_repository

@@ -60,7 +60,15 @@ def register_design_routes(
             TestDimension(id=stable_id("dimension", name), name=name, sort_order=index)
             for index, name in enumerate(input_data.dimension_names)
         ]
-        scope_items = _scopes(review, dimensions[0].id)
+        blocked_requirement_ids = {
+            requirement_id
+            for suggestion in review.suggestions
+            if suggestion.disposition == "pending_confirmation"
+            for requirement_id in suggestion.related_requirement_ids
+        }
+        scope_items = _scopes(review, dimensions[0].id, blocked_requirement_ids)
+        if not scope_items:
+            raise HTTPException(status_code=409, detail="已选择需求均有待处置新增建议，不能进入测试设计")
         raw_ai_output = {
             "contract_version": "ai-output.v1",
             "items": [
@@ -294,7 +302,10 @@ def _require_scope(design: DesignAsset, scope_id: str) -> TestScopeItem:
     return scope
 
 
-def _scopes(review: RequirementAnalysis, dimension_id: str) -> list[TestScopeItem]:
+def _scopes(
+    review: RequirementAnalysis, dimension_id: str, blocked_requirement_ids: set[str] | None = None
+) -> list[TestScopeItem]:
+    blocked_requirement_ids = blocked_requirement_ids or set()
     return [
         TestScopeItem(
             id=stable_id("scope", item.stable_requirement_id or item.candidate_id), title=item.statement[:200],
@@ -304,6 +315,7 @@ def _scopes(review: RequirementAnalysis, dimension_id: str) -> list[TestScopeIte
         for item in review.atomic_requirements
         if item.decision == "accepted" and item.stable_requirement_id
         and item.candidate_id in set(review.selected_requirement_ids)
+        and item.candidate_id not in blocked_requirement_ids
     ]
 
 

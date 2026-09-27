@@ -23,6 +23,8 @@ export const createRequirementReview = (projectId: number, versionId: number,
     method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ mode, force_new: forceNew }),
   });
+export const getRequirementReview = (projectId: number, analysisId: number): Promise<RequirementAnalysis> =>
+  request(`/api/projects/${projectId}/requirement-reviews/${analysisId}`);
 export const updateAtomicRequirement = (projectId: number, analysisId: number, candidateId: string,
   input: { decision: "accepted" | "rejected"; statement?: string }): Promise<RequirementAnalysis> =>
   request(`/api/projects/${projectId}/requirement-reviews/${analysisId}/atomic-requirements/${candidateId}`, {
@@ -63,4 +65,18 @@ export const decideRequirementConflict = (projectId: number, analysisId: number,
   request(`/api/projects/${projectId}/requirement-reviews/${analysisId}/conflicts/${conflictId}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision,
       confirmer_name: confirmerName }),
+  });
+export const generateReviewSuggestions = (projectId: number, analysisId: number): Promise<RequirementAnalysis> =>
+  request(`/api/projects/${projectId}/requirement-reviews/${analysisId}/suggestions/generate`, { method: "POST" });
+export const disposeReviewSuggestion = (projectId: number, analysisId: number, suggestionId: string,
+  disposition: "accepted" | "rejected" | "modified" | "awaiting_external_confirmation", statement?: string): Promise<RequirementAnalysis> =>
+  request(`/api/projects/${projectId}/requirement-reviews/${analysisId}/suggestions/${suggestionId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ disposition, ...(statement ? { statement } : {}) }),
+  });
+export const confirmSupplementalRequirements = (projectId: number, analysisId: number, candidateIds: string[],
+  confirmerName: string): Promise<RequirementAnalysis> =>
+  request(`/api/projects/${projectId}/requirement-reviews/${analysisId}/supplemental-requirements/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidate_ids: candidateIds, confirmer_name: confirmerName }),
   });
