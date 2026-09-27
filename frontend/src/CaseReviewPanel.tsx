@@ -11,13 +11,12 @@ const roleLabels: Record<string, string> = {
   project_manager: "项目经理评审员",
 };
 
-export function CaseReviewPanel({ projectId, generationId, candidateIds, excludedCandidateIds = [], candidates = [], editedIds = [], mode = "mock" }: {
+export function CaseReviewPanel({ projectId, generationId, candidateIds, excludedCandidateIds = [], candidates = [], mode = "mock" }: {
   projectId: number;
   generationId: number;
   candidateIds: string[];
   excludedCandidateIds?: string[];
   candidates?: CandidateTestCase[];
-  editedIds?: string[];
   mode?: "mock" | "real";
 }) {
   const [batch, setBatch] = useState<CaseReviewBatch | null>(null);
@@ -28,16 +27,7 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
 
   const startReview = async () => {
     try {
-      let created = await createCaseReviews(projectId, generationId, mode);
-      for (const candidate of candidates.filter((item) => editedIds.includes(item.id))) {
-        created = await editCase(projectId, created.id, candidate.id, {
-          title: candidate.title, priority: candidate.priority, preconditions: candidate.preconditions,
-          input: candidate.input, steps: candidate.steps, overall_expectation: candidate.overall_expectation,
-          test_type: candidate.test_type, module: candidate.module, test_item: candidate.test_item,
-          pre_test_notes: candidate.pre_test_notes, software_version: candidate.software_version,
-          reason: "生成预览中的人工修改",
-        });
-      }
+      const created = await createCaseReviews(projectId, generationId, mode);
       setBatch(created);
       setError("");
     } catch (reason) {

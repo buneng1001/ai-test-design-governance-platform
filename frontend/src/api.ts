@@ -33,7 +33,7 @@ export {
 export { uploadTemplate, confirmTemplate, validateTemplate } from "./template_api";
 export {
   generateCases, createCaseReviews, disposeCaseReviewSuggestion, confirmCaseReviews, changeCaseStatus,
-  editCase, changeCaseStatuses, exportCaseFile, publishTestTask,
+  editCase, editGeneratedCase, setGeneratedCaseRemoved, changeCaseStatuses, exportCaseFile, publishTestTask,
 } from "./case_api";
 export {
   createExecutionBatch, downloadManualExecutionFile, importExecutionResults, resolveExecutionConflict,

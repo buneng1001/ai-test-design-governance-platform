@@ -6,6 +6,8 @@ import { RequirementImportPanel } from "./RequirementImportPanel";
 import { RequirementReviewPanel } from "./RequirementReviewPanel";
 import { ReviewSuggestionsPanel } from "./ReviewSuggestionsPanel";
 import { TestPointReviewPanel } from "./TestPointReviewPanel";
+import { TestDesignPanel } from "./TestDesignPanel";
+import { CaseGenerationPanel } from "./CaseGenerationPanel";
 
 const pageDescriptions: Record<ProjectWorkflowView["tabs"][number]["id"], string> = {
   upload: "上传当前任务需要的需求资料，并查看文件解析状态与诊断。",
@@ -94,7 +96,12 @@ export function WorkflowShell({ projectId, testObject, softwareVersion }: {
           analysisId={workflow.asset_ids.requirement_analysis_id} onWorkflowChanged={() => void refreshWorkflow()} />}
         {active.id === "review" && <TestPointReviewPanel projectId={projectId}
           analysisId={workflow.asset_ids.requirement_analysis_id} onWorkflowChanged={() => void refreshWorkflow()} />}
-        {active.id === "cases" && <p className="muted">请先在审核页确认测试点与生成范围。</p>}
+        {active.id === "cases" && <>
+          {!workflow.asset_ids.test_design_id && <TestDesignPanel projectId={projectId}
+            onConfirmed={() => void refreshWorkflow()} />}
+          {workflow.asset_ids.test_design_id && <CaseGenerationPanel projectId={projectId}
+            designId={workflow.asset_ids.test_design_id} />}
+        </>}
       </article>
       {error && <p role="alert" className="error">{error}</p>}
     </section>

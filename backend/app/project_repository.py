@@ -120,6 +120,8 @@ class ProjectRepository:
                                "(SELECT id FROM template_mappings WHERE project_id = ?)", (project_id,))
             connection.execute("DELETE FROM case_review_history WHERE batch_id IN "
                                "(SELECT id FROM case_review_batches WHERE project_id = ?)", (project_id,))
+            connection.execute("DELETE FROM case_generation_history WHERE generation_id IN "
+                               "(SELECT id FROM case_generations WHERE project_id = ?)", (project_id,))
             connection.execute("DELETE FROM ai_run_dispositions WHERE run_id IN "
                                "(SELECT id FROM ai_runs WHERE project_id = ?)", (project_id,))
             connection.execute("DELETE FROM ai_run_attempts WHERE run_id IN "

@@ -3,7 +3,7 @@ import io
 import zipfile
 
 from fastapi.testclient import TestClient
-from app.ai_service import ModelResponse, OpenAICompatibleModelService
+from app.ai_service import ModelResponse, MockModelService, OpenAICompatibleModelService
 
 
 def _setup(
@@ -123,6 +123,166 @@ def test_generation_keeps_traceability_granularity_and_internal_basis(client: Te
     assert client.get(f"/api/projects/{project_id}/case-generations/{generation['id']}").status_code == 200
 
 
+def test_generation_preserves_structured_model_case_content(client: TestClient, monkeypatch) -> None:
+    project_id, design_id, mapping_id = _setup(client)
+    captured_context = {}
+
+    def complete(_: MockModelService, request) -> ModelResponse:
+        point = request.input_context[0]
+        captured_context.update(point)
+        return ModelResponse(raw_output={
+            "contract_version": "case-generation.v1",
+            "items": [{
+                "test_point_id": point["platform_test_point_id"],
+                "variant": "boundary",
+                "case_discriminator": "maximum-allowed-value",
+                "title": "模型给出的保存上限边界",
+                "objective": "验证保存输入达到上限时的可观察行为",
+                "preconditions": ["设备已连接", "存储空间充足"],
+                "steps": [{
+                    "order": 1, "action": "输入最大允许值", "input": "最大边界值",
+                    "expected": "界面允许提交",
+                }, {
+                    "order": 2, "action": "提交保存", "input": "点击保存",
+                    "expected": "返回保存成功提示",
+                }],
+                "overall_expectation": "保存后的状态与最大允许输入一致。",
+                "evidence_requirements": ["保存请求与响应", "保存后状态截图"],
+                "design_basis": [{
+                    "method": "boundary", "reason": "最大允许值是独立边界场景。",
+                }],
+                "pending_confirmations": ["最大允许值的具体数值待产品确认"],
+            }],
+        })
+
+    monkeypatch.setattr(MockModelService, "complete", complete)
+    response = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        json={"template_mapping_id": mapping_id, "variants": ["normal", "boundary"]},
+    )
+
+    assert response.status_code == 201
+    candidate = response.json()["candidates"][0]
+    assert candidate["title"] == "模型给出的保存上限边界"
+    assert candidate["objective"] == "验证保存输入达到上限时的可观察行为"
+    assert candidate["steps"][1]["expected"] == "返回保存成功提示"
+    assert candidate["pending_confirmations"] == ["最大允许值的具体数值待产品确认"]
+    assert captured_context["rules"]
+
+
+def test_generation_rejects_model_case_outside_selected_test_points(client: TestClient, monkeypatch) -> None:
+    project_id, design_id, mapping_id = _setup(client)
+
+    def complete(_: MockModelService, request) -> ModelResponse:
+        return ModelResponse(raw_output={
+            "contract_version": "case-generation.v1",
+            "items": [{
+                "test_point_id": "point-not-selected", "variant": "normal", "case_discriminator": "outside-scope", "title": "越界用例",
+                "objective": "不应保存", "preconditions": ["无"],
+                "steps": [{"order": 1, "action": "执行", "input": "输入", "expected": "结果"}],
+                "overall_expectation": "不应进入候选", "evidence_requirements": ["日志"],
+                "design_basis": [{"method": "scenario", "reason": "越界检查"}],
+                "pending_confirmations": [],
+            }],
+        })
+
+    monkeypatch.setattr(MockModelService, "complete", complete)
+    response = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        json={"template_mapping_id": mapping_id},
+    )
+
+    assert response.status_code == 422
+    assert client.get(f"/api/projects/{project_id}/case-generations").json() == []
+
+
+def test_generation_rejects_unmarked_uncertainty_as_candidate_fact(client: TestClient, monkeypatch) -> None:
+    project_id, design_id, mapping_id = _setup(client)
+
+    def complete(_: MockModelService, request) -> ModelResponse:
+        point = request.input_context[0]
+        return ModelResponse(raw_output={
+            "contract_version": "case-generation.v1",
+            "items": [{
+                "test_point_id": point["platform_test_point_id"], "variant": "normal",
+                "case_discriminator": "unconfirmed-threshold", "title": "阈值行为", "objective": "验证阈值",
+                "preconditions": ["设备已连接"],
+                "steps": [{"order": 1, "action": "输入阈值", "input": "待确认阈值", "expected": "系统响应"}],
+                "overall_expectation": "系统符合规则", "evidence_requirements": ["日志"],
+                "design_basis": [{"method": "scenario", "reason": "阈值场景"}], "pending_confirmations": [],
+            }],
+        })
+
+    monkeypatch.setattr(MockModelService, "complete", complete)
+    response = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        json={"template_mapping_id": mapping_id},
+    )
+
+    assert response.status_code == 422
+    assert client.get(f"/api/projects/{project_id}/case-generations").json() == []
+
+
+def test_generation_distinguishes_boundary_candidates_by_deterministic_key(client: TestClient, monkeypatch) -> None:
+    project_id, design_id, mapping_id = _setup(client)
+
+    def complete(_: MockModelService, request) -> ModelResponse:
+        point = request.input_context[0]
+        def item(discriminator: str, title: str) -> dict:
+            return {
+                "test_point_id": point["platform_test_point_id"], "variant": "boundary",
+                "case_discriminator": discriminator, "title": title, "objective": "验证保存上限边界",
+                "preconditions": ["设备已连接"],
+                "steps": [{"order": 1, "action": "输入边界值", "input": discriminator, "expected": "允许保存"}],
+                "overall_expectation": "系统行为符合确认规则", "evidence_requirements": ["请求响应"],
+                "design_basis": [{"method": "boundary", "reason": "独立边界值"}], "pending_confirmations": [],
+            }
+        return ModelResponse(raw_output={"contract_version": "case-generation.v1", "items": [
+            item("maximum-allowed", "最大允许值"), item("just-above-maximum", "超过最大值"),
+        ]})
+
+    monkeypatch.setattr(MockModelService, "complete", complete)
+    response = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        json={"template_mapping_id": mapping_id, "variants": ["boundary"]},
+    )
+
+    assert response.status_code == 201
+    candidates = response.json()["candidates"]
+    assert [item["title"] for item in candidates] == ["最大允许值", "超过最大值"]
+    assert len({item["candidate_key"] for item in candidates}) == 2
+    assert len({item["id"] for item in candidates}) == 2
+
+
+def test_candidate_edit_removal_and_restore_are_persisted_with_original_content(client: TestClient) -> None:
+    project_id, design_id, mapping_id = _setup(client)
+    generation = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        json={"template_mapping_id": mapping_id, "variants": ["normal"]},
+    ).json()
+    candidate = generation["candidates"][0]
+    edited = client.patch(
+        f"/api/projects/{project_id}/case-generations/{generation['id']}/candidates/{candidate['id']}",
+        json={"title": "人工编辑后的候选标题", "reason": "补充可读性"},
+    )
+    assert edited.status_code == 200
+    removed = client.patch(
+        f"/api/projects/{project_id}/case-generations/{generation['id']}/candidates/{candidate['id']}/removal",
+        json={"removed": True, "reason": "本次不纳入"},
+    )
+    assert removed.status_code == 200
+    restored = client.patch(
+        f"/api/projects/{project_id}/case-generations/{generation['id']}/candidates/{candidate['id']}/removal",
+        json={"removed": False, "reason": "重新纳入审核"},
+    )
+    assert restored.status_code == 200
+    persisted = client.get(f"/api/projects/{project_id}/case-generations/{generation['id']}").json()
+    assert persisted["candidates"][0]["title"] == "人工编辑后的候选标题"
+    assert persisted["original_candidates"][0]["title"] == candidate["title"]
+    assert persisted["removed_candidate_ids"] == []
+    assert [item["action"] for item in persisted["candidate_history"]] == ["edited", "removed", "restored"]
+
+
 def test_template_limitation_requires_explicit_confirmation(client: TestClient) -> None:
     project_id, design_id, mapping_id = _setup(client, template_field="design_basis")
     blocked = client.post(
@@ -158,7 +318,7 @@ def test_real_case_generation_uses_session_model(client: TestClient, monkeypatch
 
     def complete(_: OpenAICompatibleModelService, request) -> ModelResponse:
         assert request.model_parameters.provider == "custom"
-        return ModelResponse(raw_output={"contract_version": "ai-output.v1", "items": []})
+        return ModelResponse(raw_output={"contract_version": "case-generation.v1", "items": []})
 
     monkeypatch.setattr(OpenAICompatibleModelService, "complete", complete)
     config = client.put("/api/ai-session-config", headers={"X-Session-ID": "real-case-test"}, json={

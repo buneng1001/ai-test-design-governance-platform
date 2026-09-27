@@ -45,6 +45,20 @@ test("刷新恢复上游变更后的重新确认状态", async () => {
   expect(screen.getByText("下一步操作：重新确认受影响的下游草稿")).toBeInTheDocument();
 });
 
+test("测试用例页使用当前工作流中的已确认测试设计生成候选", async () => {
+  mockRequests({ ...initialWorkflow, current_step: "cases", progress: 4,
+    tabs: initialWorkflow.tabs.map((tab) => tab.id === "cases" ? {
+      ...tab, status: "current", blocked_reason: null,
+    } : tab),
+    next_action: { label: "生成并管理测试用例", target_tab: "cases" },
+    asset_ids: { ...initialWorkflow.asset_ids, test_design_id: 6 },
+  });
+  render(<WorkflowShell projectId={1} testObject="虚构设备" softwareVersion="v1.0.0" />);
+
+  expect(await screen.findByRole("button", { name: "生成候选测试用例" })).toBeInTheDocument();
+  expect(screen.getByText(/当前已确认测试设计将使用默认 XLSX 用例模板/)).toBeInTheDocument();
+});
+
 test("工作流查询失败时显示可理解错误", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("服务不可用", { status: 503 }));
   render(<WorkflowShell projectId={1} testObject="虚构设备" softwareVersion="v1.0.0" />);

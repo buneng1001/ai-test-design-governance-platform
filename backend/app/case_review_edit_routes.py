@@ -42,7 +42,8 @@ def register_edit_routes(router: APIRouter, deps: CaseReviewRouteDependencies) -
             updates = {}
         else:
             updates = data.model_dump(exclude_none=True, exclude={"reason", "restore_original"})
-        original_candidate = previous.original_candidate if previous else source
+        generation_original = next((item for item in generation.original_candidates if item.id == source.id), source)
+        original_candidate = previous.original_candidate if previous else generation_original
         if previous and original_candidate is None:
             original_candidate = next(
                 (item for item in generation.candidates if item.id == source.id), source

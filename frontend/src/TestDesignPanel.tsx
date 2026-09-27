@@ -11,7 +11,7 @@ import {
 } from "./api";
 import type { RequirementVersion } from "./api_types";
 
-export function TestDesignPanel({ projectId }: { projectId: number }) {
+export function TestDesignPanel({ projectId, onConfirmed }: { projectId: number; onConfirmed?: () => void }) {
   const [versionId, setVersionId] = useState("");
   const [versions, setVersions] = useState<RequirementVersion[]>([]);
   const [confirmerName, setConfirmerName] = useState("测试工程师");
@@ -41,6 +41,7 @@ export function TestDesignPanel({ projectId }: { projectId: number }) {
     try {
       setDesign(await confirmTestDesign(projectId, design.id, confirmerName));
       setError("");
+      onConfirmed?.();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "测试设计确认失败");
     }
