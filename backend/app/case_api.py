@@ -16,6 +16,7 @@ from app.repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
 from app.review_repository import RequirementReviewRepository
 from app.template_repository import TemplateMappingRepository
+from app.test_point_review_service import selected_test_points
 
 
 def register_case_routes(
@@ -54,6 +55,12 @@ def register_case_routes(
             mapping = templates.get(project_id, mapping_id)
         if version is None or review is None or review.status != "confirmed":
             raise HTTPException(status_code=409, detail="需求确认后才能生成候选测试用例")
+        test_point_review = review.test_point_review
+        if test_point_review is None or test_point_review.status != "confirmed":
+            raise HTTPException(status_code=409, detail="请先确认 Step 07～08 测试点审核")
+        selected_points = selected_test_points(test_point_review)
+        if not selected_points:
+            raise HTTPException(status_code=409, detail="未选择测试点范围，不能生成候选测试用例")
         # 未解决冲突默认只排除受影响模块；严格模式才阻止整批生成。
         unresolved = [
             item for item in review.conflicts
@@ -92,6 +99,14 @@ def register_case_routes(
         request = ModelRequest(
             task_type="case_generation", prompt_version="case-generation.v1", model_parameters=model_parameters,
             input_asset_versions=asset_versions, scenario=data.scenario,
+            input_context=tuple({
+                "platform_test_point_id": point.platform_test_point_id,
+                "skill_test_point_id": point.skill_test_point_id,
+                "test_item_id": point.test_item_id,
+                "stable_requirement_ids": point.stable_requirement_ids,
+                "rule_ids": point.rule_ids,
+                "objective": point.objective,
+            } for point in selected_points),
             base_url=session_config.base_url if session_config else "",
             api_key=session_config.api_key if session_config else "",
         )
@@ -124,11 +139,19 @@ def register_case_routes(
         )
         if generation.status != "empty":
             project = projects.get(project_id)
+            selected_requirement_ids = {
+                requirement_id for point in selected_points for requirement_id in point.stable_requirement_ids
+            }
+            selected_candidates = [
+                item.candidate_id for item in review.atomic_requirements
+                if item.stable_requirement_id in selected_requirement_ids
+            ]
             generation.candidates = build_candidates(
                 0, project_id, design, review, version, mapping, data.variants, limitations,
-                review.selected_requirement_ids, excluded_modules,
-                set(data.modules),
+                selected_candidates, excluded_modules,
+                None,
                 project.software_version if project else "",
+                selected_points,
             )
         return generations.create(generation)
 

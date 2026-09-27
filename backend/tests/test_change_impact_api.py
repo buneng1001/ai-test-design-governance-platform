@@ -61,7 +61,7 @@ def test_v1_v2_impact_requires_confirmation_and_confirms_regression(client) -> N
     confirmed = client.post(
         f"/api/projects/{project_id}/case-review-batches/{review_batch['id']}/confirm",
         json={"confirmer_name": "测试工程师", "inclusion": {
-            review_batch["suggestions"][0]["candidate_id"]: True
+            item["candidate_id"]: True for item in review_batch["suggestions"]
         }},
     )
     assert confirmed.status_code == 200, confirmed.text

@@ -26,7 +26,7 @@ def test_reports_are_independent_downloadable_contracts_and_audit_excludes_raw_a
     confirmed = client.post(
         f"/api/projects/{project_id}/case-review-batches/{review['id']}/confirm",
         json={"confirmer_name": "测试工程师", "inclusion": {
-            review["suggestions"][0]["candidate_id"]: True,
+            item["candidate_id"]: True for item in review["suggestions"]
         }},
     )
     assert confirmed.status_code == 200, confirmed.text

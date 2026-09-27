@@ -4,7 +4,7 @@ export type { ConnectionTestResult, ModelDiscoveryResult, ModelOption, ModelProv
   ModelServiceError, SessionModelConfig, SessionModelConfigStatus, AIRun } from "./api_types_ai";
 export type {
   AssetProvenanceInput, AssetProvenanceRecord, RequirementFileInput, ParseDiagnostic, RequirementMaterial,
-  RequirementPackage, RequirementVersion, RequirementAnalysis, TestDesign, TemplateColumn, TemplateSheet,
+  RequirementPackage, RequirementVersion, RequirementAnalysis, TestPointReview, TestDesign, TemplateColumn, TemplateSheet,
   TemplateMappingVersion, CandidateTestCase, CaseGeneration, CaseReviewSuggestion, CaseReviewBatch, TestTask,
   ExecutionBatch, ExecutionResultStatus, ExecutionResultRecord, ExecutionBatchResults, CoverageMetric,
   CoverageSummary, ChangeImpactAnalysis, RegressionCandidate, RegressionSelection, ReportDocument,
@@ -21,7 +21,7 @@ export {
   createRequirementPackage, reparseRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview, getRequirementReview,
   updateAtomicRequirement, bulkConfirmAtomicRequirements, updateFinding, updateVisualInference, confirmRequirementReview,
   updateRequirementSelection, decideRequirementConflict, generateReviewSuggestions, disposeReviewSuggestion,
-  confirmSupplementalRequirements,
+  confirmSupplementalRequirements, generateTestPointReview, updateTestPointScope, confirmTestPointReview,
 } from "./requirement_api";
 export {
   listModelProviders, getSessionModelConfig, saveSessionModelConfig, discoverSessionModels,

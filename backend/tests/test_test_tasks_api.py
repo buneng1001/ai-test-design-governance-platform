@@ -21,7 +21,7 @@ def _confirmed_batch(client) -> tuple[int, dict]:
         f"/api/projects/{project_id}/case-review-batches/{batch['id']}/confirm",
         json={
             "confirmer_name": "测试工程师",
-            "inclusion": {batch["suggestions"][0]["candidate_id"]: True},
+            "inclusion": {item["candidate_id"]: True for item in batch["suggestions"]},
         },
     )
     assert confirmed.status_code == 200

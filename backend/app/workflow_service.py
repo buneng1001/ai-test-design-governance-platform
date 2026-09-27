@@ -33,13 +33,18 @@ def build_project_workflow_view(
     selected = bool(analysis and analysis.selected_requirement_ids)
     pending_suggestions = [
         item for item in analysis.suggestions
-        if item.disposition == "pending_confirmation"
+        if item.disposition in {"pending_confirmation", "awaiting_external_confirmation"}
     ] if analysis else []
     blocked_requirement_ids = sorted({
         requirement_id for suggestion in pending_suggestions for requirement_id in suggestion.related_requirement_ids
     })
     suggestions_generated = bool(analysis and analysis.suggestions)
     suggestions_completed = bool(analysis and analysis.suggestions and not pending_suggestions)
+    test_point_review = analysis.test_point_review if analysis else None
+    review_scope_selected = bool(test_point_review and (
+        test_point_review.selected_test_item_ids or test_point_review.selected_test_point_ids
+    ))
+    review_completed = bool(test_point_review and test_point_review.status == "confirmed" and review_scope_selected)
     design = designs.latest_for_version(project_id, version.id) if version else None
     generation = next((item for item in generations.list(project_id) if design and item.design_id == design.id), None)
     batch = case_reviews.latest_for_generation(project_id, generation.id) if generation else None
@@ -64,15 +69,17 @@ def build_project_workflow_view(
         ),
         WorkflowTab(
             id="review", label="审核", stage_ids=TAB_STAGE_IDS["review"],
-            status="current" if suggestions_generated else "locked",
+            status="completed" if review_completed else "current" if suggestions_generated else "locked",
             blocked_reason="仍有待处置建议；审核时仅应排除其关联需求或模块。" if pending_suggestions
+            else "请在审核页选择至少一个测试项或测试点，确认后才能生成用例。"
+            if test_point_review and test_point_review.status == "confirmed" and not review_scope_selected
             else None if suggestions_generated else "请先生成 S03–S06 新增建议，再审核测试点与覆盖。",
             blocked_requirement_ids=blocked_requirement_ids,
         ),
         WorkflowTab(
             id="cases", label="测试用例", stage_ids=TAB_STAGE_IDS["cases"],
-            status="locked",
-            blocked_reason="请先完成 S07–S08 审核、覆盖检查和生成范围确认。",
+            status="current" if review_completed else "locked",
+            blocked_reason=None if review_completed else "请先完成 S07–S08 审核、覆盖检查和生成范围确认。",
         ),
     ]
     if invalidated:
@@ -96,6 +103,7 @@ def build_project_workflow_view(
         asset_ids=WorkflowAssetIds(
             requirement_version_id=version.id if version else None,
             requirement_analysis_id=analysis.id if analysis else None,
+            test_point_review_id=test_point_review.review_id if test_point_review else None,
             test_design_id=design.id if design else None,
             case_generation_id=generation.id if generation else None,
             case_review_batch_id=batch.id if batch else None,

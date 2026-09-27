@@ -64,6 +64,8 @@ class CandidateTestCase(BaseModel):
     planned_execution_time: str = ""
     attachment: str = ""
     software_version: str = ""
+    platform_test_point_id: str | None = None
+    skill_test_point_id: str | None = None
 
 
 class CaseGenerationInput(BaseModel):

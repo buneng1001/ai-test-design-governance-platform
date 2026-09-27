@@ -5,6 +5,7 @@ import { ModelConfigPanel } from "./ModelConfigPanel";
 import { RequirementImportPanel } from "./RequirementImportPanel";
 import { RequirementReviewPanel } from "./RequirementReviewPanel";
 import { ReviewSuggestionsPanel } from "./ReviewSuggestionsPanel";
+import { TestPointReviewPanel } from "./TestPointReviewPanel";
 
 const pageDescriptions: Record<ProjectWorkflowView["tabs"][number]["id"], string> = {
   upload: "上传当前任务需要的需求资料，并查看文件解析状态与诊断。",
@@ -91,7 +92,8 @@ export function WorkflowShell({ projectId, testObject, softwareVersion }: {
           onWorkflowChanged={() => void refreshWorkflow()} />}
         {active.id === "suggestions" && <ReviewSuggestionsPanel projectId={projectId}
           analysisId={workflow.asset_ids.requirement_analysis_id} onWorkflowChanged={() => void refreshWorkflow()} />}
-        {active.id === "review" && <p className="muted">测试点审核与范围选择将在后续步骤提供。</p>}
+        {active.id === "review" && <TestPointReviewPanel projectId={projectId}
+          analysisId={workflow.asset_ids.requirement_analysis_id} onWorkflowChanged={() => void refreshWorkflow()} />}
         {active.id === "cases" && <p className="muted">请先在审核页确认测试点与生成范围。</p>}
       </article>
       {error && <p role="alert" className="error">{error}</p>}

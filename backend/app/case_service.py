@@ -4,6 +4,7 @@ from app.case_schemas import CaseDesignBasis, CandidateTestCase, CaseVariant, Te
 from app.design_schemas import DesignAsset, RiskAssessment, TestScopeItem
 from app.requirement_schemas import RequirementVersion, SourceReference
 from app.review_schemas import RequirementAnalysis
+from app.test_point_review_schemas import ReviewTestPoint
 from app.template_schemas import TemplateMappingVersion
 from app.design_service import stable_id
 
@@ -48,6 +49,7 @@ def build_candidates(
     excluded_modules: set[str] | None = None,
     included_modules: set[str] | None = None,
     software_version: str = "",
+    selected_test_points: list[ReviewTestPoint] | None = None,
 ) -> list[CandidateTestCase]:
     case_sheet = next(sheet for sheet in mapping.sheets if sheet.role == "case" and sheet.participates)
     selected = set(selected_requirement_ids) if selected_requirement_ids is not None else None
@@ -61,6 +63,7 @@ def build_candidates(
     requirement_modules = {item.requirement_id: item.module for item in review.requirements}
     risks = {item.scope_item_id: item for item in design.risks}
     automations = {item.scope_item_id: item for item in design.automation_candidates}
+    points = selected_test_points or []
     candidates: list[CandidateTestCase] = []
     for scope in design.scope_items:
         linked = [requirements[item] for item in scope.requirement_ids if item in requirements]
@@ -73,12 +76,20 @@ def build_candidates(
         risk = risks.get(scope.id)
         if not linked or risk is None:
             continue
-        references = [item.source_reference for item in linked]
-        for variant in variants:
-            candidate_id = stable_id("candidate-case", f"{project_id}:{scope.id}:{variant}")
+        scope_points = [
+            point for point in points
+            if set(point.stable_requirement_ids).intersection(scope.requirement_ids)
+        ]
+        for point in scope_points:
+            variant = _variant_for_direction(point.direction)
+            point_requirements = [item for item in linked if item.stable_requirement_id in point.stable_requirement_ids]
+            if not point_requirements:
+                continue
+            references = [item.source_reference for item in point_requirements]
+            candidate_id = stable_id("candidate-case", f"{project_id}:{scope.id}:{point.platform_test_point_id}")
             candidates.append(_candidate(
                 candidate_id, generation_id, project_id, scope, risk, automations.get(scope.id), variant,
-                references, case_sheet.name, limitations, software_version,
+                references, case_sheet.name, limitations, software_version, point,
             ))
     return candidates
 
@@ -87,20 +98,21 @@ def _candidate(
     candidate_id: str, generation_id: int, project_id: int, scope: TestScopeItem, risk: RiskAssessment,
     automation: object, variant: CaseVariant, references: list[SourceReference], sheet_name: str,
     limitations: list[dict], software_version: str,
+    test_point: ReviewTestPoint,
 ) -> CandidateTestCase:
     labels = {"normal": "正常路径", "boundary": "边界值", "equivalence": "等价类", "invalid": "非法输入", "scenario": "异常场景"}
     label = labels[variant]
     return CandidateTestCase(
         id=candidate_id, project_id=project_id, generation_id=generation_id,
-        title=f"{scope.title} - {label}", objective=f"验证{scope.title}在{label}下满足已确认需求。", variant=variant,
-        preconditions=[f"测试对象处于可验证{scope.title}的初始状态"],
+        title=f"{test_point.objective} - {label}", objective=test_point.objective, variant=variant,
+        preconditions=[f"测试对象处于可验证{test_point.objective}的初始状态"],
         steps=[
             TestStep(order=1, action="准备测试对象", input=f"按{label}准备输入", expected="测试对象接受准备状态"),
-            TestStep(order=2, action="执行目标能力", input=scope.description, expected="系统返回与输入对应的可观察结果"),
+            TestStep(order=2, action="执行目标能力", input=test_point.objective, expected="系统返回与输入对应的可观察结果"),
         ],
-        overall_expectation=f"{scope.title}完成后，系统行为符合已确认原子需求。",
+        overall_expectation=f"{test_point.objective}完成后，系统行为符合已确认原子需求。",
         evidence_requirements=["保留关键操作截图或请求响应", "记录最终状态和必要日志"],
-        requirement_ids=scope.requirement_ids, requirement_references=references, scope_item_id=scope.id,
+        requirement_ids=test_point.stable_requirement_ids, requirement_references=references, scope_item_id=scope.id,
         risk_item_id=f"risk-{scope.id}", priority=risk.priority, case_sheet_name=sheet_name,
         automation_mapping=f"automation-{scope.id}" if automation is not None else None,
         unexpressed_fields=[item.get("code", "unknown") for item in limitations],
@@ -109,7 +121,19 @@ def _candidate(
             reason=f"按{label}拆分为可独立确认和执行的用例。", source_references=references,
         )],
         created_at=datetime.now(UTC),
-        input=scope.description,
-        test_item=scope.title,
+        input=test_point.objective,
+        test_item=test_point.test_item_id,
         software_version=software_version,
+        platform_test_point_id=test_point.platform_test_point_id,
+        skill_test_point_id=test_point.skill_test_point_id,
     )
+
+
+def _variant_for_direction(direction: str) -> CaseVariant:
+    return {
+        "normal": "normal",
+        "boundary": "boundary",
+        "exception": "invalid",
+        "risk": "scenario",
+        "permission": "normal",
+    }[direction]

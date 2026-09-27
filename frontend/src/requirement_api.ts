@@ -80,3 +80,20 @@ export const confirmSupplementalRequirements = (projectId: number, analysisId: n
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ candidate_ids: candidateIds, confirmer_name: confirmerName }),
   });
+export const generateTestPointReview = (projectId: number, analysisId: number): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/test-point-review`, { method: "POST" },
+);
+export const updateTestPointScope = (projectId: number, analysisId: number, testItemIds: string[],
+  testPointIds: string[]): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/test-point-review/selection`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ test_item_ids: testItemIds, test_point_ids: testPointIds }),
+  },
+);
+export const confirmTestPointReview = (projectId: number, analysisId: number,
+  confirmerName: string): Promise<RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-reviews/${analysisId}/test-point-review/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmer_name: confirmerName }),
+  },
+);
