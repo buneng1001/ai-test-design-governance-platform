@@ -1,30 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
-  confirmRequirementReview,
-  bulkConfirmAtomicRequirements,
-  createRequirementReview,
-  listRequirementVersions,
-  RequirementAnalysis,
-  updateAtomicRequirement,
-  updateFinding,
-  updateVisualInference,
-  decideRequirementConflict,
-  updateRequirementSelection,
+  confirmRequirementReview, createRequirementReview, decideRequirementConflict, listRequirementVersions,
+  RequirementAnalysis, updateFinding, updateRequirementSelection, updateVisualInference,
 } from "./api";
 import type { RequirementVersion } from "./api_types";
 
-type RequirementReviewPanelProps = {
-  projectId: number;
-  versionRefreshKey?: number;
-  newlyPublishedVersionId?: number | null;
-};
+type RequirementReviewPanelProps = { projectId: number; versionRefreshKey?: number; newlyPublishedVersionId?: number | null };
 
-export function RequirementReviewPanel({
-  projectId,
-  versionRefreshKey = 0,
-  newlyPublishedVersionId = null,
-}: RequirementReviewPanelProps) {
+export function RequirementReviewPanel({ projectId, versionRefreshKey = 0, newlyPublishedVersionId = null }: RequirementReviewPanelProps) {
   const [analysis, setAnalysis] = useState<RequirementAnalysis | null>(null);
   const [versions, setVersions] = useState<RequirementVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState("");
@@ -32,286 +16,144 @@ export function RequirementReviewPanel({
   const [confirmerName, setConfirmerName] = useState("测试工程师");
   const [error, setError] = useState("");
   const [mode, setMode] = useState<"mock" | "real">("mock");
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
+  const [keyword, setKeyword] = useState("");
   const [moduleFilter, setModuleFilter] = useState("");
-  const [problemOnly, setProblemOnly] = useState(false);
+  const [typeFilter, setTypeFilter] = useState("");
+  const [problemFilter, setProblemFilter] = useState<"all" | "with_problem" | "without_problem">("all");
   const [isRunning, setIsRunning] = useState(false);
-  const [findingDrafts, setFindingDrafts] = useState<Record<string, { summary: string; reason: string }>>({});
-  const [selectedAtomicIds, setSelectedAtomicIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const loadVersions = async () => {
-      try {
-        const result = await listRequirementVersions(projectId);
-        setVersions(result);
-        const preferredVersion = newlyPublishedVersionId !== null
-          ? result.find((item) => item.id === newlyPublishedVersionId)
-          : undefined;
-        if (preferredVersion) {
-          setSelectedVersionId(String(preferredVersion.id));
-        } else if (result.length > 0) {
-          setSelectedVersionId((current) => current && result.some((item) => String(item.id) === current)
-            ? current
-            : String(result[0].id));
-        }
-      } catch (reason) {
-        setError(message(reason));
-      } finally {
-        setLoadingVersions(false);
-      }
-    };
-    void loadVersions();
+    void listRequirementVersions(projectId).then((result) => {
+      setVersions(result);
+      const preferred = newlyPublishedVersionId === null ? undefined : result.find((item) => item.id === newlyPublishedVersionId);
+      setSelectedVersionId((current) => String(preferred?.id ?? (current && result.some((item) => String(item.id) === current)
+        ? current : result[0]?.id ?? "")));
+    }).catch((reason: unknown) => setError(message(reason))).finally(() => setLoadingVersions(false));
   }, [projectId, versionRefreshKey, newlyPublishedVersionId]);
 
-  const runReview = async (forceNew = false) => {
+  const runAnalysis = async (forceNew = false) => {
     if (isRunning) return;
     try {
       if (!selectedVersionId) throw new Error("请先发布并选择需求版本");
-      setIsRunning(true);
-      setError("");
+      setIsRunning(true); setError("");
       setAnalysis(await createRequirementReview(projectId, Number(selectedVersionId), mode, forceNew));
-      setError("");
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setIsRunning(false);
-    }
+    } catch (reason) { setError(message(reason)); } finally { setIsRunning(false); }
   };
-
   const refresh = (request: Promise<RequirementAnalysis>) => {
-    void request.then(setAnalysis).then(() => setError("")).catch((reason: unknown) => {
-      setError(message(reason));
-    });
+    void request.then((result) => { setAnalysis(result); setError(""); }).catch((reason: unknown) => setError(message(reason)));
   };
 
-  const problemIds = new Set((analysis?.findings ?? []).flatMap((finding) =>
-    (analysis?.requirements ?? []).filter((item) => item.source_references.some((source) =>
-      source.reference_id === finding.source_reference?.reference_id,
-    )).map((item) => item.requirement_id),
+  const modules = useMemo(() => [...new Set((analysis?.requirements ?? []).map((item) => item.module))], [analysis]);
+  const types = useMemo(() => [...new Set((analysis?.requirements ?? []).map((item) => item.requirement_type))], [analysis]);
+  const selected = new Set(analysis?.selected_requirement_ids ?? []);
+  const rowHasProblem = (requirement: RequirementAnalysis["requirements"][number]) => {
+    const sourceIds = new Set(requirement.source_references.map((source) => source.reference_id));
+    return (analysis?.findings ?? []).some((item) => item.status === "pending_confirmation"
+      && (item.source_reference === null || (item.source_reference.reference_id !== undefined
+        && sourceIds.has(item.source_reference.reference_id))))
+      || (analysis?.visual_inferences ?? []).some((item) => item.decision === "pending_confirmation"
+        && sourceIds.has(item.source_reference.reference_id))
+      || (analysis?.conflicts ?? []).some((item) => item.affected_modules.includes(requirement.module)
+        && ["unresolved", "awaiting_external_confirmation"].includes(item.decision));
+  };
+  const visibleRequirements = (analysis?.requirements ?? []).filter((item) => {
+    const searchable = `${item.name} ${item.statement} ${item.module}`.toLocaleLowerCase();
+    const hasProblem = rowHasProblem(item);
+    return (!keyword || searchable.includes(keyword.toLocaleLowerCase()))
+      && (!moduleFilter || item.module === moduleFilter) && (!typeFilter || item.requirement_type === typeFilter)
+      && (problemFilter === "all" || (problemFilter === "with_problem") === hasProblem);
+  });
+  const blockedCount = (analysis?.requirements ?? []).filter((item) => selected.has(item.requirement_id) && rowHasProblem(item)).length;
+  const atomicByRequirementId = new Map((analysis?.atomic_requirements ?? []).map((item) => [item.candidate_id, item]));
+  const groupedVisibleRequirements = Object.entries(visibleRequirements.reduce<Record<string, typeof visibleRequirements>>(
+    (groups, item) => ({ ...groups, [item.module]: [...(groups[item.module] ?? []), item] }), {},
   ));
-  const requirements = (analysis?.requirements ?? []).filter((item) =>
-    (!search || `${item.name} ${item.statement} ${item.module}`.includes(search))
-    && (!moduleFilter || item.module === moduleFilter)
-    && (!problemOnly || problemIds.has(item.requirement_id)),
-  );
-  const modules = [...new Set((analysis?.requirements ?? []).map((item) => item.module))];
-  const problemRequirementIds = problemIds;
-  const pageItems = requirements.slice((page - 1) * 20, page * 20);
-  const selected = new Set(analysis?.selected_requirement_ids ?? requirements.map((item) => item.requirement_id));
-  const conflicts = analysis?.conflicts ?? [];
-  const testItems = analysis?.test_items ?? [];
-  const acceptanceCriteria = analysis?.acceptance_criteria ?? [];
-  const atomicGroups = groupAtomicByModule(analysis?.atomic_requirements ?? [], analysis?.requirements ?? []);
 
-  useEffect(() => {
-    setSelectedAtomicIds(new Set(
-      (analysis?.atomic_requirements ?? [])
-        .filter((item) => item.decision === "pending_confirmation")
-        .map((item) => item.candidate_id),
-    ));
-  }, [analysis?.atomic_requirements]);
-
-  return (
-    <section className="panel">
-      <h2 id="requirement-review">需求评审与确认</h2>
-      {!analysis && <>
-        <label>需求版本
-          <select aria-label="需求版本" value={selectedVersionId}
-            disabled={loadingVersions || versions.length === 0}
-            onChange={(event) => setSelectedVersionId(event.target.value)}>
-            {versions.map((item) => <option key={item.id} value={item.id}>
-              V{item.version} · {item.name}
-            </option>)}
-          </select>
-        </label>
-        <label>分析方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
-          <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
-        </select></label>
-        <button disabled={loadingVersions || versions.length === 0 || isRunning} onClick={() => void runReview()}>
-          {isRunning ? "正在分析…" : "运行原子需求与需求评审"}
-        </button>
-        {isRunning && <p role="status" className="running-status">正在使用{mode === "real" ? "真实模型" : "Mock AI"}分析需求，
-          预计需要{mode === "real" ? "10–30 秒" : "1–3 秒"}，请勿重复点击。</p>}
-        {!loadingVersions && versions.length === 0 && <p className="muted">请先发布需求版本。</p>}
-      </>}
-      {error && <p role="alert" className="error">{error}</p>}
-      {analysis && <>
-        <p>状态：{analysis.status === "confirmed" ? "需求已确认" : "等待测试工程师处理"} · 已生成语义分析结果 ·
-          {analysis.is_mock ? " Mock AI" : " 真实模型"}</p>
-        <div className="report-actions review-rerun-actions">
-          <label>重新分析方式<select value={mode}
-            disabled={isRunning}
-            onChange={(event) => setMode(event.target.value as "mock" | "real")}>
-            <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
-          </select></label>
-          <button disabled={isRunning} onClick={() => void runReview(true)}>
-            {isRunning ? "正在分析…" : "重新分析当前需求版本"}
-          </button>
+  return <section className="panel">
+    <h2 id="requirement-review">结构预览与需求确认</h2>
+    {!analysis && <>
+      <label>需求版本<select aria-label="需求版本" value={selectedVersionId} disabled={loadingVersions || !versions.length}
+        onChange={(event) => setSelectedVersionId(event.target.value)}>{versions.map((item) =>
+          <option key={item.id} value={item.id}>V{item.version} · {item.name}</option>)}</select></label>
+      <label>分析方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
+        <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option></select></label>
+      <button disabled={loadingVersions || !versions.length || isRunning} onClick={() => void runAnalysis()}>
+        {isRunning ? "正在分析…" : "生成结构预览"}</button>
+    </>}
+    {error && <p role="alert" className="error">{error}</p>}
+    {analysis && <>
+      <p>状态：{analysis.status === "confirmed" ? "需求已确认" : "等待测试工程师确认"} ·
+        已完成 {analysis.analysis_batches?.length ?? 0} 个分析批次 · {analysis.is_mock ? " Mock AI" : " 真实模型"}</p>
+      {analysis.status === "draft" && <div className="report-actions review-rerun-actions">
+        <label>重新分析方式<select value={mode} disabled={isRunning} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
+          <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option></select></label>
+        <button disabled={isRunning} onClick={() => void runAnalysis(true)}>{isRunning ? "正在分析…" : "重新分析当前需求版本"}</button>
+      </div>}
+      <div className="requirement-summary">
+        <h3 id="grouped-requirements">需求确认表</h3>
+        <p>已选 {selected.size} · 未选 {(analysis.requirements ?? []).length - selected.size} · 阻塞问题 {blockedCount}</p>
+        <p className="field-help">只有本表勾选并完成确认的需求会进入后续分析；未勾选项不会进入建议、测试设计、覆盖率或用例生成。</p>
+        <div className="filter-grid">
+          <label>关键字<input aria-label="关键字" value={keyword} onChange={(event) => setKeyword(event.target.value)} /></label>
+          <label>模块<select aria-label="模块筛选" value={moduleFilter} onChange={(event) => setModuleFilter(event.target.value)}>
+            <option value="">全部模块</option>{modules.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label>类型<select aria-label="类型筛选" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            <option value="">全部类型</option>{types.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label>问题状态<select aria-label="问题状态" value={problemFilter}
+            onChange={(event) => setProblemFilter(event.target.value as typeof problemFilter)}>
+            <option value="all">全部</option><option value="with_problem">有问题</option><option value="without_problem">无问题</option></select></label>
         </div>
-        {isRunning && <p role="status" className="running-status">正在使用{mode === "real" ? "真实模型" : "Mock AI"}分析需求，
-          预计需要{mode === "real" ? "10–30 秒" : "1–3 秒"}，请勿重复点击。</p>}
-        <div className="requirement-summary">
-          <h3 id="grouped-requirements">按模块归并的需求表</h3>
-          {requirements.length === 0 && <p className="muted">模型没有返回需求候选，请检查输入或模型输出。</p>}
-          <label>搜索需求<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} /></label>
-          <label>模块筛选<select value={moduleFilter} onChange={(event) => { setModuleFilter(event.target.value); setPage(1); }}>
-            <option value="">全部模块</option>{modules.map((module) => <option key={module} value={module}>{module}</option>)}
-          </select></label>
-          <label className="checkbox-label"><input type="checkbox" checked={problemOnly} onChange={(event) => setProblemOnly(event.target.checked)} /><span>仅显示有问题标记</span></label>
-          <div className="button-group">
-            <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, []))}>批量取消当前选择</button>
-            <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, requirements.map((item) => item.requirement_id)))}>全选筛选结果</button>
-          </div>
-          {groupByModule(pageItems).map(([module, moduleRequirements]) => <article key={module}>
-            <strong>{module}</strong>
-            <table><thead><tr><th>名称</th><th>类型</th><th>需求</th><th>来源</th></tr></thead>
-              <tbody>{moduleRequirements.map((item) => <tr key={item.requirement_id}>
-                <td><input type="checkbox" checked={selected.has(item.requirement_id)} onChange={() => refresh(updateRequirementSelection(
+        {analysis.status === "draft" && <div className="button-group">
+          <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, [
+            ...new Set([...selected, ...visibleRequirements.map((item) => item.requirement_id)]),
+          ]))}>选择当前筛选结果</button>
+          <button onClick={() => refresh(updateRequirementSelection(projectId, analysis.id, [...selected].filter(
+            (id) => !visibleRequirements.some((item) => item.requirement_id === id),
+          )))}>取消当前筛选结果</button>
+        </div>}
+        {visibleRequirements.length === 0 && <p className="muted">没有符合当前筛选条件的需求。</p>}
+        <table><thead><tr><th>选择</th><th>模块</th><th>名称</th><th>类型</th><th>正文摘要</th><th>问题</th></tr></thead>
+          <tbody>{groupedVisibleRequirements.flatMap(([module, requirements]) => [
+            <tr className="requirement-module-group" key={`module-${module}`}><th colSpan={6}>模块：{module}</th></tr>,
+            ...requirements.map((item) => {
+            const atomic = atomicByRequirementId.get(item.requirement_id);
+            const relatedCriteria = (analysis.acceptance_criteria ?? []).filter((criterion) => criterion.requirement_id === item.requirement_id);
+            const relatedFindings = (analysis.findings ?? []).filter((finding) => item.source_references.some(
+              (source) => finding.source_reference?.reference_id !== undefined
+                && source.reference_id === finding.source_reference.reference_id));
+            const relatedVisuals = (analysis.visual_inferences ?? []).filter((inference) => item.source_references.some(
+              (source) => source.reference_id === inference.source_reference.reference_id));
+            const relatedConflicts = (analysis.conflicts ?? []).filter((conflict) => conflict.affected_modules.includes(item.module));
+            return <tr key={item.requirement_id}>
+              <td><input aria-label={`选择 ${item.name}`} type="checkbox" disabled={analysis.status === "confirmed"}
+                checked={selected.has(item.requirement_id)} onChange={() => refresh(updateRequirementSelection(
                   projectId, analysis.id, selected.has(item.requirement_id)
-                    ? [...selected].filter((id) => id !== item.requirement_id)
-                    : [...selected, item.requirement_id],
-                ))} /> {item.name}</td><td>{item.requirement_type}</td><td>{item.statement}<br />
-                  <small>{item.analysis_note}</small><br />
-                  <small>{problemRequirementIds.has(item.requirement_id) ? "问题标记：有待处理发现" : "问题标记：无"}</small></td>
-                <td>{item.source_references.map((source) => `${source.filename} ${source.locator}`).join("；")}</td>
-              </tr>)}</tbody>
-            </table>
-          </article>)}
-          {requirements.length > 20 && <nav aria-label="需求分页"><button disabled={page === 1} onClick={() => setPage(page - 1)}>上一页</button>
-            <span>第 {page} / {Math.ceil(requirements.length / 20)} 页</span>
-            <button disabled={page >= Math.ceil(requirements.length / 20)} onClick={() => setPage(page + 1)}>下一页</button></nav>}
-          <p>测试项：{testItems.length} · 验收条件：{acceptanceCriteria.length}</p>
-          <p className="field-help">验收条件是对需求可验证结果的检查标准；原子需求候选是需要人工确认、并用于后续追踪的最小需求单元。</p>
-          <h3 id="requirement-conflicts">需求冲突表</h3>
-          {conflicts.length === 0 && <p className="muted">未发现跨资料冲突。</p>}
-          {conflicts.map((conflict) => <article key={conflict.conflict_id}>
-            <strong>{conflict.topic}</strong><p>影响模块：{conflict.affected_modules.join("、")} ·
-              影响测试项：{conflict.affected_test_items.join("、") || "无"} · 状态：{conflict.decision}</p>
-            <p>处理人：{conflict.decided_by ?? "未处理"} · 处理说明：{conflict.decision_note ?? "无"}</p>
-            <p>SRS：{conflict.srs_text}（{conflict.srs_source.filename} {conflict.srs_source.locator}）</p>
-            <p>实现规格：{conflict.implementation_text}（{conflict.implementation_source.filename} {conflict.implementation_source.locator}）</p>
-            {analysis.status === "draft" && <select value={conflict.decision} onChange={(event) => refresh(decideRequirementConflict(
-              projectId, analysis.id, conflict.conflict_id,
-              event.target.value as typeof conflict.decision, confirmerName,
-            ))}><option value="unresolved">未解决</option><option value="srs_preferred">以 SRS 为准</option>
-              <option value="implementation_preferred">以实现规格为准</option><option value="both_retained">两者保留</option>
-              <option value="awaiting_external_confirmation">待外部确认</option></select>}
-          </article>)}
-          <h3 id="atomic-requirements">原子需求候选</h3>
-          <p className="field-help">这里确认的是需求是否作为后续测试设计的正式追踪对象，不是重复确认上面的验收条件。</p>
-          {analysis.atomic_requirements.some((item) => item.decision === "pending_confirmation") &&
-            <div className="button-group">
-              <button disabled={selectedAtomicIds.size === 0} onClick={() => refresh(bulkConfirmAtomicRequirements(
-                projectId, analysis.id, [...selectedAtomicIds],
-              ))}>确认已勾选的原子需求</button>
-            </div>}
-          {atomicGroups.map(([module, candidates]) => <div className="atomic-module-group" key={module}>
-            <strong>{module}</strong>
-            {candidates.map((candidate) => <article key={candidate.candidate_id}>
-            <label className="checkbox-label"><input type="checkbox"
-              checked={selectedAtomicIds.has(candidate.candidate_id)}
-              disabled={candidate.decision !== "pending_confirmation"}
-              onChange={() => setSelectedAtomicIds((current) => {
-                const next = new Set(current);
-                if (next.has(candidate.candidate_id)) next.delete(candidate.candidate_id);
-                else next.add(candidate.candidate_id);
-                return next;
-              })} /><span>{candidate.statement}</span></label>
-            <small>来源：{candidate.source_reference.filename} {candidate.source_reference.locator}</small>
-            {candidate.decision === "pending_confirmation" && <div className="button-group">
-              <button onClick={() => refresh(updateAtomicRequirement(
-                projectId, analysis.id, candidate.candidate_id, { decision: "accepted" },
-              ))}>接受并获得稳定需求 ID</button>
-              <button onClick={() => refresh(updateAtomicRequirement(
-                projectId, analysis.id, candidate.candidate_id, { decision: "rejected" },
-              ))}>拒绝</button>
-            </div>}
-            {candidate.stable_requirement_id && <small>稳定需求 ID：{candidate.stable_requirement_id}</small>}
-            </article>)}
-          </div>)}
-          <h3 id="review-findings">需求评审发现</h3>
-          {analysis.findings.map((finding) => <article key={finding.finding_id}>
-            {finding.status === "pending_confirmation" ? <>
-              <label>问题描述<textarea value={findingDrafts[finding.finding_id]?.summary ?? finding.summary}
-                onChange={(event) => setFindingDrafts((current) => ({ ...current,
-                  [finding.finding_id]: { summary: event.target.value,
-                    reason: current[finding.finding_id]?.reason ?? finding.reason },
-                }))} /></label>
-              <label>修改原因<textarea value={findingDrafts[finding.finding_id]?.reason ?? finding.reason}
-                onChange={(event) => setFindingDrafts((current) => ({ ...current,
-                  [finding.finding_id]: { summary: current[finding.finding_id]?.summary ?? finding.summary,
-                    reason: event.target.value },
-                }))} /></label>
-            </> : <span>{finding.summary}（{finding.finding_type}）</span>}
-            <small>{finding.reason} {finding.source_reference?.locator ?? "来源待补充"}</small>
-            {finding.status === "pending_confirmation" && <div className="button-group">
-              <button onClick={() => {
-                const draft = findingDrafts[finding.finding_id] ?? { summary: finding.summary, reason: finding.reason };
-                refresh(updateFinding(projectId, analysis.id, finding.finding_id, "pending_confirmation",
-                  draft.summary, draft.reason));
-              }}>保存修改</button>
-              <button onClick={() => refresh(updateFinding(
-                projectId, analysis.id, finding.finding_id, "resolved",
-                findingDrafts[finding.finding_id]?.summary, findingDrafts[finding.finding_id]?.reason,
-              ))}>标记已解决</button>
-              <button onClick={() => refresh(updateFinding(
-                projectId, analysis.id, finding.finding_id, "rejected",
-                findingDrafts[finding.finding_id]?.summary, findingDrafts[finding.finding_id]?.reason,
-              ))}>拒绝发现</button>
-            </div>}
-          </article>)}
-          {analysis.visual_inferences.map((inference) => <article key={inference.inference_id}>
-            <span>视觉推断（待人工确认）：{inference.description}</span>
-            <small>来源：{inference.source_reference.locator}</small>
-            {inference.decision === "pending_confirmation" && <div className="button-group">
-              <button onClick={() => refresh(updateVisualInference(
-                projectId, analysis.id, inference.inference_id, "accepted",
-              ))}>
-                接受为需求事实
-              </button>
-              <button onClick={() => refresh(updateVisualInference(
-                projectId, analysis.id, inference.inference_id, "rejected",
-              ))}>拒绝</button>
-            </div>}
-          </article>)}
-        </div>
-        {analysis.status === "draft" && <form className="project-form" onSubmit={(event) => {
-          event.preventDefault();
-          refresh(confirmRequirementReview(projectId, analysis.id, confirmerName));
-        }}>
-          <label>确认人名称<input value={confirmerName} onChange={(event) => setConfirmerName(event.target.value)} /></label>
-          <button type="submit">完成需求确认</button>
-        </form>}
-      </>}
-    </section>
-  );
+                    ? [...selected].filter((id) => id !== item.requirement_id) : [...selected, item.requirement_id],
+                ))} /></td><td>{item.module}</td><td>{item.name}</td><td>{item.requirement_type}</td>
+              <td>{item.statement}<details><summary>展开详情</summary><p>{item.analysis_note}</p>
+                <p>来源：{item.source_references.map((source) => `${source.filename} ${source.locator}`).join("；")}</p>
+                <p>验收条件：{relatedCriteria.map((criterion) => criterion.statement).join("；") || "未提供"}</p>
+                <p>内部原子拆分：{atomic?.statement ?? "未提供"}</p>{atomic?.stable_requirement_id && <p>稳定需求 ID：{atomic.stable_requirement_id}</p>}
+                {relatedFindings.map((finding) => <p key={finding.finding_id}>问题：{finding.summary}（{finding.status}）
+                  {analysis.status === "draft" && finding.status === "pending_confirmation" && <button onClick={() => refresh(updateFinding(
+                    projectId, analysis.id, finding.finding_id, "resolved"))}>标记已处理</button>}</p>)}
+                {relatedVisuals.map((inference) => <p key={inference.inference_id}>视觉推断：{inference.description}（{inference.decision}）
+                  {analysis.status === "draft" && inference.decision === "pending_confirmation" && <button onClick={() => refresh(updateVisualInference(
+                    projectId, analysis.id, inference.inference_id, "rejected"))}>不作为需求事实</button>}</p>)}
+                {relatedConflicts.map((conflict) => <p key={conflict.conflict_id}>冲突：{conflict.topic}（{conflict.decision}）
+                  {analysis.status === "draft" && ["unresolved", "awaiting_external_confirmation"].includes(conflict.decision) && <button onClick={() => refresh(decideRequirementConflict(
+                    projectId, analysis.id, conflict.conflict_id, "srs_preferred", confirmerName))}>以 SRS 为准</button>}</p>)}
+              </details></td><td>{rowHasProblem(item) ? "有阻塞问题" : "无"}</td>
+            </tr>;
+          })])}</tbody>
+        </table>
+      </div>
+      {analysis.status === "draft" && <form className="project-form" onSubmit={(event) => {
+        event.preventDefault(); refresh(confirmRequirementReview(projectId, analysis.id, confirmerName));
+      }}><label>确认人名称<input value={confirmerName} onChange={(event) => setConfirmerName(event.target.value)} /></label>
+        <button type="submit" disabled={!selected.size || blockedCount > 0}>确认已选需求</button></form>}
+    </>}
+  </section>;
 }
 
 const message = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";
-
-const groupByModule = (requirements: RequirementAnalysis["requirements"]): Array<[
-  string, RequirementAnalysis["requirements"]
-]> => Object.entries(requirements.reduce<Record<string, RequirementAnalysis["requirements"]>>(
-  (groups, requirement) => ({ ...groups, [requirement.module]: [...(groups[requirement.module] ?? []), requirement] }),
-  {},
-));
-
-const groupAtomicByModule = (
-  candidates: RequirementAnalysis["atomic_requirements"],
-  requirements: RequirementAnalysis["requirements"],
-): Array<[string, RequirementAnalysis["atomic_requirements"]]> => {
-  const moduleBySource = new Map<string, string>(
-    requirements.flatMap((requirement) => requirement.source_references.map((source) => [
-      `${source.filename}|${source.locator}`, requirement.module,
-    ] as const)),
-  );
-  return Object.entries(candidates.reduce<Record<string, RequirementAnalysis["atomic_requirements"]>>(
-    (groups, candidate) => {
-      const sourceKey = `${candidate.source_reference.filename}|${candidate.source_reference.locator}`;
-      const module = moduleBySource.get(sourceKey) ?? "未分类模块";
-      return { ...groups, [module]: [...(groups[module] ?? []), candidate] };
-    },
-    {},
-  ));
-};

@@ -141,6 +141,18 @@ def semantic_output_to_analysis(
     return requirements, test_items, criteria, atomics, findings, output.conflicts
 
 
+def merge_structured_analysis_outputs(outputs: list[StructuredAnalysisOutput]) -> StructuredAnalysisOutput:
+    """在持久化前再次按整次运行校验跨批次 ID 与关系，禁止局部有效结果伪装为完整分析。"""
+    return StructuredAnalysisOutput.model_validate({
+        "contract_version": "requirement-analysis.v1",
+        "requirements": [item.model_dump(mode="json") for output in outputs for item in output.requirements],
+        "test_items": [item.model_dump(mode="json") for output in outputs for item in output.test_items],
+        "acceptance_criteria": [item.model_dump(mode="json") for output in outputs for item in output.acceptance_criteria],
+        "findings": [item.model_dump(mode="json") for output in outputs for item in output.findings],
+        "conflicts": [item.model_dump(mode="json") for output in outputs for item in output.conflicts],
+    })
+
+
 def _identifier(prefix: str, source_id: str) -> str:
     digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:12]
     return f"{prefix}-{digest}"

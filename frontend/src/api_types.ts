@@ -112,6 +112,13 @@ export interface RequirementAnalysis {
     module: string;
     source_references: Array<{ filename: string; locator: string; reference_id: string }>;
     analysis_note: string;
+    analysis_status: "ready" | "blocked";
+  }>;
+  analysis_batches: Array<{
+    batch_number: number;
+    source_reference_ids: string[];
+    status: "completed";
+    ai_run_id: number;
   }>;
   selected_requirement_ids: string[];
   conflicts: Array<{
@@ -131,7 +138,7 @@ export interface RequirementAnalysis {
     candidate_id: string;
     stable_requirement_id: string | null;
     statement: string;
-    source_reference: { locator: string; filename: string };
+    source_reference: { locator: string; filename: string; reference_id: string };
     decision: "pending_confirmation" | "accepted" | "rejected";
   }>;
   findings: Array<{
@@ -145,7 +152,7 @@ export interface RequirementAnalysis {
   visual_inferences: Array<{
     inference_id: string;
     description: string;
-    source_reference: { locator: string; filename: string };
+    source_reference: { locator: string; filename: string; reference_id: string };
     decision: "pending_confirmation" | "accepted" | "rejected";
   }>;
   confirmed_by: string | null;

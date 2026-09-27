@@ -3,11 +3,13 @@ from datetime import UTC, datetime
 from fastapi import FastAPI, Header, HTTPException
 
 from app.ai_repository import AIRunRepository
-from app.ai_schemas import AIAttempt, AIModelConfig
-from app.ai_service import ModelRequest, analysis_max_tokens, validate_requirement_analysis_output
+from app.ai_schemas import AIModelConfig
+from app.ai_service import analysis_max_tokens
 from app.main_route_context import AppRouteContext
-from app.model_config_service import provider_error_type, service_error
 from app.project_asset_api import require_project
+from app.requirement_analysis_runner import (
+    RequirementAnalysisBatchError, record_aggregate_validation_failure, run_requirement_analysis_batches,
+)
 from app.requirement_repository import RequirementRepository
 from app.requirement_schemas import RequirementVersion
 from app.review_repository import RequirementReviewRepository
@@ -15,6 +17,7 @@ from app.review_schemas import (
     AtomicRequirementBulkConfirmationInput,
     AtomicRequirementUpdate,
     FindingUpdate,
+    AnalysisBatch,
     RequirementAnalysis,
     RequirementAnalysisInput,
     RequirementConfirmationInput,
@@ -23,7 +26,9 @@ from app.review_schemas import (
     RequirementSelectionInput,
     VisualInferenceUpdate,
 )
-from app.review_service import build_analysis_candidates, semantic_output_to_analysis, source_reference_exists
+from app.review_service import (
+    build_analysis_candidates, merge_structured_analysis_outputs, semantic_output_to_analysis, source_reference_exists,
+)
 from app.repository import ProjectRepository
 
 
@@ -88,119 +93,57 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             max_tokens=analysis_max_tokens(session_config.provider, session_config.model)
             if analysis_input.mode == "real" else 1200,
         )
-        request = ModelRequest(
-            task_type="requirement_review",
-            prompt_version="requirement-analysis.v1",
-            model_parameters=model_parameters,
-            input_asset_versions=tuple(input_asset_versions),
-            scenario=analysis_input.scenario,
-            input_context=context_values,
-            base_url=session_config.base_url if session_config else "",
-            api_key=session_config.api_key if session_config else "",
-        )
         selected_model_service = context.real_model_service if analysis_input.mode == "real" else context.model_service
-        attempts: list[AIAttempt] = []
-        output = None
-        validation_errors: list[str] = []
-        last_error_code: str | None = None
-        run_status = "failed"
-        validation_status = "not_run"
-        last_diagnostic: str | None = None
-        for attempt_number in range(1, analysis_input.max_retries + 2):
-            started_at = datetime.now(UTC)
-            elapsed_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
-            try:
-                response = selected_model_service.complete(request)
-            except Exception as exc:
-                # 供应商适配器的未知异常也必须转成可诊断的业务错误，避免直接返回裸 500。
-                response = None
-                last_error_code = "provider_unexpected_error"
-                # 异常字符串可能包含底层请求或授权信息；公开响应仅保留可定位的异常类型。
-                last_diagnostic = type(exc).__name__
-                attempts.append(AIAttempt(
-                    attempt=attempt_number,
-                    started_at=started_at,
-                    elapsed_ms=elapsed_ms,
-                    status="failed",
-                    error_code=last_error_code,
-                    retryable=False,
-                    diagnostic=last_diagnostic,
-                ))
-                break
-            elapsed_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
-            if response.error_code:
-                last_error_code = response.error_code
-                last_diagnostic = response.diagnostic
-                attempts.append(AIAttempt(
-                    attempt=attempt_number,
-                    started_at=started_at,
-                    elapsed_ms=elapsed_ms,
-                    status="failed",
-                    error_code=response.error_code,
-                    retryable=response.retryable,
-                    diagnostic=response.diagnostic,
-                ))
-                if not response.retryable or attempt_number == analysis_input.max_retries + 1:
-                    break
-                continue
-            output, validation_errors = validate_requirement_analysis_output(response.raw_output, context_values)
-            if validation_errors:
-                attempts.append(AIAttempt(
-                    attempt=attempt_number,
-                    started_at=started_at,
-                    elapsed_ms=elapsed_ms,
-                    status="validation_failed",
-                    error_code="schema_invalid",
-                    retryable=False,
-                ))
-                validation_status = "failed"
-                run_status = "validation_failed"
-                break
-            validation_status = "passed"
-            run_status = "succeeded"
-            attempts.append(AIAttempt(
-                attempt=attempt_number,
-                started_at=started_at,
-                elapsed_ms=elapsed_ms,
-                status="succeeded",
-                error_code=None,
-                retryable=False,
-            ))
-            break
-        if output is None:
-            error_type = "invalid_response" if run_status == "validation_failed" else provider_error_type(last_error_code)
-            detail = service_error(
-                "model_call", model_parameters.provider, model_parameters.model, error_type,
-                "schema_invalid" if run_status == "validation_failed" else last_diagnostic,
-            ).model_dump(mode="json")
-            raise HTTPException(status_code=502 if run_status == "failed" else 422, detail=detail)
         try:
-            requirements, test_items, criteria, atomic_requirements, findings, conflicts = (
-                semantic_output_to_analysis(version, output)
+            batches = run_requirement_analysis_batches(
+                project_id=project_id,
+                model_service=selected_model_service,
+                model_parameters=model_parameters,
+                input_asset_versions=input_asset_versions,
+                input_context=context_values,
+                mode=analysis_input.mode,
+                scenario=analysis_input.scenario,
+                max_retries=analysis_input.max_retries,
+                batch_size=analysis_input.batch_size,
+                ai_runs=ai_run_repository,
+                base_url=session_config.base_url if session_config else "",
+                api_key=session_config.api_key if session_config else "",
+            )
+        except RequirementAnalysisBatchError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        try:
+            merged_output = merge_structured_analysis_outputs([batch.output for batch in batches])
+            requirements, test_items, criteria, atomic_requirements, findings, conflicts = semantic_output_to_analysis(
+                version, merged_output,
             )
         except Exception as exc:
             # 模型契约校验通过后仍可能在内部对象转换阶段失败，返回可定位的业务错误。
-            raise HTTPException(status_code=422, detail=f"AI 分析结果转换失败：{exc}") from exc
-        _, _, visual_inferences = build_analysis_candidates(version)
-        from app.ai_schemas import AIRun
-
-        ai_run = ai_run_repository.create_run(
-            AIRun(
-                id=0,
+            failed_run_id = record_aggregate_validation_failure(
+                ai_runs=ai_run_repository,
                 project_id=project_id,
-                task_type="requirement_review",
                 model_parameters=model_parameters,
-                prompt_version="requirement-analysis.v1",
                 input_asset_versions=input_asset_versions,
-                output=output.model_dump(mode="json"),
-                validation_status=validation_status,
-                validation_errors=validation_errors,
-                status=run_status,
-                is_mock=analysis_input.mode == "mock",
-                created_at=datetime.now(UTC),
-                attempts=attempts,
+                mode=analysis_input.mode,
+                diagnostic=str(exc),
             )
-        )
+            raise HTTPException(
+                status_code=422,
+                detail={"message": f"AI 分析结果转换失败：{exc}", "ai_run_id": failed_run_id},
+            ) from exc
+        _, _, visual_inferences = build_analysis_candidates(version)
+        blocked_source_ids = {
+            item.source_reference.reference_id for item in findings if item.source_reference is not None
+        }
+        blocked_modules = {
+            module for item in conflicts if item.decision in {"unresolved", "awaiting_external_confirmation"}
+            for module in item.affected_modules
+        }
+        requirements = [item.model_copy(update={
+            "analysis_status": "blocked" if (
+                item.module in blocked_modules
+                or any(source.reference_id in blocked_source_ids for source in item.source_references)
+            ) else "ready",
+        }) for item in requirements]
         analysis = RequirementAnalysis(
             id=0,
             project_id=project_id,
@@ -213,8 +156,14 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             selected_requirement_ids=[item.requirement_id for item in requirements],
             test_items=test_items,
             acceptance_criteria=criteria,
+            analysis_batches=[AnalysisBatch(
+                batch_number=batch.batch_number,
+                source_reference_ids=batch.source_reference_ids,
+                status="completed",
+                ai_run_id=batch.ai_run_id,
+            ) for batch in batches],
             is_mock=analysis_input.mode == "mock",
-            ai_run_id=ai_run.id,
+            ai_run_id=batches[-1].ai_run_id,
         )
         return review_repository.create(analysis)
 
@@ -259,8 +208,6 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             candidate.source_reference = update.source_reference
         if update.decision is not None:
             candidate.decision = update.decision
-            if update.decision == "accepted" and candidate.stable_requirement_id is None:
-                candidate.stable_requirement_id = f"REQ-{candidate.candidate_id.removeprefix('candidate-')}"
         if update.split_into:
             candidate.decision = "rejected"
             for index, statement in enumerate(update.split_into, start=1):
@@ -305,8 +252,6 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         for candidate_id in selected_ids:
             candidate = candidates[candidate_id]
             candidate.decision = "accepted"
-            if candidate.stable_requirement_id is None:
-                candidate.stable_requirement_id = f"REQ-{candidate.candidate_id.removeprefix('candidate-')}"
             candidate.updated_at = now
         return review_repository.save(analysis, "atomic_requirements_bulk_confirmed")
 
@@ -400,12 +345,25 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         analysis = require_review(repository, review_repository, project_id, analysis_id)
         if analysis.status == "confirmed":
             raise HTTPException(status_code=409, detail="需求确认已经完成")
-        if any(item.decision == "pending_confirmation" for item in analysis.atomic_requirements):
-            raise HTTPException(status_code=409, detail="仍有原子需求候选待确认")
-        if any(item.status == "pending_confirmation" for item in analysis.findings):
-            raise HTTPException(status_code=409, detail="仍有需求评审发现待处置")
-        if any(item.decision == "pending_confirmation" for item in analysis.visual_inferences):
-            raise HTTPException(status_code=409, detail="仍有视觉推断待确认")
+        selected_requirement_ids = set(analysis.selected_requirement_ids)
+        if not selected_requirement_ids:
+            raise HTTPException(status_code=409, detail="请至少选择一条需求后再确认")
+        selected_source_ids = {
+            source.reference_id
+            for item in analysis.requirements if item.requirement_id in selected_requirement_ids
+            for source in item.source_references
+        }
+        if any(
+            item.status == "pending_confirmation"
+            and (item.source_reference is None or item.source_reference.reference_id in selected_source_ids)
+            for item in analysis.findings
+        ):
+            raise HTTPException(status_code=409, detail="仍有已选择需求的阻塞问题待处置")
+        if any(
+            item.decision == "pending_confirmation" and item.source_reference.reference_id in selected_source_ids
+            for item in analysis.visual_inferences
+        ):
+            raise HTTPException(status_code=409, detail="仍有已选择需求关联的视觉推断待确认")
         unresolved_modules = {
             module for item in analysis.conflicts
             if item.decision in {"unresolved", "awaiting_external_confirmation"}
@@ -417,9 +375,23 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
         }
         if unresolved_modules.intersection(selected_modules):
             raise HTTPException(status_code=409, detail="请先处理已选择需求所属模块的冲突")
+        now = datetime.now(UTC)
+        for candidate in analysis.atomic_requirements:
+            selected = any(
+                candidate.candidate_id == requirement_id
+                or candidate.candidate_id.startswith(f"{requirement_id}-split-")
+                for requirement_id in selected_requirement_ids
+            )
+            if selected:
+                candidate.decision = "accepted"
+                candidate.stable_requirement_id = f"REQ-{candidate.candidate_id.removeprefix('candidate-')}"
+            else:
+                candidate.decision = "rejected"
+                candidate.stable_requirement_id = None
+            candidate.updated_at = now
         analysis.status = "confirmed"
         analysis.confirmed_by = confirmation.confirmer_name
-        analysis.confirmed_at = datetime.now(UTC)
+        analysis.confirmed_at = now
         return review_repository.save(analysis, "requirement_confirmed")
 
 

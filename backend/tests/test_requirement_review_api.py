@@ -3,7 +3,7 @@ import base64
 from fastapi.testclient import TestClient
 
 from app.ai_schemas import AIModelConfig
-from app.ai_service import ModelRequest, MockModelService, validate_requirement_analysis_output
+from app.ai_service import ModelRequest, ModelResponse, MockModelService, validate_requirement_analysis_output
 
 
 def encoded(content: bytes) -> str:
@@ -101,7 +101,7 @@ def test_requirement_review_requires_human_confirmation_and_keeps_history(client
         )
         assert accepted.status_code == 200
     assert all(
-        item["stable_requirement_id"]
+        item["stable_requirement_id"] is None
         for item in accepted.json()["atomic_requirements"]
     )
     finding_update = client.patch(
@@ -115,6 +115,7 @@ def test_requirement_review_requires_human_confirmation_and_keeps_history(client
     )
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "confirmed"
+    assert all(item["stable_requirement_id"] for item in confirmed.json()["atomic_requirements"])
 
     history = client.get(f"/api/projects/{project_id}/requirement-reviews/{analysis['id']}/history")
     assert history.status_code == 200
@@ -271,3 +272,94 @@ def test_requirement_table_selection_and_conflict_decision_are_independent_views
     )
     assert resolved.status_code == 200
     assert resolved.json()["conflicts"][0]["decision"] == "srs_preferred"
+
+
+def test_confirmation_only_promotes_selected_requirements_and_records_analysis_batches(client: TestClient) -> None:
+    project_id, version_id = setup_version(client)
+
+    analysis_response = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        json={"batch_size": 1},
+    )
+
+    assert analysis_response.status_code == 201, analysis_response.text
+    analysis = analysis_response.json()
+    assert len(analysis["analysis_batches"]) == 2
+    assert all(item["status"] == "completed" for item in analysis["analysis_batches"])
+    assert all(item["analysis_status"] in {"ready", "blocked"} for item in analysis["requirements"])
+
+    selected_requirement_id = analysis["requirements"][0]["requirement_id"]
+    selected = client.patch(
+        f"/api/projects/{project_id}/requirement-reviews/{analysis['id']}/selection",
+        json={"selected_requirement_ids": [selected_requirement_id]},
+    )
+    assert selected.status_code == 200
+
+    for finding in analysis["findings"]:
+        resolved = client.patch(
+            f"/api/projects/{project_id}/requirement-reviews/{analysis['id']}/findings/{finding['finding_id']}",
+            json={"status": "resolved"},
+        )
+        assert resolved.status_code == 200
+
+    confirmed = client.post(
+        f"/api/projects/{project_id}/requirement-reviews/{analysis['id']}/confirm",
+        json={"confirmer_name": "测试工程师"},
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    confirmed_analysis = confirmed.json()
+    selected_atomic = next(
+        item for item in confirmed_analysis["atomic_requirements"]
+        if item["candidate_id"] == selected_requirement_id
+    )
+    assert selected_atomic["decision"] == "accepted"
+    assert selected_atomic["stable_requirement_id"]
+    assert confirmed_analysis["selected_requirement_ids"] == [selected_requirement_id]
+    unselected = [
+        item for item in confirmed_analysis["atomic_requirements"] if item["candidate_id"] != selected_requirement_id
+    ]
+    assert all(item["decision"] == "rejected" and item["stable_requirement_id"] is None for item in unselected)
+    reloaded = client.get(f"/api/projects/{project_id}/requirement-reviews/{analysis['id']}").json()
+    assert next(item for item in reloaded["atomic_requirements"] if item["candidate_id"] == selected_requirement_id)[
+        "stable_requirement_id"
+    ] == selected_atomic["stable_requirement_id"]
+    design = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/test-designs", json={}
+    )
+    assert design.status_code == 201
+    assert [item["requirement_ids"] for item in design.json()["scope_items"]] == [
+        [selected_atomic["stable_requirement_id"]]
+    ]
+
+
+def test_cross_batch_validation_failure_is_audited_without_creating_requirement_analysis(monkeypatch, client: TestClient) -> None:
+    project_id, version_id = setup_version(client)
+
+    def duplicate_requirement_id(_: MockModelService, request: ModelRequest) -> ModelResponse:
+        source = request.input_context[0]["source_reference"]
+        return ModelResponse(raw_output={
+            "contract_version": "requirement-analysis.v1",
+            "requirements": [{
+                "requirement_id": "duplicate-requirement", "name": "重复候选", "statement": "状态必须保存",
+                "requirement_type": "functional", "module": "状态", "source_references": [source], "analysis_note": "测试重复 ID",
+            }],
+            "test_items": [{
+                "test_item_id": f"test-{source['reference_id']}", "name": "验证状态", "module": "状态",
+                "requirement_ids": ["duplicate-requirement"], "source_references": [source],
+            }],
+            "acceptance_criteria": [], "findings": [], "conflicts": [],
+        })
+
+    monkeypatch.setattr(MockModelService, "complete", duplicate_requirement_id)
+    response = client.post(
+        f"/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
+        json={"batch_size": 1},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["ai_run_id"]
+    runs = client.get(f"/api/projects/{project_id}/ai-runs").json()
+    aggregate_run = next(item for item in runs if item["id"] == response.json()["detail"]["ai_run_id"])
+    assert aggregate_run["status"] == "validation_failed"
+    assert aggregate_run["validation_errors"]
