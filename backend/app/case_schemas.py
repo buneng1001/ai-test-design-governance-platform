@@ -167,12 +167,16 @@ class CaseGenerationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     template_mapping_id: int | None = Field(default=None, gt=0)
-    mode: Literal["mock", "real"] = "mock"
+    mode: Literal["mock", "real", "template"] = "mock"
     scenario: Literal[
         "normal", "empty", "missing_source", "invalid_schema", "timeout", "rate_limit", "temporary_error",
         "authentication_error", "parameter_error", "content_safety_error"
     ] = "normal"
     max_retries: int = Field(default=2, ge=0, le=2)
+    batch_size: int = Field(default=25, ge=1, le=50)
+    run_control_id: str | None = None
+    start_only: bool = False
+    advance_only: bool = False
     variants: list[CaseVariant] = Field(
         default_factory=lambda: ["normal", "boundary", "invalid", "scenario"], min_length=1, max_length=5
     )
@@ -192,6 +196,11 @@ class CaseGeneration(BaseModel):
     ai_run_id: int
     ai_run_status: str
     is_mock: bool
+    ai_run_ids: list[int] = Field(default_factory=list)
+    source: Literal["mock", "real", "template"] = "mock"
+    batch_total: int = Field(default=1, ge=1)
+    completed_batches: int = Field(default=0, ge=0)
+    run_control_id: str | None = None
     candidates: list[CandidateTestCase] = Field(default_factory=list)
     original_candidates: list[CandidateTestCase] = Field(default_factory=list)
     removed_candidate_ids: list[str] = Field(default_factory=list)

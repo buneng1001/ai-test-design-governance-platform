@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
-  CandidateTestCase, CaseGeneration, editGeneratedCase, generateCases, setGeneratedCaseRemoved,
+  advanceCaseGenerationRun, CandidateTestCase, CaseGeneration, editGeneratedCase, getCaseGeneration,
+  isAIRunControl, resumeCaseGenerationRun, setGeneratedCaseRemoved, startCaseGenerationRun, stopAIRunControl,
 } from "./api";
 import { CaseReviewPanel } from "./CaseReviewPanel";
+import { usePersistentAIRunControl } from "./usePersistentAIRunControl";
 
 export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: number; designId?: number }) {
   const [generation, setGeneration] = useState<CaseGeneration | null>(null);
@@ -18,19 +20,54 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
   const [testItemFilter, setTestItemFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("included");
   const [page, setPage] = useState(1);
-  const [mode, setMode] = useState<"mock" | "real">("mock");
+  const [mode, setMode] = useState<"mock" | "real" | "template">("mock");
+  const [isRunning, setIsRunning] = useState(false);
+  const { runControl, remember } = usePersistentAIRunControl(projectId, `case:${designId}`);
 
-  const generate = async () => {
+  const runOptions = () => ({
+    templateMappingId: 0, acceptTemplateLimitations: false, strictConflicts,
+    modules: modules.split(",").map((item) => item.trim()).filter(Boolean), mode,
+  });
+  useEffect(() => {
+    if (!runControl || runControl.status !== "completed" || !runControl.final_asset_id || generation) return;
+    void getCaseGeneration(projectId, runControl.final_asset_id).then((result) => {
+      setGeneration(result); remember(null);
+    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "无法恢复生成结果"));
+  }, [generation, projectId, remember, runControl]);
+
+  const startGeneration = async () => {
     try {
-      const created = await generateCases(
-        projectId, designId, 0, false, strictConflicts,
-        modules.split(",").map((item) => item.trim()).filter(Boolean), mode,
-      );
-      setGeneration(created);
+      setIsRunning(true); setGeneration(null);
+      remember(await startCaseGenerationRun(projectId, designId, runOptions()));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "候选测试用例生成失败");
-    }
+    } finally { setIsRunning(false); }
+  };
+  const advanceGeneration = async (control = runControl) => {
+    if (!control || isRunning) return;
+    try {
+      setIsRunning(true); setError("");
+      const result = await advanceCaseGenerationRun(projectId, designId, control.id, runOptions());
+      if (isAIRunControl(result)) remember(result);
+      else { setGeneration(result); remember(null); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "候选测试用例生成失败"); }
+    finally { setIsRunning(false); }
+  };
+  const stopGeneration = async () => {
+    if (!runControl) return;
+    try { remember(await stopAIRunControl(projectId, runControl.id)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "停止生成失败"); }
+  };
+  const resumeGeneration = async () => {
+    if (!runControl || isRunning) return;
+    try {
+      setIsRunning(true); setError("");
+      const result = await resumeCaseGenerationRun(projectId, designId, runControl.id, runOptions());
+      if (isAIRunControl(result)) remember(result);
+      else { setGeneration(result); remember(null); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "继续生成失败"); }
+    finally { setIsRunning(false); }
   };
 
   const filteredCandidates = useMemo(() => (generation?.candidates ?? []).filter((candidate) => {
@@ -113,19 +150,27 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
   return <section className="panel" aria-label="候选测试用例生成">
     <h2 id="case-generation">生成可追踪的候选测试用例</h2>
     <p className="field-help">当前已确认测试设计将使用默认 XLSX 用例模板；用例内容由模型根据已确认测试点生成。</p>
-    <label>生成方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
-      <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option>
+    <label>生成方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real" | "template")}>
+      <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option><option value="template">模板回退（需明确选择）</option>
     </select></label>
-    <button onClick={() => void generate()}>生成候选测试用例</button>
+    <button disabled={isRunning || Boolean(runControl)} onClick={() => void startGeneration()}>
+      {isRunning ? "正在创建…" : "创建用例生成运行"}</button>
     <div className="case-generation-options">
       <label className="checkbox-label"><input type="checkbox" checked={strictConflicts} onChange={(event) => setStrictConflicts(event.target.checked)} /><span>整批严格模式</span></label>
       <label>局部生成模块（逗号分隔）<input value={modules} onChange={(event) => setModules(event.target.value)} /></label>
     </div>
+    {runControl && <div className="report-actions" role="status">
+      <span>用例生成运行：{runControl.status}；已完成 {runControl.completed_count}/{runControl.batch_total} 批</span>
+      {runControl.status === "running" && <><button disabled={isRunning} onClick={() => void advanceGeneration()}>执行下一批</button>
+        <button onClick={() => void stopGeneration()}>停止运行</button></>}
+      {runControl.status === "stopped" && <button disabled={isRunning} onClick={() => void resumeGeneration()}>继续运行</button>}
+    </div>}
     {error && <p role="alert" className="error">{error}</p>}
     {generation && <div>
       <p role="status">
         生成状态：{generation.status}；AI 运行编号：{generation.ai_run_id}；
-        {generation.is_mock ? "Mock AI 运行" : "真实 AI 运行"}（{generation.ai_run_status}）
+        {generation.source === "template" ? "模板回退（显式选择）" : generation.is_mock ? "Mock AI 运行" : "真实 AI 运行"}（{generation.ai_run_status}）；
+        批次 {generation.completed_batches ?? 1}/{generation.batch_total ?? 1}
       </p>
       <div className="case-table-toolbar">
         <label>搜索用例<input aria-label="搜索用例" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
@@ -189,7 +234,7 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
         candidateIds={generation.candidates.map((candidate) => candidate.id)}
         excludedCandidateIds={generation.removed_candidate_ids ?? []}
         candidates={generation.candidates}
-        mode={mode}
+        mode={mode === "template" ? "mock" : mode}
       />}
     </div>}
   </section>;

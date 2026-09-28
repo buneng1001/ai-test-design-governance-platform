@@ -27,9 +27,9 @@ class CaseGenerationRepository:
             if not generation.original_candidates:
                 generation.original_candidates = [item.model_copy(deep=True) for item in generation.candidates]
             cursor = connection.execute(
-                "INSERT INTO case_generations(project_id, design_id, payload_json, created_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO case_generations(project_id, design_id, run_control_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
                 (
-                    generation.project_id, generation.design_id, generation.model_dump_json(),
+                    generation.project_id, generation.design_id, generation.run_control_id, generation.model_dump_json(),
                     datetime.now(UTC).isoformat(),
                 ),
             )
@@ -62,6 +62,14 @@ class CaseGenerationRepository:
             row = connection.execute(
                 "SELECT payload_json FROM case_generations WHERE project_id = ? AND id = ?",
                 (project_id, generation_id),
+            ).fetchone()
+        return CaseGeneration.model_validate_json(row["payload_json"]) if row else None
+
+    def get_by_run_control(self, project_id: int, run_control_id: str) -> CaseGeneration | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM case_generations WHERE project_id = ? AND run_control_id = ?",
+                (project_id, run_control_id),
             ).fetchone()
         return CaseGeneration.model_validate_json(row["payload_json"]) if row else None
 

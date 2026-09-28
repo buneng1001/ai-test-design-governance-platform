@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  confirmRequirementReview, createRequirementReview, decideRequirementConflict, listRequirementVersions,
-  RequirementAnalysis, updateFinding, updateRequirementSelection, updateVisualInference,
+  advanceRequirementReviewRun, confirmRequirementReview, decideRequirementConflict, getRequirementReview,
+  isAIRunControl, listRequirementVersions, RequirementAnalysis, resumeRequirementReviewRun, startRequirementReviewRun,
+  stopAIRunControl, updateFinding, updateRequirementSelection, updateVisualInference,
 } from "./api";
 import type { RequirementVersion } from "./api_types";
+import { usePersistentAIRunControl } from "./usePersistentAIRunControl";
 
 type RequirementReviewPanelProps = {
   projectId: number;
@@ -22,12 +24,13 @@ export function RequirementReviewPanel({
   const [loadingVersions, setLoadingVersions] = useState(true);
   const [confirmerName, setConfirmerName] = useState("测试工程师");
   const [error, setError] = useState("");
-  const [mode, setMode] = useState<"mock" | "real">("mock");
+  const [mode, setMode] = useState<"mock" | "real" | "template">("mock");
   const [keyword, setKeyword] = useState("");
   const [moduleFilter, setModuleFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [problemFilter, setProblemFilter] = useState<"all" | "with_problem" | "without_problem">("all");
   const [isRunning, setIsRunning] = useState(false);
+  const { runControl, remember } = usePersistentAIRunControl(projectId, `requirement:${selectedVersionId || "pending"}`);
 
   useEffect(() => {
     void listRequirementVersions(projectId).then((result) => {
@@ -38,12 +41,43 @@ export function RequirementReviewPanel({
     }).catch((reason: unknown) => setError(message(reason))).finally(() => setLoadingVersions(false));
   }, [projectId, versionRefreshKey, newlyPublishedVersionId]);
 
-  const runAnalysis = async (forceNew = false) => {
+  useEffect(() => {
+    if (!runControl || runControl.status !== "completed" || !runControl.final_asset_id || analysis) return;
+    void getRequirementReview(projectId, runControl.final_asset_id).then((result) => {
+      setAnalysis(result); remember(null);
+    }).catch((reason: unknown) => setError(message(reason)));
+  }, [analysis, projectId, remember, runControl]);
+
+  const startAnalysis = async () => {
     if (isRunning) return;
     try {
       if (!selectedVersionId) throw new Error("请先发布并选择需求版本");
       setIsRunning(true); setError("");
-      setAnalysis(await createRequirementReview(projectId, Number(selectedVersionId), mode, forceNew));
+      setAnalysis(null);
+      remember(await startRequirementReviewRun(projectId, Number(selectedVersionId), { mode }));
+    } catch (reason) { setError(message(reason)); } finally { setIsRunning(false); }
+  };
+  const advanceAnalysis = async (control = runControl) => {
+    if (!control || isRunning) return;
+    try {
+      setIsRunning(true); setError("");
+      const result = await advanceRequirementReviewRun(projectId, Number(selectedVersionId), control.id, { mode });
+      if (isAIRunControl(result)) remember(result);
+      else { setAnalysis(result); remember(null); }
+    } catch (reason) { setError(message(reason)); } finally { setIsRunning(false); }
+  };
+  const stopAnalysis = async () => {
+    if (!runControl) return;
+    try { remember(await stopAIRunControl(projectId, runControl.id)); }
+    catch (reason) { setError(message(reason)); }
+  };
+  const resumeAnalysis = async () => {
+    if (!runControl || isRunning) return;
+    try {
+      setIsRunning(true); setError("");
+      const result = await resumeRequirementReviewRun(projectId, Number(selectedVersionId), runControl.id, { mode });
+      if (isAIRunControl(result)) remember(result);
+      else { setAnalysis(result); remember(null); }
     } catch (reason) { setError(message(reason)); } finally { setIsRunning(false); }
   };
   const refresh = (request: Promise<RequirementAnalysis>) => {
@@ -86,19 +120,26 @@ export function RequirementReviewPanel({
       <label>需求版本<select aria-label="需求版本" value={selectedVersionId} disabled={loadingVersions || !versions.length}
         onChange={(event) => setSelectedVersionId(event.target.value)}>{versions.map((item) =>
           <option key={item.id} value={item.id}>V{item.version} · {item.name}</option>)}</select></label>
-      <label>分析方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
-        <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option></select></label>
-      <button disabled={loadingVersions || !versions.length || isRunning} onClick={() => void runAnalysis()}>
-        {isRunning ? "正在分析…" : "生成结构预览"}</button>
+      <label>分析方式<select value={mode} onChange={(event) => setMode(event.target.value as "mock" | "real" | "template")}>
+        <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option><option value="template">模板回退（需明确选择）</option></select></label>
+      <button disabled={loadingVersions || !versions.length || isRunning || Boolean(runControl)} onClick={() => void startAnalysis()}>
+        {isRunning ? "正在创建…" : "创建结构分析运行"}</button>
     </>}
+    {runControl && <div className="report-actions" role="status">
+      <span>分析运行：{runControl.status}；已完成 {runControl.completed_count}/{runControl.batch_total} 批</span>
+      {runControl.status === "running" && <><button disabled={isRunning} onClick={() => void advanceAnalysis()}>执行下一批</button>
+        <button onClick={() => void stopAnalysis()}>停止运行</button></>}
+      {runControl.status === "stopped" && <button disabled={isRunning} onClick={() => void resumeAnalysis()}>继续运行</button>}
+    </div>}
     {error && <p role="alert" className="error">{error}</p>}
     {analysis && <>
       <p>状态：{analysis.status === "confirmed" ? "需求已确认" : "等待测试工程师确认"} ·
-        已完成 {analysis.analysis_batches?.length ?? 0} 个分析批次 · {analysis.is_mock ? " Mock AI" : " 真实模型"}</p>
+        已完成 {analysis.analysis_batches?.length ?? 0} 个分析批次 · {analysis.run_source === "template"
+          ? " 模板回退（显式选择）" : analysis.is_mock ? " Mock AI" : " 真实模型"}</p>
       {analysis.status === "draft" && <div className="report-actions review-rerun-actions">
-        <label>重新分析方式<select value={mode} disabled={isRunning} onChange={(event) => setMode(event.target.value as "mock" | "real")}>
-          <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option></select></label>
-        <button disabled={isRunning} onClick={() => void runAnalysis(true)}>{isRunning ? "正在分析…" : "重新分析当前需求版本"}</button>
+        <label>重新分析方式<select value={mode} disabled={isRunning} onChange={(event) => setMode(event.target.value as "mock" | "real" | "template")}>
+          <option value="mock">Mock AI（离线）</option><option value="real">真实模型</option><option value="template">模板回退（需明确选择）</option></select></label>
+        <button disabled={isRunning || Boolean(runControl)} onClick={() => void startAnalysis()}>{isRunning ? "正在创建…" : "重新分析当前需求版本"}</button>
       </div>}
       <div className="requirement-summary">
         <h3 id="grouped-requirements">需求确认表</h3>

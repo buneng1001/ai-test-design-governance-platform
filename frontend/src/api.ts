@@ -1,7 +1,8 @@
 // API 公共兼容门面，保持组件原有的统一导入方式。
 export type { ProjectSettings, ProjectInput, Project } from "./api_types_project";
 export type { ConnectionTestResult, ModelDiscoveryResult, ModelOption, ModelProviderId, ModelProviderOption,
-  ModelServiceError, SessionModelConfig, SessionModelConfigStatus, AIRun } from "./api_types_ai";
+  ModelServiceError, SessionModelConfig, SessionModelConfigStatus, AIRun, AIRunControl } from "./api_types_ai";
+export { isAIRunControl } from "./api_types_ai";
 export type {
   AssetProvenanceInput, AssetProvenanceRecord, RequirementFileInput, ParseDiagnostic, RequirementMaterial,
   RequirementPackage, RequirementVersion, RequirementAnalysis, TestPointReview, TestDesign, TemplateColumn, TemplateSheet,
@@ -19,20 +20,21 @@ export {
 } from "./asset_api";
 export {
   createRequirementPackage, reparseRequirementPackage, publishRequirementPackage, listRequirementVersions, createRequirementReview, getRequirementReview,
+  startRequirementReviewRun, advanceRequirementReviewRun, resumeRequirementReviewRun,
   updateAtomicRequirement, bulkConfirmAtomicRequirements, updateFinding, updateVisualInference, confirmRequirementReview,
   updateRequirementSelection, decideRequirementConflict, generateReviewSuggestions, disposeReviewSuggestion,
   confirmSupplementalRequirements, generateTestPointReview, updateTestPointScope, confirmTestPointReview,
 } from "./requirement_api";
 export {
   listModelProviders, getSessionModelConfig, saveSessionModelConfig, discoverSessionModels,
-  testSessionModelConfig, clearSessionModelConfig, listAIRuns,
+  testSessionModelConfig, clearSessionModelConfig, listAIRuns, getAIRunControl, stopAIRunControl,
 } from "./ai_api";
 export {
   createTestDesign, confirmTestDesign, addTestDimension, adjustTestRisk, decideAutomation,
 } from "./design_api";
 export { uploadTemplate, confirmTemplate, validateTemplate } from "./template_api";
 export {
-  generateCases, createCaseReviews, disposeCaseReviewSuggestion, confirmCaseReviews, changeCaseStatus,
+  generateCases, startCaseGenerationRun, advanceCaseGenerationRun, resumeCaseGenerationRun, getCaseGeneration, createCaseReviews, disposeCaseReviewSuggestion, confirmCaseReviews, changeCaseStatus,
   editCase, editGeneratedCase, setGeneratedCaseRemoved, changeCaseStatuses, exportCaseFile, publishTestTask,
 } from "./case_api";
 export {

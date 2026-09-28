@@ -4,7 +4,12 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { RequirementReviewPanel } from "./RequirementReviewPanel";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+
+const runControl = {
+  id: "requirement-run-1", project_id: 1, workflow: "requirement_analysis", input_fingerprint: "v1:test",
+  status: "running", next_batch: 1, batch_total: 1, completed_count: 0, final_asset_type: null, final_asset_id: null,
+} as const;
 
 const analysis = {
   id: 1, requirement_version_id: 42, status: "draft", is_mock: true,
@@ -25,10 +30,12 @@ test("结构预览只使用一张需求确认表，并在展开详情中展示�
   const user = userEvent.setup();
   vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 42, version: 1, name: "当前任务" }]), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 201 }));
+    .mockResolvedValueOnce(new Response(JSON.stringify(runControl), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 200 }));
 
   render(<RequirementReviewPanel projectId={1} />);
-  await user.click(await screen.findByRole("button", { name: "生成结构预览" }));
+  await user.click(await screen.findByRole("button", { name: "创建结构分析运行" }));
+  await user.click(await screen.findByRole("button", { name: "执行下一批" }));
 
   expect(await screen.findByText("需求确认表")).toBeInTheDocument();
   expect(screen.getAllByRole("table")).toHaveLength(1);
@@ -44,13 +51,33 @@ test("取消当前筛选结果只提交筛选后的选择集合", async () => {
   const user = userEvent.setup();
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 42, version: 1, name: "当前任务" }]), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(runControl), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ ...analysis, selected_requirement_ids: [] }), { status: 200 }));
 
   render(<RequirementReviewPanel projectId={1} />);
-  await user.click(await screen.findByRole("button", { name: "生成结构预览" }));
+  await user.click(await screen.findByRole("button", { name: "创建结构分析运行" }));
+  await user.click(await screen.findByRole("button", { name: "执行下一批" }));
   await user.click(await screen.findByRole("button", { name: "取消当前筛选结果" }));
 
-  expect(fetchMock.mock.calls[2]?.[0]).toContain("/requirement-reviews/1/selection");
-  expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(JSON.stringify({ selected_requirement_ids: [] }));
+  expect(fetchMock.mock.calls[3]?.[0]).toContain("/requirement-reviews/1/selection");
+  expect(fetchMock.mock.calls[3]?.[1]?.body).toBe(JSON.stringify({ selected_requirement_ids: [] }));
+});
+
+test("停止后的继续会先恢复持久化运行，再显式推进一个批次", async () => {
+  const user = userEvent.setup();
+  const stopped = { ...runControl, status: "stopped" };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 42, version: 1, name: "当前任务" }]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(runControl), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(stopped), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(analysis), { status: 200 }));
+
+  render(<RequirementReviewPanel projectId={1} />);
+  await user.click(await screen.findByRole("button", { name: "创建结构分析运行" }));
+  await user.click(screen.getByRole("button", { name: "停止运行" }));
+  await user.click(await screen.findByRole("button", { name: "继续运行" }));
+
+  expect(fetchMock.mock.calls[3]?.[0]).toContain("/requirement-review-runs/requirement-run-1/resume");
+  expect(await screen.findByText("需求确认表")).toBeInTheDocument();
 });

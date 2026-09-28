@@ -4,11 +4,16 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 
-test("测试工程师可以生成并查看带追踪关系和设计依据的候选用例", async () => {
+const runControl = {
+  id: "case-run-1", project_id: 1, workflow: "case_generation", input_fingerprint: "v1:test",
+  status: "running", next_batch: 1, batch_total: 1, completed_count: 0, final_asset_type: null, final_asset_id: null,
+} as const;
+
+test("测试工程师可以从受控运行生成并查看带追踪关系和设计依据的候选用例", async () => {
   const user = userEvent.setup();
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+  const generation = {
     id: 1, ai_run_id: 2, ai_run_status: "succeeded", is_mock: true, status: "succeeded",
     template_diagnostics: [], candidates: [{
       id: "candidate-1", candidate_key: "candidate-key-1", title: "保存状态 - 边界值", objective: "验证保存状态", variant: "boundary",
@@ -19,10 +24,14 @@ test("测试工程师可以生成并查看带追踪关系和设计依据的候�
       unexpressed_fields: [], design_basis: [{ method: "boundary", reason: "边界独立执行" }],
       pending_confirmations: ["最大值阈值待确认"],
     }],
-  }), { status: 201 }));
+  };
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(runControl), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(generation), { status: 200 }));
 
   render(<CaseGenerationPanel projectId={1} />);
-  await user.click(screen.getByRole("button", { name: "生成候选测试用例" }));
+  await user.click(screen.getByRole("button", { name: "创建用例生成运行" }));
+  await user.click(await screen.findByRole("button", { name: "执行下一批" }));
 
   expect(await screen.findByText("保存状态 - 边界值")).toBeInTheDocument();
   expect(screen.getByText(/追踪：需求/)).toHaveTextContent("需求 req-1；范围 scope-1； 风险 risk-scope-1；P1");
@@ -44,7 +53,11 @@ test("测试工程师保存候选编辑时调用持久化 API", async () => {
     id: 1, ai_run_id: 2, ai_run_status: "succeeded", is_mock: true, status: "succeeded",
     template_diagnostics: [], candidates: [candidate], removed_candidate_ids: [],
   };
+  let call = 0;
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    call += 1;
+    if (call === 1) return new Response(JSON.stringify(runControl), { status: 201 });
+    if (call === 2) return new Response(JSON.stringify(generation), { status: 200 });
     if (String(input).includes("/candidates/")) {
       return new Response(JSON.stringify({ ...generation, candidates: [{ ...candidate, title: "人工编辑标题" }] }), { status: 200 });
     }
@@ -52,7 +65,8 @@ test("测试工程师保存候选编辑时调用持久化 API", async () => {
   });
 
   render(<CaseGenerationPanel projectId={1} />);
-  await user.click(screen.getByRole("button", { name: "生成候选测试用例" }));
+  await user.click(screen.getByRole("button", { name: "创建用例生成运行" }));
+  await user.click(await screen.findByRole("button", { name: "执行下一批" }));
   await user.clear(await screen.findByLabelText("标题-candidate-1"));
   await user.type(screen.getByLabelText("标题-candidate-1"), "人工编辑标题");
   await user.click(screen.getByRole("button", { name: "保存候选编辑" }));

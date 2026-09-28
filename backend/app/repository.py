@@ -339,6 +339,62 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    ALTER TABLE ai_runs ADD COLUMN source TEXT NOT NULL DEFAULT 'mock';
+    ALTER TABLE ai_runs ADD COLUMN stage TEXT NOT NULL DEFAULT 'model_call';
+    ALTER TABLE ai_runs ADD COLUMN batch_number INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE ai_runs ADD COLUMN batch_total INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE ai_runs ADD COLUMN completed_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE ai_runs ADD COLUMN total_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE ai_runs ADD COLUMN estimated_remaining_ms INTEGER;
+    ALTER TABLE ai_runs ADD COLUMN recovery_point TEXT;
+    ALTER TABLE ai_run_attempts ADD COLUMN error_category TEXT;
+    ALTER TABLE ai_run_attempts ADD COLUMN retry_after_ms INTEGER;
+    ALTER TABLE ai_run_attempts ADD COLUMN recovery_point TEXT;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_run_controls (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        workflow TEXT NOT NULL,
+        input_fingerprint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        next_batch INTEGER NOT NULL,
+        batch_total INTEGER NOT NULL,
+        completed_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ai_run_batch_results (
+        run_id TEXT NOT NULL REFERENCES ai_run_controls(id),
+        batch_number INTEGER NOT NULL,
+        output_json TEXT NOT NULL,
+        ai_run_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, batch_number),
+        UNIQUE (run_id, ai_run_id)
+    );
+    """,
+    """
+    ALTER TABLE ai_run_controls ADD COLUMN payload_json TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE ai_run_controls ADD COLUMN final_asset_type TEXT;
+    ALTER TABLE ai_run_controls ADD COLUMN final_asset_id INTEGER;
+    CREATE UNIQUE INDEX IF NOT EXISTS ai_run_controls_final_asset_unique
+    ON ai_run_controls(final_asset_type, final_asset_id)
+    WHERE final_asset_id IS NOT NULL;
+    """,
+    """
+    ALTER TABLE requirement_analyses ADD COLUMN run_control_id TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS requirement_analyses_run_control_unique
+    ON requirement_analyses(run_control_id) WHERE run_control_id IS NOT NULL;
+    ALTER TABLE case_generations ADD COLUMN run_control_id TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS case_generations_run_control_unique
+    ON case_generations(run_control_id) WHERE run_control_id IS NOT NULL;
+    """,
+    """
+    ALTER TABLE ai_run_controls ADD COLUMN active_batch_number INTEGER;
+    ALTER TABLE ai_run_controls ADD COLUMN active_lease_id TEXT;
+    """,
 )
 
 

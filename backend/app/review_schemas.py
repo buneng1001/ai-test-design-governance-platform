@@ -247,6 +247,8 @@ class RequirementAnalysis(BaseModel):
     analysis_batches: list[AnalysisBatch] = Field(default_factory=list)
     ai_run_id: int | None = None
     is_mock: bool = True
+    run_source: Literal["mock", "real", "template"] = "mock"
+    run_control_id: str | None = None
     confirmed_by: str | None = None
     confirmed_at: datetime | None = None
 
@@ -326,8 +328,11 @@ class RequirementConflictDecisionInput(BaseModel):
 class RequirementAnalysisInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["mock", "real"] = "mock"
+    mode: Literal["mock", "real", "template"] = "mock"
     scenario: MockScenario = "normal"
     max_retries: int = Field(default=2, ge=0, le=2)
     batch_size: int = Field(default=25, ge=1, le=50)
+    run_control_id: str | None = None
+    start_only: bool = False
+    advance_only: bool = False
     force_new: bool = False

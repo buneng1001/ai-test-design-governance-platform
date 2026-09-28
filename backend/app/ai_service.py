@@ -54,6 +54,8 @@ class MockModelService:
             return ModelResponse(error_code="temporary_error", retryable=True)
         if request.scenario in {"authentication_error", "parameter_error", "content_safety_error"}:
             return ModelResponse(error_code=request.scenario, retryable=False)
+        if request.scenario == "truncated":
+            return ModelResponse(error_code="provider_response_truncated", retryable=False, diagnostic="finish_reason=length")
         if request.scenario == "invalid_schema":
             return ModelResponse(raw_output={"contract_version": "ai-output.v1", "unexpected": True})
         if request.scenario == "missing_source":
@@ -228,6 +230,18 @@ def validate_output(raw_output: object) -> tuple[dict | None, list[str]]:
     except Exception as error:
         return None, [str(error)]
     return output.model_dump(mode="json"), []
+
+
+def local_structural_repair(raw_output: object) -> object:
+    """只清理包装层和未知字段，绝不补写业务语义。"""
+    if not isinstance(raw_output, dict):
+        return raw_output
+    if "items" in raw_output:
+        return {key: raw_output[key] for key in ("contract_version", "items") if key in raw_output}
+    known = {"contract_version", "requirements", "test_items", "acceptance_criteria", "findings", "conflicts"}
+    return {key: value for key, value in raw_output.items() if key in known}
+
+
 
 
 def validate_requirement_analysis_output(

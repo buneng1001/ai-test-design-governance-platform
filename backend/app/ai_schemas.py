@@ -19,10 +19,12 @@ MockScenario = Literal[
     "authentication_error",
     "parameter_error",
     "content_safety_error",
+    "truncated",
 ]
 RunStatus = Literal["succeeded", "validation_failed", "failed"]
 ValidationStatus = Literal["passed", "failed", "not_run"]
 Disposition = Literal["accepted", "rejected", "modified"]
+RunSource = Literal["mock", "real", "template"]
 
 
 class AIModelConfig(BaseModel):
@@ -68,6 +70,9 @@ class AIAttempt(BaseModel):
     error_code: str | None = None
     retryable: bool = False
     diagnostic: str | None = None
+    error_category: str | None = None
+    retry_after_ms: int | None = Field(default=None, ge=0, le=5000)
+    recovery_point: str | None = None
 
 
 class AIRun(BaseModel):
@@ -84,6 +89,15 @@ class AIRun(BaseModel):
     is_mock: bool
     created_at: datetime
     attempts: list[AIAttempt]
+    # 新字段均有默认值，历史运行记录无需重写即可读取。
+    source: RunSource = "mock"
+    stage: str = "model_call"
+    batch_number: int = Field(default=1, ge=1)
+    batch_total: int = Field(default=1, ge=1)
+    completed_count: int = Field(default=0, ge=0)
+    total_count: int = Field(default=0, ge=0)
+    estimated_remaining_ms: int | None = Field(default=None, ge=0)
+    recovery_point: str | None = None
     dispositions: list[dict] = Field(default_factory=list)
     disposition: dict | None = None
 

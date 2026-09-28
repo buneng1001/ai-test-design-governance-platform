@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
+from time import sleep
 
 from fastapi import FastAPI, HTTPException
 
 from app.ai_repository import AIRunRepository
 from app.ai_schemas import AIDispositionInput, AIRun, AIRunInput
-from app.ai_service import ModelRequest, validate_output
+from app.ai_run_reliability import error_category, redact_diagnostic, retry_delay_ms
+from app.ai_service import ModelRequest, local_structural_repair, validate_output
 from app.main_route_context import AppRouteContext
 from app.project_asset_api import require_project
 
@@ -14,6 +16,21 @@ def register_ai_run_routes(app: FastAPI, context: AppRouteContext) -> None:
     repository = context.repository
     asset_repository = context.asset_repository
     ai_run_repository: AIRunRepository = context.ai_run_repository
+    controls = context.ai_run_control_repository
+
+    @app.post("/api/projects/{project_id}/ai-workflow-runs/{run_id}/stop")
+    def stop_ai_workflow_run(project_id: int, run_id: str) -> dict:
+        run = controls.require(run_id)
+        if run.project_id != project_id:
+            raise HTTPException(status_code=404, detail="AI 运行不存在")
+        return controls.request_stop(run_id).__dict__
+
+    @app.get("/api/projects/{project_id}/ai-workflow-runs/{run_id}")
+    def get_ai_workflow_run(project_id: int, run_id: str) -> dict:
+        run = controls.require(run_id)
+        if run.project_id != project_id:
+            raise HTTPException(status_code=404, detail="AI 运行不存在")
+        return run.__dict__
 
     @app.post("/api/projects/{project_id}/ai-runs", response_model=AIRun, status_code=201)
     def create_ai_run(project_id: int, run_input: AIRunInput) -> AIRun:
@@ -52,15 +69,32 @@ def register_ai_run_routes(app: FastAPI, context: AppRouteContext) -> None:
                 attempts.append({
                     "attempt": attempt_number, "started_at": started_at, "elapsed_ms": elapsed_ms,
                     "status": "failed", "error_code": response.error_code, "retryable": response.retryable,
+                    "diagnostic": redact_diagnostic(response.diagnostic),
+                    "error_category": error_category(response.error_code),
+                    "retry_after_ms": retry_delay_ms(attempt_number) if response.retryable else None,
+                    "recovery_point": f"model_call.retry-{attempt_number + 1}" if response.retryable else None,
                 })
                 if not response.retryable or attempt_number == max_attempts:
                     break
+                sleep(retry_delay_ms(attempt_number) / 1000)
                 continue
             final_output, validation_errors = validate_output(response.raw_output)
+            if validation_errors:
+                final_output, validation_errors = validate_output(local_structural_repair(response.raw_output))
+                if final_output is not None:
+                    validation_status = "passed"
+                    run_status = "succeeded"
+                    attempts.append({
+                        "attempt": attempt_number, "started_at": started_at, "elapsed_ms": elapsed_ms,
+                        "status": "succeeded", "error_code": "schema_local_repaired", "retryable": False,
+                        "error_category": "structure", "recovery_point": "local_structural_repair",
+                    })
+                    break
             if validation_errors:
                 attempts.append({
                     "attempt": attempt_number, "started_at": started_at, "elapsed_ms": elapsed_ms,
                     "status": "validation_failed", "error_code": "schema_invalid", "retryable": False,
+                    "error_category": "structure", "recovery_point": "structural_repair_required",
                 })
                 validation_status = "failed"
                 run_status = "validation_failed"
@@ -79,6 +113,8 @@ def register_ai_run_routes(app: FastAPI, context: AppRouteContext) -> None:
             validation_status=validation_status, validation_errors=validation_errors,
             status=run_status, is_mock=run_input.model_parameters.provider == "mock",
             created_at=datetime.now(UTC), attempts=attempts,
+            source="mock" if run_input.model_parameters.provider == "mock" else "real",
+            stage="model_call", total_count=len(input_asset_versions),
         )
         return ai_run_repository.create_run(run)
 
