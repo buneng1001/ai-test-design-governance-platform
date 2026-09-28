@@ -12,19 +12,21 @@ from app.case_review_status_routes import register_status_routes
 from app.case_review_repository import CaseReviewRepository
 from app.repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
+from app.review_repository import RequirementReviewRepository
 from app.template_repository import TemplateMappingRepository
 
 
 def register_case_review_routes(
     app: FastAPI, projects: ProjectRepository, generations: CaseGenerationRepository,
     reviews: CaseReviewRepository, ai_runs: AIRunRepository, requirements: RequirementRepository,
+    requirement_reviews: RequirementReviewRepository,
     templates: TemplateMappingRepository, mock_service: MockModelService,
     real_model_service: OpenAICompatibleModelService,
 ) -> None:
     """注册用例评审相关路由，并保留原有统一入口。"""
     deps = CaseReviewRouteDependencies(
         projects=projects, generations=generations, reviews=reviews, ai_runs=ai_runs,
-        requirements=requirements, templates=templates, mock_service=mock_service,
+        requirements=requirements, requirement_reviews=requirement_reviews, templates=templates, mock_service=mock_service,
         real_model_service=real_model_service,
     )
     router = APIRouter()

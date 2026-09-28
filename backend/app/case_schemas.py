@@ -67,6 +67,7 @@ class CandidateTestCase(BaseModel):
     software_version: str = ""
     platform_test_point_id: str | None = None
     skill_test_point_id: str | None = None
+    template_fallback: bool = False
     # 模型不能把待确认内容写成需求事实；它们仅作为人工审核提示保存在候选用例中。
     pending_confirmations: list[str] = Field(default_factory=list, max_length=20)
 

@@ -6,6 +6,7 @@ from app.case_repository import CaseGenerationRepository
 from app.case_review_repository import CaseReviewRepository
 from app.repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
+from app.review_repository import RequirementReviewRepository
 from app.template_repository import TemplateMappingRepository
 
 
@@ -18,6 +19,7 @@ class CaseReviewRouteDependencies:
     reviews: CaseReviewRepository
     ai_runs: AIRunRepository
     requirements: RequirementRepository
+    requirement_reviews: RequirementReviewRepository
     templates: TemplateMappingRepository
     mock_service: MockModelService
     real_model_service: OpenAICompatibleModelService

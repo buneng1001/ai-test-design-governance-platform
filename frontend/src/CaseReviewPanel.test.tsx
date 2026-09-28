@@ -54,6 +54,8 @@ test("三个独立评审完成后可逐条处置并确认用例", async () => {
   await user.click(screen.getByRole("button", { name: "完成用例确认" }));
   expect(await screen.findByText(/用例已确认/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "下载用例文件" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "执行质量检查" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "预览标准用例表" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "变更用例状态" }));
   expect(await screen.findByText(/生命周期：closed/)).toBeInTheDocument();
 });

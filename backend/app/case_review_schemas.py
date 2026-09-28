@@ -149,6 +149,10 @@ class CaseExportInput(BaseModel):
     stable_case_ids: list[str] = Field(default_factory=list)
 
 
+class StandardCaseExportInput(CaseExportInput):
+    format: Literal["xlsx", "csv"] = "xlsx"
+
+
 class ReviewerRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

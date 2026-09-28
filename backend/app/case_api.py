@@ -100,11 +100,21 @@ def register_case_routes(
         ]
         if not generation_points:
             raise HTTPException(status_code=409, detail="当前生成范围没有可用的已选测试点")
-        if mapping is None or mapping.status != "confirmed":
-            raise HTTPException(status_code=409, detail="模板映射确认后才能生成候选测试用例")
-        limitations = template_limitations(mapping)
-        if limitations and not data.accept_template_limitations:
-            raise HTTPException(status_code=409, detail={"code": "template_limitations", "diagnostics": limitations})
+        template_fallback = mapping is None or mapping.status != "confirmed"
+        fallback_diagnostics: list[dict] = []
+        if template_fallback:
+            if mapping is None:
+                raise HTTPException(status_code=404, detail="用例模板映射不存在")
+            fallback_diagnostics = [*[
+                item.model_dump() for item in mapping.diagnostics
+            ], {"code": "template_mapping_fallback", "severity": "warning",
+                "message": "自定义模板映射尚未确认，已改用平台标准用例表；可继续评审和导出"}]
+            mapping, raw_content = default_template(project_id)
+            mapping = templates.create(mapping, raw_content)
+        mapping_limitations = template_limitations(mapping)
+        if mapping_limitations and not data.accept_template_limitations:
+            raise HTTPException(status_code=409, detail={"code": "template_limitations", "diagnostics": mapping_limitations})
+        limitations = [*mapping_limitations, *fallback_diagnostics]
         asset_versions = tuple(
             {"asset_id": item.asset_id, "revision": item.asset_revision} for item in version.materials
         )
@@ -231,7 +241,7 @@ def register_case_routes(
                 selected_candidates, excluded_modules,
                 None,
                 project.software_version if project else "",
-                generation_points,
+                generation_points, template_fallback,
             )
         if controls.require(control.id).status != "running":
             raise HTTPException(status_code=409, detail={"message": "AI 运行已停止", "run_id": control.id})
