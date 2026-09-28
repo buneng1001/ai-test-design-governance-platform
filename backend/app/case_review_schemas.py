@@ -116,7 +116,6 @@ class CaseEditInput(BaseModel):
     module: str | None = None
     test_item: str | None = None
     pre_test_notes: str | None = None
-    software_version: str | None = None
     restore_original: bool = False
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)] = "人工编辑用例"
 
@@ -147,6 +146,10 @@ class CaseExportInput(BaseModel):
 
     scope: Literal["all", "selected", "changed"] = "all"
     stable_case_ids: list[str] = Field(default_factory=list)
+
+
+class StandardCaseExportInput(CaseExportInput):
+    format: Literal["xlsx", "csv"] = "xlsx"
 
 
 class ReviewerRun(BaseModel):

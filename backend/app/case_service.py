@@ -50,6 +50,7 @@ def build_candidates(
     included_modules: set[str] | None = None,
     software_version: str = "",
     selected_test_points: list[ReviewTestPoint] | None = None,
+    template_fallback: bool = False,
 ) -> list[CandidateTestCase]:
     case_sheet = next(sheet for sheet in mapping.sheets if sheet.role == "case" and sheet.participates)
     selected = set(selected_requirement_ids) if selected_requirement_ids is not None else None
@@ -96,7 +97,7 @@ def build_candidates(
         candidates.append(_candidate(
             candidate_id, candidate_key, generation_id, project_id, scope, risk, automations.get(scope.id), item,
             references, case_sheet.name, limitations, software_version, point,
-            test_item.module if test_item else "",
+            test_item.module if test_item else "", template_fallback,
         ))
     return candidates
 
@@ -104,7 +105,7 @@ def build_candidates(
 def _candidate(
     candidate_id: str, candidate_key: str, generation_id: int, project_id: int, scope: TestScopeItem, risk: RiskAssessment,
     automation: object, generated: CaseGenerationOutputItem, references: list[SourceReference], sheet_name: str,
-    limitations: list[dict], software_version: str, test_point: ReviewTestPoint, module: str,
+    limitations: list[dict], software_version: str, test_point: ReviewTestPoint, module: str, template_fallback: bool,
 ) -> CandidateTestCase:
     return CandidateTestCase(
         id=candidate_id, candidate_key=candidate_key, project_id=project_id, generation_id=generation_id,
@@ -123,6 +124,7 @@ def _candidate(
         software_version=software_version,
         platform_test_point_id=test_point.platform_test_point_id,
         skill_test_point_id=test_point.skill_test_point_id,
+        template_fallback=template_fallback,
         pending_confirmations=generated.pending_confirmations,
     )
 

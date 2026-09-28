@@ -317,7 +317,18 @@ export interface CandidateTestCase {
   software_version?: string;
   platform_test_point_id?: string | null;
   skill_test_point_id?: string | null;
+  template_fallback?: boolean;
   pending_confirmations: string[];
+}
+
+export interface CaseQualityReport {
+  coverage: Record<string, { numerator: number; denominator: number; percentage: number; uncovered?: string[] }>;
+  issues: Array<{ rule: string; target_id: string; message: string; severity: string }>;
+}
+
+export interface StandardCasePreview {
+  columns: string[];
+  rows: Array<Record<string, string>>;
 }
 
 export interface CaseGeneration {

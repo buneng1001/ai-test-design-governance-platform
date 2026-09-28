@@ -126,7 +126,7 @@ def create_app(
     )
     register_case_review_routes(
         app, repository, case_generation_repository, case_review_repository, ai_run_repository,
-        requirement_repository, template_repository, model_service, real_model_service,
+        requirement_repository, review_repository, template_repository, model_service, real_model_service,
     )
     register_task_routes(
         app, repository, case_review_repository, task_repository, case_generation_repository, requirement_repository

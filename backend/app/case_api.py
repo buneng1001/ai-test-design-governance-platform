@@ -17,8 +17,10 @@ from app.model_config_service import provider_error_type, service_error
 from app.case_lifecycle_service import default_template
 from app.case_repository import CaseGenerationRepository
 from app.case_schemas import (
-    CandidateDraftEditInput, CandidateHistoryRecord, CandidateRemovalInput, CaseGeneration, CaseGenerationInput,
+    CandidateDraftEditInput, CandidateHistoryRecord, CandidateRemovalInput, CandidateStandardExportInput, CaseGeneration, CaseGenerationInput,
 )
+from app.case_quality_service import STANDARD_COLUMNS, export_standard, quality_report_for_candidates, standard_rows_for_candidates
+from fastapi.responses import Response
 from app.case_service import _case_generation_context, build_candidates, template_limitations
 from app.design_repository import DesignRepository
 from app.repository import ProjectRepository
@@ -100,11 +102,21 @@ def register_case_routes(
         ]
         if not generation_points:
             raise HTTPException(status_code=409, detail="当前生成范围没有可用的已选测试点")
-        if mapping is None or mapping.status != "confirmed":
-            raise HTTPException(status_code=409, detail="模板映射确认后才能生成候选测试用例")
-        limitations = template_limitations(mapping)
-        if limitations and not data.accept_template_limitations:
-            raise HTTPException(status_code=409, detail={"code": "template_limitations", "diagnostics": limitations})
+        template_fallback = mapping is None or mapping.status != "confirmed"
+        fallback_diagnostics: list[dict] = []
+        if template_fallback:
+            if mapping is None:
+                raise HTTPException(status_code=404, detail="用例模板映射不存在")
+            fallback_diagnostics = [*[
+                item.model_dump() for item in mapping.diagnostics
+            ], {"code": "template_mapping_fallback", "severity": "warning",
+                "message": "自定义模板映射尚未确认，已改用平台标准用例表；可继续评审和导出"}]
+            mapping, raw_content = default_template(project_id)
+            mapping = templates.create(mapping, raw_content)
+        mapping_limitations = template_limitations(mapping)
+        if mapping_limitations and not data.accept_template_limitations:
+            raise HTTPException(status_code=409, detail={"code": "template_limitations", "diagnostics": mapping_limitations})
+        limitations = [*mapping_limitations, *fallback_diagnostics]
         asset_versions = tuple(
             {"asset_id": item.asset_id, "revision": item.asset_revision} for item in version.materials
         )
@@ -231,7 +243,7 @@ def register_case_routes(
                 selected_candidates, excluded_modules,
                 None,
                 project.software_version if project else "",
-                generation_points,
+                generation_points, template_fallback,
             )
         if controls.require(control.id).status != "running":
             raise HTTPException(status_code=409, detail={"message": "AI 运行已停止", "run_id": control.id})
@@ -289,6 +301,43 @@ def register_case_routes(
         if generation is None:
             raise HTTPException(status_code=404, detail="候选测试用例生成记录不存在")
         return generation
+
+    @router.get("/api/projects/{project_id}/case-generations/{generation_id}/standard-preview")
+    def preview_generated_cases(project_id: int, generation_id: int) -> dict:
+        _require_project(projects, project_id)
+        generation = generations.get(project_id, generation_id)
+        if generation is None:
+            raise HTTPException(status_code=404, detail="候选测试用例不存在")
+        project = projects.get(project_id)
+        candidates = [item for item in generation.candidates if item.id not in generation.removed_candidate_ids]
+        return {"columns": STANDARD_COLUMNS, "rows": standard_rows_for_candidates(candidates, project.software_version)}
+
+    @router.get("/api/projects/{project_id}/case-generations/{generation_id}/quality-checks")
+    def quality_check_generated_cases(project_id: int, generation_id: int) -> dict:
+        _require_project(projects, project_id)
+        generation = generations.get(project_id, generation_id)
+        review = reviews.latest_for_version(project_id, generation.requirement_version_id) if generation else None
+        if generation is None or review is None:
+            raise HTTPException(status_code=409, detail="候选用例缺少需求审核上下文")
+        candidates = [item for item in generation.candidates if item.id not in generation.removed_candidate_ids]
+        return quality_report_for_candidates(review, candidates)
+
+    @router.post("/api/projects/{project_id}/case-generations/{generation_id}/standard-export")
+    def export_generated_cases(project_id: int, generation_id: int, data: CandidateStandardExportInput) -> Response:
+        _require_project(projects, project_id)
+        generation = generations.get(project_id, generation_id)
+        if generation is None:
+            raise HTTPException(status_code=404, detail="候选测试用例不存在")
+        requested = set(data.candidate_ids)
+        candidates = [item for item in generation.candidates if item.id not in generation.removed_candidate_ids
+                      and (not requested or item.id in requested)]
+        project = projects.get(project_id)
+        content, media_type, extension = export_standard(
+            standard_rows_for_candidates(candidates, project.software_version), data.format,
+        )
+        return Response(content=content, media_type=media_type, headers={
+            "Content-Disposition": f'attachment; filename="candidate-test-cases.{extension}"',
+        })
 
     @router.patch(
         "/api/projects/{project_id}/case-generations/{generation_id}/candidates/{candidate_id}",

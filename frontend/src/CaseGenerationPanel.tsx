@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  advanceCaseGenerationRun, CandidateTestCase, CaseGeneration, editGeneratedCase, getCaseGeneration,
-  isAIRunControl, resumeCaseGenerationRun, setGeneratedCaseRemoved, startCaseGenerationRun, stopAIRunControl,
+  advanceCaseGenerationRun, CandidateTestCase, CaseGeneration, CaseQualityReport, editGeneratedCase, exportGeneratedCaseFile,
+  getCaseGeneration, getGeneratedCasePreview, getGeneratedCaseQualityReport, isAIRunControl, resumeCaseGenerationRun,
+  setGeneratedCaseRemoved, startCaseGenerationRun, stopAIRunControl, StandardCasePreview,
 } from "./api";
 import { CaseReviewPanel } from "./CaseReviewPanel";
 import { usePersistentAIRunControl } from "./usePersistentAIRunControl";
@@ -22,6 +23,8 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
   const [page, setPage] = useState(1);
   const [mode, setMode] = useState<"mock" | "real" | "template">("mock");
   const [isRunning, setIsRunning] = useState(false);
+  const [standardPreview, setStandardPreview] = useState<StandardCasePreview | null>(null);
+  const [quality, setQuality] = useState<CaseQualityReport | null>(null);
   const { runControl, remember } = usePersistentAIRunControl(projectId, `case:${designId}`);
 
   const runOptions = () => ({
@@ -172,6 +175,8 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
         {generation.source === "template" ? "模板回退（显式选择）" : generation.is_mock ? "Mock AI 运行" : "真实 AI 运行"}（{generation.ai_run_status}）；
         批次 {generation.completed_batches ?? 1}/{generation.batch_total ?? 1}
       </p>
+      {generation.template_diagnostics.length > 0 && <div role="alert" className="field-help">
+        {generation.template_diagnostics.map((item) => <p key={`${item.code}-${item.message}`}>{item.message}</p>)}</div>}
       <div className="case-table-toolbar">
         <label>搜索用例<input aria-label="搜索用例" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <label>优先级<select aria-label="筛选优先级" value={priority} onChange={(event) => setPriority(event.target.value)}>
@@ -190,11 +195,21 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
         <button onClick={() => setSelected(visibleCandidates.map((candidate) => candidate.id))}>全选当前结果</button>
         <button onClick={() => void saveEdits()} disabled={editedIds.length === 0}>保存候选编辑</button>
         <button onClick={() => void setSelectedRemoval(true)} disabled={selected.length === 0}>批量移除</button>
+        <button onClick={() => void getGeneratedCasePreview(projectId, generation.id).then(setStandardPreview).catch(
+          (reason) => setError(reason instanceof Error ? reason.message : "标准预览失败"))}>预览平台标准表</button>
+        <button onClick={() => void getGeneratedCaseQualityReport(projectId, generation.id).then(setQuality).catch(
+          (reason) => setError(reason instanceof Error ? reason.message : "质量检查失败"))}>执行候选质量检查</button>
+        <button onClick={() => void exportGeneratedCaseFile(projectId, generation.id, selected).catch(
+          (reason) => setError(reason instanceof Error ? reason.message : "备用导出失败"))}>导出当前候选 XLSX</button>
         {(generation.removed_candidate_ids ?? []).length > 0 && <button onClick={() => void setSelectedRemoval(
           false, generation.removed_candidate_ids ?? [],
         )}>恢复已移除用例</button>}
       </div>
       <p>用例表预览：显示 {visibleCandidates.length} / {filteredCandidates.length} 条，已移除 {(generation.removed_candidate_ids ?? []).length} 条</p>
+      {standardPreview && <div><p>平台标准用例表预览（{standardPreview.rows.length} 条）</p>
+        <p>{standardPreview.columns.join("、")}</p></div>}
+      {quality && <div role="status"><p>候选质量检查：{quality.issues.length ? `发现 ${quality.issues.length} 项` : "未发现问题"}</p>
+        {quality.issues.map((item) => <p key={`${item.rule}-${item.target_id}`}>{item.message}</p>)}</div>}
       <table className="case-table"><thead><tr><th>选择</th><th>测试用例标题</th><th>优先级</th><th>预置条件</th><th>操作步骤</th><th>预期结果</th><th>软件版本</th></tr></thead>
         <tbody>{visibleCandidates.map((candidate) => <tr key={candidate.id}>
           <td><input type="checkbox" aria-label={`选择-${candidate.id}`} checked={selected.includes(candidate.id)} onChange={() => toggleSelected(candidate.id)} /></td>
@@ -211,7 +226,7 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
             <input aria-label={`模块-${candidate.id}`} value={candidate.module ?? ""} onChange={(event) => updateCandidate(candidate.id, { module: event.target.value })} />
             <input aria-label={`测试项-${candidate.id}`} value={candidate.test_item ?? ""} onChange={(event) => updateCandidate(candidate.id, { test_item: event.target.value })} />
             <input aria-label={`测试前备注信息-${candidate.id}`} value={candidate.pre_test_notes ?? ""} onChange={(event) => updateCandidate(candidate.id, { pre_test_notes: event.target.value })} />
-            <input aria-label={`软件版本-${candidate.id}`} value={candidate.software_version ?? ""} onChange={(event) => updateCandidate(candidate.id, { software_version: event.target.value })} /></td>
+            <span>软件版本：{candidate.software_version ?? "未填写"}</span></td>
         </tr>)}</tbody>
       </table>
       <div className="case-table-toolbar">

@@ -1,8 +1,9 @@
 import { useState } from "react";
 
 import {
-  CandidateTestCase, CaseReviewBatch, CaseReviewSuggestion, changeCaseStatus, confirmCaseReviews,
-  createCaseReviews, disposeCaseReviewSuggestion, editCase, exportCaseFile,
+  CandidateTestCase, CaseQualityReport, CaseReviewBatch, CaseReviewSuggestion, StandardCasePreview, changeCaseStatus,
+  confirmCaseReviews, createCaseReviews, disposeCaseReviewSuggestion, editCase, exportStandardCaseFile,
+  getCaseQualityReport, getStandardCasePreview,
 } from "./api";
 
 const roleLabels: Record<string, string> = {
@@ -23,6 +24,9 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
   const [modifiedTitles, setModifiedTitles] = useState<Record<string, string>>({});
   const [exportScope, setExportScope] = useState<"all" | "selected" | "changed">("all");
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
+  const [exportFormat, setExportFormat] = useState<"xlsx" | "csv">("xlsx");
+  const [quality, setQuality] = useState<CaseQualityReport | null>(null);
+  const [preview, setPreview] = useState<StandardCasePreview | null>(null);
   const [error, setError] = useState("");
 
   const startReview = async () => {
@@ -131,7 +135,13 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
             <option value="changed">新增或修改</option>
           </select>
         </label>
-        {exportScope === "selected" && batch.revisions.filter((item) => item.stable_case_id).map((revision) => (
+        <label>标准导出格式
+          <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as "xlsx" | "csv")}>
+            <option value="xlsx">XLSX</option><option value="csv">CSV（备用）</option>
+          </select>
+        </label>
+        {exportScope === "selected" && batch.revisions.filter((item) => item.stable_case_id
+          && item.lifecycle_status === "effective" && item.participation_status === "included").map((revision) => (
           <label key={`select-${revision.id}`}>
             <input
               type="checkbox"
@@ -143,9 +153,22 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
             {revision.stable_case_id}
           </label>
         ))}
-        <button onClick={() => void exportCaseFile(projectId, batch.id, exportScope, selectedCaseIds)}>
+        <button onClick={() => void getCaseQualityReport(projectId, batch.id).then(setQuality).catch(
+          (reason) => setError(reason instanceof Error ? reason.message : "质量检查失败"))}>
+          执行质量检查
+        </button>
+        <button onClick={() => void getStandardCasePreview(projectId, batch.id).then(setPreview).catch(
+          (reason) => setError(reason instanceof Error ? reason.message : "标准预览失败"))}>
+          预览标准用例表
+        </button>
+        <button onClick={() => void exportStandardCaseFile(projectId, batch.id, exportScope, selectedCaseIds, exportFormat).catch(
+          (reason) => setError(reason instanceof Error ? reason.message : "标准用例导出失败"))}>
           下载用例文件
         </button>
+        {quality && <div role="status"><p>质量检查：{quality.issues.length ? `发现 ${quality.issues.length} 项` : "未发现问题"}</p>
+          {quality.issues.map((item) => <p key={`${item.rule}-${item.target_id}`}>{item.rule}：{item.message}</p>)}</div>}
+        {preview && <div><p>平台标准用例表预览（{preview.rows.length} 条）</p>
+          <p>{preview.columns.join("、")}</p>{preview.rows.map((row) => <p key={row.stable_case_id}>{row.stable_case_id}｜{row.priority}｜{row.source}</p>)}</div>}
       </>}
       {batch.status === "confirmed" && <p role="status">用例已确认，已记录确认人和用例纳入决定。</p>}
     </>}

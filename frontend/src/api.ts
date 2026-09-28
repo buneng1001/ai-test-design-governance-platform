@@ -6,7 +6,7 @@ export { isAIRunControl } from "./api_types_ai";
 export type {
   AssetProvenanceInput, AssetProvenanceRecord, RequirementFileInput, ParseDiagnostic, RequirementMaterial,
   RequirementPackage, RequirementVersion, RequirementAnalysis, TestPointReview, TestDesign, TemplateColumn, TemplateSheet,
-  TemplateMappingVersion, CandidateTestCase, CaseGeneration, CaseReviewSuggestion, CaseReviewBatch, TestTask,
+  TemplateMappingVersion, CandidateTestCase, CaseGeneration, CaseQualityReport, StandardCasePreview, CaseReviewSuggestion, CaseReviewBatch, TestTask,
   ExecutionBatch, ExecutionResultStatus, ExecutionResultRecord, ExecutionBatchResults, CoverageMetric,
   CoverageSummary, ChangeImpactAnalysis, RegressionCandidate, RegressionSelection, ReportDocument,
   ProjectWorkflowView,
@@ -34,8 +34,10 @@ export {
 } from "./design_api";
 export { uploadTemplate, confirmTemplate, validateTemplate } from "./template_api";
 export {
-  generateCases, startCaseGenerationRun, advanceCaseGenerationRun, resumeCaseGenerationRun, getCaseGeneration, createCaseReviews, disposeCaseReviewSuggestion, confirmCaseReviews, changeCaseStatus,
-  editCase, editGeneratedCase, setGeneratedCaseRemoved, changeCaseStatuses, exportCaseFile, publishTestTask,
+  generateCases, startCaseGenerationRun, advanceCaseGenerationRun, resumeCaseGenerationRun, getCaseGeneration,
+  getGeneratedCasePreview, getGeneratedCaseQualityReport, exportGeneratedCaseFile, createCaseReviews, disposeCaseReviewSuggestion, confirmCaseReviews, changeCaseStatus,
+  editCase, editGeneratedCase, setGeneratedCaseRemoved, changeCaseStatuses, exportCaseFile, getCaseQualityReport,
+  getStandardCasePreview, exportStandardCaseFile, publishTestTask,
 } from "./case_api";
 export {
   createExecutionBatch, downloadManualExecutionFile, importExecutionResults, resolveExecutionConflict,

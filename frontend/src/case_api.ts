@@ -1,6 +1,6 @@
 // 用例生成、评审与发布领域请求。
 import { request, downloadResponseFile, sessionHeaders } from "./api_client";
-import type { CaseGeneration, CaseReviewBatch, TestTask } from "./api_types";
+import type { CaseGeneration, CaseQualityReport, CaseReviewBatch, StandardCasePreview, TestTask } from "./api_types";
 import type { AIRunControl } from "./api_types_ai";
 
 export type CaseGenerationRunOptions = {
@@ -50,6 +50,20 @@ export const resumeCaseGenerationRun = (projectId: number, designId: number, run
 export const getCaseGeneration = (projectId: number, generationId: number): Promise<CaseGeneration> => request(
   `/api/projects/${projectId}/case-generations/${generationId}`,
 );
+export const getGeneratedCasePreview = (projectId: number, generationId: number): Promise<StandardCasePreview> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}/standard-preview`,
+);
+export const getGeneratedCaseQualityReport = (projectId: number, generationId: number): Promise<CaseQualityReport> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}/quality-checks`,
+);
+export const exportGeneratedCaseFile = async (projectId: number, generationId: number,
+  candidateIds: string[], format: "xlsx" | "csv" = "xlsx"): Promise<void> => {
+  const response = await fetch(`/api/projects/${projectId}/case-generations/${generationId}/standard-export`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidate_ids: candidateIds, format }),
+  });
+  await downloadResponseFile(response, `candidate-test-cases.${format}`);
+};
 export const createCaseReviews = (projectId: number, generationId: number,
   mode: "mock" | "real" = "mock"): Promise<CaseReviewBatch> => request(
   `/api/projects/${projectId}/case-generations/${generationId}/reviews`, {
@@ -120,6 +134,20 @@ export const exportCaseFile = async (projectId: number, batchId: number, scope: 
       stable_case_ids: stableCaseIds }),
   });
   await downloadResponseFile(response, "test-cases.csv");
+};
+export const getCaseQualityReport = (projectId: number, batchId: number): Promise<CaseQualityReport> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/quality-checks`,
+);
+export const getStandardCasePreview = (projectId: number, batchId: number): Promise<StandardCasePreview> => request(
+  `/api/projects/${projectId}/case-review-batches/${batchId}/standard-preview`,
+);
+export const exportStandardCaseFile = async (projectId: number, batchId: number,
+  scope: "all" | "selected" | "changed", stableCaseIds: string[], format: "xlsx" | "csv"): Promise<void> => {
+  const response = await fetch(`/api/projects/${projectId}/case-review-batches/${batchId}/standard-export`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope, stable_case_ids: stableCaseIds, format }),
+  });
+  await downloadResponseFile(response, `standard-test-cases.${format}`);
 };
 export const publishTestTask = (projectId: number, batchId: number,
   input: {
