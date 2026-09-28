@@ -50,6 +50,20 @@ export const resumeCaseGenerationRun = (projectId: number, designId: number, run
 export const getCaseGeneration = (projectId: number, generationId: number): Promise<CaseGeneration> => request(
   `/api/projects/${projectId}/case-generations/${generationId}`,
 );
+export const getGeneratedCasePreview = (projectId: number, generationId: number): Promise<StandardCasePreview> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}/standard-preview`,
+);
+export const getGeneratedCaseQualityReport = (projectId: number, generationId: number): Promise<CaseQualityReport> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}/quality-checks`,
+);
+export const exportGeneratedCaseFile = async (projectId: number, generationId: number,
+  candidateIds: string[], format: "xlsx" | "csv" = "xlsx"): Promise<void> => {
+  const response = await fetch(`/api/projects/${projectId}/case-generations/${generationId}/standard-export`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidate_ids: candidateIds, format }),
+  });
+  await downloadResponseFile(response, `candidate-test-cases.${format}`);
+};
 export const createCaseReviews = (projectId: number, generationId: number,
   mode: "mock" | "real" = "mock"): Promise<CaseReviewBatch> => request(
   `/api/projects/${projectId}/case-generations/${generationId}/reviews`, {

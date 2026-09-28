@@ -34,7 +34,8 @@ export {
 } from "./design_api";
 export { uploadTemplate, confirmTemplate, validateTemplate } from "./template_api";
 export {
-  generateCases, startCaseGenerationRun, advanceCaseGenerationRun, resumeCaseGenerationRun, getCaseGeneration, createCaseReviews, disposeCaseReviewSuggestion, confirmCaseReviews, changeCaseStatus,
+  generateCases, startCaseGenerationRun, advanceCaseGenerationRun, resumeCaseGenerationRun, getCaseGeneration,
+  getGeneratedCasePreview, getGeneratedCaseQualityReport, exportGeneratedCaseFile, createCaseReviews, disposeCaseReviewSuggestion, confirmCaseReviews, changeCaseStatus,
   editCase, editGeneratedCase, setGeneratedCaseRemoved, changeCaseStatuses, exportCaseFile, getCaseQualityReport,
   getStandardCasePreview, exportStandardCaseFile, publishTestTask,
 } from "./case_api";

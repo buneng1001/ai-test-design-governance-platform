@@ -140,7 +140,8 @@ export function CaseReviewPanel({ projectId, generationId, candidateIds, exclude
             <option value="xlsx">XLSX</option><option value="csv">CSV（备用）</option>
           </select>
         </label>
-        {exportScope === "selected" && batch.revisions.filter((item) => item.stable_case_id).map((revision) => (
+        {exportScope === "selected" && batch.revisions.filter((item) => item.stable_case_id
+          && item.lifecycle_status === "effective" && item.participation_status === "included").map((revision) => (
           <label key={`select-${revision.id}`}>
             <input
               type="checkbox"

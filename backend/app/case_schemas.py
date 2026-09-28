@@ -144,7 +144,6 @@ class CandidateDraftEditInput(BaseModel):
     module: str | None = None
     test_item: str | None = None
     pre_test_notes: str | None = None
-    software_version: str | None = None
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)] = "人工编辑候选用例"
 
 
@@ -184,6 +183,13 @@ class CaseGenerationInput(BaseModel):
     accept_template_limitations: bool = False
     strict_conflicts: bool = False
     modules: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CandidateStandardExportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_ids: list[str] = Field(default_factory=list)
+    format: Literal["xlsx", "csv"] = "xlsx"
 
 
 class CaseGeneration(BaseModel):

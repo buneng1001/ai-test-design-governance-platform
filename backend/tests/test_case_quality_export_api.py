@@ -42,7 +42,7 @@ def test_quality_checks_and_standard_exports_are_deterministic_and_selection_saf
     preview = client.get(f"/api/projects/{project_id}/case-review-batches/{batch_id}/standard-preview")
     assert preview.status_code == 200
     assert preview.json()["columns"] == [
-        "stable_case_id", "priority", "software_version", "steps", "step_expectations",
+        "stable_case_id", "external_case_number", "title", "objective", "priority", "software_version", "preconditions", "steps", "step_expectations",
         "overall_expectation", "evidence_requirements", "design_basis", "traceability", "source",
     ]
     assert chosen_id in {row["stable_case_id"] for row in preview.json()["rows"]}
@@ -57,8 +57,8 @@ def test_quality_checks_and_standard_exports_are_deterministic_and_selection_saf
         rows = _xlsx_rows(workbook, sheet)
     assert rows[0][0] == "stable_case_id"
     assert [row[0] for row in rows[1:]] == [chosen_id]
-    assert "\n\n" not in rows[1][3]
-    assert rows[1][2] == "v1.0.0"
+    assert "\n\n" not in rows[1][7]
+    assert rows[1][5] == "v1.0.0"
 
     exported_csv = client.post(
         f"/api/projects/{project_id}/case-review-batches/{batch_id}/standard-export",
@@ -82,4 +82,12 @@ def test_unconfirmed_custom_template_falls_back_without_blocking_case_review(cli
     payload = generation.json()
     assert any(item["code"] == "template_mapping_fallback" for item in payload["template_diagnostics"])
     assert all(item["template_fallback"] for item in payload["candidates"])
+    preview = client.get(f"/api/projects/{project_id}/case-generations/{payload['id']}/standard-preview")
+    assert preview.status_code == 200
+    assert preview.json()["rows"][0]["source"] == "template_fallback"
+    assert client.get(f"/api/projects/{project_id}/case-generations/{payload['id']}/quality-checks").status_code == 200
+    fallback_export = client.post(f"/api/projects/{project_id}/case-generations/{payload['id']}/standard-export",
+                                  json={"format": "csv"})
+    assert fallback_export.status_code == 200
+    assert "template_fallback" in fallback_export.content.decode("utf-8-sig")
     assert client.post(f"/api/projects/{project_id}/case-generations/{payload['id']}/reviews", json={}).status_code == 201

@@ -46,12 +46,14 @@ def register_export_routes(router: APIRouter, deps: CaseReviewRouteDependencies)
     @router.get("/api/projects/{project_id}/case-review-batches/{batch_id}/standard-preview")
     def standard_preview(project_id: int, batch_id: int) -> dict:
         batch = confirmed_batch(project_id, batch_id)
-        return {"columns": STANDARD_COLUMNS, "rows": standard_rows(batch.revisions)}
+        project = deps.projects.get(project_id)
+        return {"columns": STANDARD_COLUMNS, "rows": standard_rows(batch.revisions, project.software_version)}
 
     @router.post("/api/projects/{project_id}/case-review-batches/{batch_id}/standard-export")
     def standard_export(project_id: int, batch_id: int, data: StandardCaseExportInput) -> Response:
         batch = confirmed_batch(project_id, batch_id)
-        rows = standard_rows(batch.revisions)
+        project = deps.projects.get(project_id)
+        rows = standard_rows(batch.revisions, project.software_version)
         if data.scope == "selected":
             selected = set(data.stable_case_ids)
             rows = [row for row in rows if row["stable_case_id"] in selected]
