@@ -1,7 +1,9 @@
+import json
 import sqlite3
 
 from app.project_repository import ProjectRepository
 from app.repository import MIGRATIONS
+from test_case_generation_api import _setup as setup_case_generation
 
 
 def test_migrate_applies_new_diagnostic_column_to_previous_schema(tmp_path) -> None:
@@ -70,3 +72,44 @@ def test_migrate_adds_candidate_history_to_previous_schema(tmp_path) -> None:
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'case_generation_history'"
         ).fetchone()
+
+
+def test_migrate_keeps_historical_requirement_review_design_and_case_records_readable(client) -> None:
+    project_id, design_id, mapping_id = setup_case_generation(client)
+    generation = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
+        json={"template_mapping_id": mapping_id, "variants": ["normal"]},
+    ).json()
+    batch = client.post(f"/api/projects/{project_id}/case-generations/{generation['id']}/reviews", json={}).json()
+    for suggestion in batch["suggestions"]:
+        assert client.patch(
+            f"/api/projects/{project_id}/case-review-batches/{batch['id']}/suggestions/{suggestion['id']}",
+            json={"decision": "rejected", "reason": "历史兼容验收"},
+        ).status_code == 200
+    confirmed = client.post(
+        f"/api/projects/{project_id}/case-review-batches/{batch['id']}/confirm",
+        json={"confirmer_name": "历史兼容验收", "inclusion": {
+            candidate["id"]: True for candidate in generation["candidates"]
+        }},
+    )
+    assert confirmed.status_code == 200
+    stable_case_ids = [item["stable_case_id"] for item in confirmed.json()["revisions"] if item["stable_case_id"]]
+    version = client.get(f"/api/projects/{project_id}/requirement-versions").json()[0]
+    analysis_id = client.get(f"/api/projects/{project_id}/workflow").json()["asset_ids"]["requirement_analysis_id"]
+    before = client.get(f"/api/projects/{project_id}/requirement-reviews/{analysis_id}").json()
+
+    # 模拟发行升级再次执行迁移；历史 JSON 资产和稳定 ID 不得被迁移覆盖或改写。
+    client.app.state.repository.migrate()
+
+    after = client.get(f"/api/projects/{project_id}/requirement-reviews/{analysis_id}").json()
+    restored_generation = client.get(f"/api/projects/{project_id}/case-generations/{generation['id']}").json()
+    with sqlite3.connect(client.app.state.repository.database_path) as connection:
+        batch_payload = json.loads(connection.execute(
+            "SELECT payload_json FROM case_review_batches WHERE id = ?", (batch["id"],)
+        ).fetchone()[0])
+    assert client.get(f"/api/projects/{project_id}/requirement-versions").json()[0]["id"] == version["id"]
+    assert [item["stable_requirement_id"] for item in after["atomic_requirements"]] == [
+        item["stable_requirement_id"] for item in before["atomic_requirements"]
+    ]
+    assert restored_generation["candidates"][0]["requirement_references"]
+    assert [item["stable_case_id"] for item in batch_payload["revisions"] if item["stable_case_id"]] == stable_case_ids

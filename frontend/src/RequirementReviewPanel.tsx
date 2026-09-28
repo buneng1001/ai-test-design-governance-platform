@@ -110,6 +110,7 @@ export function RequirementReviewPanel({
   });
   const blockedCount = (analysis?.requirements ?? []).filter((item) => selected.has(item.requirement_id) && rowHasProblem(item)).length;
   const atomicByRequirementId = new Map((analysis?.atomic_requirements ?? []).map((item) => [item.candidate_id, item]));
+  const unassignedFindings = (analysis?.findings ?? []).filter((finding) => finding.source_reference === null);
   const groupedVisibleRequirements = Object.entries(visibleRequirements.reduce<Record<string, typeof visibleRequirements>>(
     (groups, item) => ({ ...groups, [item.module]: [...(groups[item.module] ?? []), item] }), {},
   ));
@@ -199,6 +200,14 @@ export function RequirementReviewPanel({
             </tr>;
           })])}</tbody>
         </table>
+        {unassignedFindings.length > 0 && <section className="suggestion-card" aria-label="需人工处理的全局发现">
+          <h4>需人工处理的全局发现</h4>
+          {unassignedFindings.map((finding) => <p key={finding.finding_id}>
+            问题：{finding.summary}（{finding.status}）
+            {analysis.status === "draft" && finding.status === "pending_confirmation" && <button onClick={() => refresh(updateFinding(
+              projectId, analysis.id, finding.finding_id, "resolved"))}>标记已处理</button>}
+          </p>)}
+        </section>}
       </div>
       {analysis.status === "draft" && <form className="project-form" onSubmit={(event) => {
         event.preventDefault(); refresh(confirmRequirementReview(projectId, analysis.id, confirmerName));

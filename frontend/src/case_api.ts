@@ -6,6 +6,7 @@ import type { AIRunControl } from "./api_types_ai";
 export type CaseGenerationRunOptions = {
   templateMappingId: number; acceptTemplateLimitations: boolean; strictConflicts: boolean;
   modules: string[]; mode: "mock" | "real" | "template"; batchSize?: number;
+  variants?: Array<"normal" | "boundary" | "invalid" | "scenario">;
 };
 
 export const generateCases = (projectId: number, designId: number, templateMappingId: number,
@@ -22,7 +23,7 @@ export const generateCases = (projectId: number, designId: number, templateMappi
 const caseRunBody = (options: CaseGenerationRunOptions) => ({
   ...(options.templateMappingId > 0 ? { template_mapping_id: options.templateMappingId } : {}),
   accept_template_limitations: options.acceptTemplateLimitations,
-  variants: ["normal", "boundary", "invalid", "scenario"], strict_conflicts: options.strictConflicts,
+  variants: options.variants ?? ["normal", "boundary", "invalid", "scenario"], strict_conflicts: options.strictConflicts,
   modules: [...new Set(options.modules.map((item) => item.trim()).filter(Boolean))].sort(),
   mode: options.mode, ...(options.batchSize ? { batch_size: options.batchSize } : {}),
 });

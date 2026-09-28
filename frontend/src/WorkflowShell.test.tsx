@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { WorkflowShell } from "./WorkflowShell";
@@ -28,6 +29,21 @@ test("默认只呈现五页签，并显示持久化工作流给出的解锁原�
   expect(screen.getByRole("tab", { name: "结构预览" })).toBeDisabled();
   expect(screen.getAllByText("请先上传并发布至少一份可解析的需求资料。")).toHaveLength(1);
   expect(screen.queryByText("资产来源记录")).not.toBeInTheDocument();
+});
+
+test("高级治理能力按需可达，且不会添加或阻塞主流程页签", async () => {
+  mockRequests(initialWorkflow);
+  const user = userEvent.setup();
+  render(<WorkflowShell projectId={1} testObject="虚构设备" softwareVersion="v1.0.0" />);
+
+  await screen.findByText("下一步：上传并发布需求资料");
+  await user.click(screen.getByText("高级治理与历史详情"));
+
+  expect(await screen.findByText("资产来源记录")).toBeInTheDocument();
+  expect(screen.getByText("AI 运行审计")).toBeInTheDocument();
+  expect(screen.getByText("报告与审计包")).toBeInTheDocument();
+  expect(screen.getAllByRole("tab")).toHaveLength(5);
+  expect(screen.getByRole("tab", { name: "结构预览" })).toBeDisabled();
 });
 
 test("刷新恢复上游变更后的重新确认状态", async () => {
@@ -72,6 +88,9 @@ function mockRequests(workflow: object) {
     if (url.includes("/workflow")) return new Response(JSON.stringify(workflow), { status: 200 });
     if (url.includes("/model-providers")) return new Response(JSON.stringify([]), { status: 200 });
     if (url.includes("/requirement-versions")) return new Response(JSON.stringify([]), { status: 200 });
+    if (url.includes("/assets") || url.includes("/ai-runs") || url.includes("/template-mappings")) {
+      return new Response(JSON.stringify([]), { status: 200 });
+    }
     return new Response("null", { status: 200 });
   });
 }

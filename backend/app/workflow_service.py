@@ -88,7 +88,9 @@ def build_project_workflow_view(
             "blocked_reason": "上游需求版本已更新；受影响的下游草稿需要重新确认，不能继续沿用。",
         })
 
-    current = next((item for item in tabs if item.status == "current"), tabs[-1])
+    # 待处置建议必须把用户带回建议页，否则刷新会直接跳到审核页，导致普通主流程看不到处置入口。
+    current = next((item for item in tabs if item.status == "needs_attention"), None)
+    current = current or next((item for item in tabs if item.status == "current"), tabs[-1])
     if invalidated:
         current = tabs[2]
     action = WorkflowAction(label=_action_label(current.id, current.status), target_tab=current.id)

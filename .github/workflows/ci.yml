@@ -27,5 +27,9 @@ jobs:
         run: python -m pytest
       - name: 前端关键闭环测试
         run: pnpm test
+      - name: 安装浏览器级验收运行时
+        run: pnpm exec playwright install chromium
+      - name: 浏览器级主流程验收
+        run: pnpm test:e2e
       - name: 前端类型检查与构建
         run: pnpm build

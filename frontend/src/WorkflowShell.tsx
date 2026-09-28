@@ -8,6 +8,7 @@ import { ReviewSuggestionsPanel } from "./ReviewSuggestionsPanel";
 import { TestPointReviewPanel } from "./TestPointReviewPanel";
 import { TestDesignPanel } from "./TestDesignPanel";
 import { CaseGenerationPanel } from "./CaseGenerationPanel";
+import { AdvancedGovernancePanel } from "./AdvancedGovernancePanel";
 
 const pageDescriptions: Record<ProjectWorkflowView["tabs"][number]["id"], string> = {
   upload: "上传当前任务需要的需求资料，并查看文件解析状态与诊断。",
@@ -103,6 +104,7 @@ export function WorkflowShell({ projectId, testObject, softwareVersion }: {
             designId={workflow.asset_ids.test_design_id} />}
         </>}
       </article>
+      <AdvancedGovernancePanel projectId={projectId} />
       {error && <p role="alert" className="error">{error}</p>}
     </section>
   </div>;

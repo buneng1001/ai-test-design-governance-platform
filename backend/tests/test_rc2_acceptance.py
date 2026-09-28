@@ -245,8 +245,62 @@ def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
         headers={"X-Session-ID": session_id}, json={"mode": "real"},
     )
     assert analysis.status_code == 201, analysis.text
-    assert analysis.json()["is_mock"] is False
-    assert analysis.json()["requirements"]
-    assert all(item["source_references"] for item in analysis.json()["requirements"])
+    reviewed = analysis.json()
+    assert reviewed["is_mock"] is False
+    assert reviewed["requirements"]
+    assert all(item["source_references"] for item in reviewed["requirements"])
+    for conflict in reviewed["conflicts"]:
+        resolved = client.patch(
+            f"/api/projects/{project['id']}/requirement-reviews/{reviewed['id']}"
+            f"/conflicts/{conflict['conflict_id']}",
+            json={"decision": "srs_preferred", "confirmer_name": "真实模型验收工程师", "decision_note": "受控验收确认"},
+        )
+        assert resolved.status_code == 200, resolved.text
+        reviewed = resolved.json()
+    confirmed_review = _confirm_requirements(client, project["id"], reviewed)
+    suggestions = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/suggestions/generate"
+    )
+    assert suggestions.status_code == 200, suggestions.text
+    for suggestion in suggestions.json()["suggestions"]:
+        disposed = client.patch(
+            f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}"
+            f"/suggestions/{suggestion['suggestion_id']}", json={"disposition": "rejected"},
+        )
+        assert disposed.status_code == 200, disposed.text
+    point_review = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review"
+    )
+    assert point_review.status_code == 200, point_review.text
+    test_point_review = point_review.json()["test_point_review"]
+    selected = client.patch(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review/selection",
+        json={"test_item_ids": [item["test_item_id"] for item in test_point_review["test_items"]]},
+    )
+    assert selected.status_code == 200, selected.text
+    handoff = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review/confirm",
+        json={"confirmer_name": "真实模型验收工程师"},
+    )
+    assert handoff.status_code == 200, handoff.text
+    design = client.post(
+        f"/api/projects/{project['id']}/requirement-versions/{version['id']}/test-designs",
+        json={"dimension_names": ["功能"]},
+    )
+    assert design.status_code == 201, design.text
+    design_confirmed = client.post(
+        f"/api/projects/{project['id']}/test-designs/{design.json()['id']}/confirm",
+        json={"confirmer_name": "真实模型验收工程师"},
+    )
+    assert design_confirmed.status_code == 200, design_confirmed.text
+    generation = client.post(
+        f"/api/projects/{project['id']}/test-designs/{design.json()['id']}/case-generations",
+        headers={"X-Session-ID": session_id},
+        json={"mode": "real", "variants": ["normal"], "batch_size": 100, "accept_template_limitations": True},
+    )
+    assert generation.status_code == 201, generation.text
+    generated = generation.json()
+    assert generated["is_mock"] is False and generated["source"] == "real" and generated["candidates"]
+    assert generated["ai_run_status"] == "succeeded"
     audit = client.get(f"/api/projects/{project['id']}/ai-runs/audit-export")
     assert os.environ["RC2_REAL_MODEL_API_KEY"] not in audit.text
