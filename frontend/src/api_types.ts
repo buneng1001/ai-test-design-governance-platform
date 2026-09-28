@@ -104,6 +104,7 @@ export interface RequirementAnalysis {
   requirement_version_id: number;
   status: "draft" | "confirmed";
   is_mock: boolean;
+  run_source?: "mock" | "real" | "template";
   requirements: Array<{
     requirement_id: string;
     name: string;
@@ -324,6 +325,10 @@ export interface CaseGeneration {
   ai_run_id: number;
   ai_run_status: string;
   is_mock: boolean;
+  ai_run_ids?: number[];
+  source?: "mock" | "real" | "template";
+  batch_total?: number;
+  completed_batches?: number;
   status: "succeeded" | "empty" | "validation_failed" | "failed" | "needs_confirmation";
   template_diagnostics: Array<{ code: string; message: string }>;
   candidates: CandidateTestCase[];

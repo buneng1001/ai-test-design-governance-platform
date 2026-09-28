@@ -31,7 +31,11 @@ def test_migrate_removes_legacy_plaintext_model_keys(tmp_path) -> None:
     database_path = tmp_path / "legacy-model-config.sqlite3"
     with sqlite3.connect(database_path) as connection:
         connection.executescript(MIGRATIONS[0])
-        for version, migration in enumerate(MIGRATIONS[1:-2], start=1):
+        cleanup_version = next(
+            version for version, migration in enumerate(MIGRATIONS[1:], start=1)
+            if "DELETE FROM ai_model_configs" in migration
+        )
+        for version, migration in enumerate(MIGRATIONS[1:cleanup_version - 1], start=1):
             connection.executescript(migration)
             connection.execute(
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",

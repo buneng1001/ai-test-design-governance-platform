@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
+import sqlite3
 
 from fastapi import FastAPI, Header, HTTPException
 
 from app.ai_repository import AIRunRepository
+from app.ai_run_control_repository import ConcurrentRunResumeError, InputFingerprintMismatchError
 from app.ai_schemas import AIModelConfig
 from app.ai_service import analysis_max_tokens
 from app.main_route_context import AppRouteContext
@@ -52,6 +54,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
     requirement_repository: RequirementRepository = context.requirement_repository
     review_repository: RequirementReviewRepository = context.review_repository
     ai_run_repository: AIRunRepository = context.ai_run_repository
+    controls = context.ai_run_control_repository
 
     @app.post(
         "/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review",
@@ -94,6 +97,22 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
             if analysis_input.mode == "real" else 1200,
         )
         selected_model_service = context.real_model_service if analysis_input.mode == "real" else context.model_service
+        control_payload = {"requirement_version_id": version_id, "materials": input_asset_versions,
+                           "source_reference_ids": [str(item["source_reference"]["reference_id"]) for item in context_values],
+                           "mode": analysis_input.mode, "batch_size": analysis_input.batch_size}
+        fingerprint = controls.fingerprint(control_payload)
+        batch_total = (len(context_values) + analysis_input.batch_size - 1) // analysis_input.batch_size
+        control = controls.require(analysis_input.run_control_id) if analysis_input.run_control_id else controls.create(
+            project_id, "requirement_analysis", control_payload, batch_total,
+        )
+        if control.project_id != project_id or control.workflow != "requirement_analysis" or control.input_fingerprint != fingerprint:
+            raise HTTPException(status_code=409, detail="运行输入已变化，不能恢复")
+        if control.status == "completed" and control.final_asset_id is not None:
+            existing_completed = review_repository.get(project_id, control.final_asset_id)
+            if existing_completed is not None:
+                return existing_completed
+        if analysis_input.start_only:
+            return control.__dict__  # type: ignore[return-value]
         try:
             batches = run_requirement_analysis_batches(
                 project_id=project_id,
@@ -106,11 +125,16 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
                 max_retries=analysis_input.max_retries,
                 batch_size=analysis_input.batch_size,
                 ai_runs=ai_run_repository,
+                controls=controls,
+                run_control_id=control.id,
+                max_new_batches=1 if analysis_input.advance_only else None,
                 base_url=session_config.base_url if session_config else "",
                 api_key=session_config.api_key if session_config else "",
             )
         except RequirementAnalysisBatchError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        if analysis_input.advance_only and len(batches) < control.batch_total:
+            return controls.require(control.id).__dict__  # type: ignore[return-value]
         try:
             merged_output = merge_structured_analysis_outputs([batch.output for batch in batches])
             requirements, test_items, criteria, atomic_requirements, findings, conflicts = semantic_output_to_analysis(
@@ -163,9 +187,53 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
                 ai_run_id=batch.ai_run_id,
             ) for batch in batches],
             is_mock=analysis_input.mode == "mock",
+            run_source="template" if analysis_input.mode == "template" else analysis_input.mode,
+            run_control_id=control.id,
             ai_run_id=batches[-1].ai_run_id,
         )
-        return review_repository.create(analysis)
+        if controls.require(control.id).status != "running":
+            raise HTTPException(status_code=409, detail={"message": "AI 运行已停止", "run_id": control.id})
+        try:
+            created = review_repository.create(analysis)
+        except sqlite3.IntegrityError:
+            # 唯一约束赢得竞态时，恢复已经成功持久化的同一最终资产。
+            created = review_repository.get_by_run_control(project_id, control.id)
+            if created is None:
+                raise
+        controls.record_final_asset(control.id, "requirement_analysis", created.id)
+        controls.complete(control.id)
+        return created
+
+    @app.post("/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review-runs", status_code=201)
+    def start_requirement_review_run(project_id: int, version_id: int, data: RequirementAnalysisInput) -> dict:
+        # 显式开始一次受控运行必须返回运行控制记录，不能被旧的同步结果短路。
+        return create_requirement_review(project_id, version_id, data.model_copy(update={"start_only": True, "force_new": True}))  # type: ignore[return-value]
+
+    @app.post("/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review-runs/{run_id}/advance")
+    def advance_requirement_review_run(project_id: int, version_id: int, run_id: str, data: RequirementAnalysisInput) -> dict:
+        result = create_requirement_review(project_id, version_id, data.model_copy(update={"run_control_id": run_id, "advance_only": True, "force_new": True}))
+        return result if isinstance(result, dict) else result.model_dump(mode="json")
+
+    @app.post("/api/projects/{project_id}/requirement-versions/{version_id}/requirement-review-runs/{run_id}/resume")
+    def resume_requirement_review_run(project_id: int, version_id: int, run_id: str, data: RequirementAnalysisInput) -> dict:
+        control = controls.require(run_id)
+        if control.project_id != project_id or control.workflow != "requirement_analysis":
+            raise HTTPException(status_code=404, detail="AI 运行不存在")
+        if control.payload.get("requirement_version_id") != version_id:
+            raise HTTPException(status_code=409, detail="运行输入已变化，不能恢复")
+        try:
+            controls.claim_resume(run_id, control.input_fingerprint)
+        except InputFingerprintMismatchError as exc:
+            raise HTTPException(status_code=409, detail="运行输入已变化，不能恢复") from exc
+        except ConcurrentRunResumeError as exc:
+            raise HTTPException(status_code=409, detail="已有恢复操作正在执行") from exc
+        # 续跑只能使用创建时由后端归一化并指纹化的输入，忽略客户端可变字段。
+        resumed = data.model_copy(update={
+            "mode": control.payload["mode"], "batch_size": control.payload["batch_size"],
+            "run_control_id": run_id, "advance_only": True, "force_new": True,
+        })
+        result = create_requirement_review(project_id, version_id, resumed)
+        return result if isinstance(result, dict) else result.model_dump(mode="json")
 
     @app.get("/api/projects/{project_id}/requirement-reviews/{analysis_id}", response_model=RequirementAnalysis)
     def get_requirement_review(project_id: int, analysis_id: int) -> RequirementAnalysis:

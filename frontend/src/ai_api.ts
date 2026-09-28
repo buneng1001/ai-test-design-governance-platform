@@ -2,6 +2,7 @@
 import { request, sessionHeaders } from "./api_client";
 import type { AIRun, ConnectionTestResult, ModelDiscoveryResult, ModelProviderOption, SessionModelConfig,
   SessionModelConfigStatus } from "./api_types";
+import type { AIRunControl } from "./api_types_ai";
 
 export const listModelProviders = (): Promise<ModelProviderOption[]> => request("/api/model-providers");
 export const getSessionModelConfig = (): Promise<SessionModelConfigStatus | null> =>
@@ -23,3 +24,8 @@ export const clearSessionModelConfig = async (): Promise<void> => {
   if (!response.ok) throw new Error("清除模型配置失败");
 };
 export const listAIRuns = (projectId: number): Promise<AIRun[]> => request(`/api/projects/${projectId}/ai-runs`);
+export const getAIRunControl = (projectId: number, runId: string): Promise<AIRunControl> =>
+  request(`/api/projects/${projectId}/ai-workflow-runs/${runId}`);
+export const stopAIRunControl = (projectId: number, runId: string): Promise<AIRunControl> => request(
+  `/api/projects/${projectId}/ai-workflow-runs/${runId}/stop`, { method: "POST" },
+);

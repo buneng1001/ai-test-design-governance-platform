@@ -25,8 +25,8 @@ class RequirementReviewRepository:
     def create(self, analysis: RequirementAnalysis) -> RequirementAnalysis:
         with self.connect() as connection:
             cursor = connection.execute(
-                "INSERT INTO requirement_analyses(project_id, requirement_version_id, payload_json) VALUES (?, ?, ?)",
-                (analysis.project_id, analysis.requirement_version_id, analysis.model_dump_json()),
+                "INSERT INTO requirement_analyses(project_id, requirement_version_id, run_control_id, payload_json) VALUES (?, ?, ?, ?)",
+                (analysis.project_id, analysis.requirement_version_id, analysis.run_control_id, analysis.model_dump_json()),
             )
             analysis.id = cursor.lastrowid or 0
             connection.execute(
@@ -41,6 +41,14 @@ class RequirementReviewRepository:
             row = connection.execute(
                 "SELECT payload_json FROM requirement_analyses WHERE id = ? AND project_id = ?",
                 (analysis_id, project_id),
+            ).fetchone()
+        return RequirementAnalysis.model_validate_json(row["payload_json"]) if row else None
+
+    def get_by_run_control(self, project_id: int, run_control_id: str) -> RequirementAnalysis | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM requirement_analyses WHERE project_id = ? AND run_control_id = ?",
+                (project_id, run_control_id),
             ).fetchone()
         return RequirementAnalysis.model_validate_json(row["payload_json"]) if row else None
 

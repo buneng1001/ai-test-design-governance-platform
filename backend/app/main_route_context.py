@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.ai_repository import AIRunRepository
+from app.ai_run_control_repository import AIRunControlRepository
 from app.ai_service import MockModelService, OpenAICompatibleModelService, UnavailableModelService
 from app.asset_repository import AssetRepository
 from app.case_repository import CaseGenerationRepository
@@ -28,6 +29,7 @@ class AppRouteContext:
     review_repository: RequirementReviewRepository
     design_repository: DesignRepository
     ai_run_repository: AIRunRepository
+    ai_run_control_repository: AIRunControlRepository
     template_repository: TemplateMappingRepository
     case_generation_repository: CaseGenerationRepository
     case_review_repository: CaseReviewRepository

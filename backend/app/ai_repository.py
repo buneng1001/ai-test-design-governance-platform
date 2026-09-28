@@ -28,13 +28,17 @@ class AIRunRepository:
                 """
                 INSERT INTO ai_runs(
                     project_id, task_type, model_config_json, prompt_version, input_asset_versions_json,
-                    output_json, validation_status, validation_errors_json, status, is_mock, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    output_json, validation_status, validation_errors_json, status, is_mock, created_at,
+                    source, stage, batch_number, batch_total, completed_count, total_count,
+                    estimated_remaining_ms, recovery_point
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run.project_id, run.task_type, run.model_parameters.model_dump_json(), run.prompt_version,
                     json.dumps(run.input_asset_versions), json.dumps(run.output), run.validation_status,
                     json.dumps(run.validation_errors), run.status, run.is_mock, run.created_at.isoformat(),
+                    run.source, run.stage, run.batch_number, run.batch_total, run.completed_count, run.total_count,
+                    run.estimated_remaining_ms, run.recovery_point,
                 ),
             )
             run_id = cursor.lastrowid
@@ -92,6 +96,14 @@ class AIRunRepository:
             validation_status=row["validation_status"], validation_errors=json.loads(row["validation_errors_json"]),
             status=row["status"], is_mock=bool(row["is_mock"]), created_at=row["created_at"],
             attempts=[AIAttempt.model_validate(dict(item)) for item in attempts],
+            source=row["source"] if "source" in row.keys() else ("mock" if row["is_mock"] else "real"),
+            stage=row["stage"] if "stage" in row.keys() else "model_call",
+            batch_number=row["batch_number"] if "batch_number" in row.keys() else 1,
+            batch_total=row["batch_total"] if "batch_total" in row.keys() else 1,
+            completed_count=row["completed_count"] if "completed_count" in row.keys() else 0,
+            total_count=row["total_count"] if "total_count" in row.keys() else 0,
+            estimated_remaining_ms=row["estimated_remaining_ms"] if "estimated_remaining_ms" in row.keys() else None,
+            recovery_point=row["recovery_point"] if "recovery_point" in row.keys() else None,
             dispositions=[dict(item) for item in dispositions],
             disposition=dict(disposition) if disposition else None,
         )
@@ -99,10 +111,11 @@ class AIRunRepository:
     @staticmethod
     def _insert_attempt(connection: sqlite3.Connection, run_id: int, attempt: AIAttempt) -> None:
         connection.execute(
-            "INSERT INTO ai_run_attempts(run_id, attempt, started_at, elapsed_ms, status, error_code, retryable, diagnostic) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO ai_run_attempts(run_id, attempt, started_at, elapsed_ms, status, error_code, retryable, diagnostic, "
+            "error_category, retry_after_ms, recovery_point) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (run_id, attempt.attempt, attempt.started_at.isoformat(), attempt.elapsed_ms, attempt.status,
-             attempt.error_code, attempt.retryable, attempt.diagnostic),
+             attempt.error_code, attempt.retryable, attempt.diagnostic, attempt.error_category,
+             attempt.retry_after_ms, attempt.recovery_point),
         )
 
     @staticmethod

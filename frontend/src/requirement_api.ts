@@ -1,6 +1,9 @@
 // 需求导入与评审领域请求。
 import { request, sessionHeaders } from "./api_client";
 import type { RequirementFileInput, RequirementAnalysis, RequirementPackage, RequirementVersion } from "./api_types";
+import type { AIRunControl } from "./api_types_ai";
+
+type RequirementRunOptions = { mode: "mock" | "real" | "template"; batchSize?: number };
 
 export const createRequirementPackage = (projectId: number, name: string,
   files: RequirementFileInput[]): Promise<RequirementPackage> =>
@@ -18,11 +21,32 @@ export const publishRequirementPackage = (projectId: number, packageId: number):
 export const listRequirementVersions = (projectId: number): Promise<RequirementVersion[]> =>
   request(`/api/projects/${projectId}/requirement-versions`);
 export const createRequirementReview = (projectId: number, versionId: number,
-  mode: "mock" | "real" = "mock", forceNew = false): Promise<RequirementAnalysis> =>
+  mode: "mock" | "real" | "template" = "mock", forceNew = false): Promise<RequirementAnalysis> =>
   request(`/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review`, {
     method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ mode, force_new: forceNew }),
   });
+export const startRequirementReviewRun = (projectId: number, versionId: number,
+  { mode, batchSize }: RequirementRunOptions): Promise<AIRunControl> => request(
+  `/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review-runs`, {
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, ...(batchSize ? { batch_size: batchSize } : {}) }),
+  },
+);
+export const advanceRequirementReviewRun = (projectId: number, versionId: number, runId: string,
+  { mode, batchSize }: RequirementRunOptions): Promise<AIRunControl | RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review-runs/${runId}/advance`, {
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, ...(batchSize ? { batch_size: batchSize } : {}) }),
+  },
+);
+export const resumeRequirementReviewRun = (projectId: number, versionId: number, runId: string,
+  { mode, batchSize }: RequirementRunOptions): Promise<AIRunControl | RequirementAnalysis> => request(
+  `/api/projects/${projectId}/requirement-versions/${versionId}/requirement-review-runs/${runId}/resume`, {
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, ...(batchSize ? { batch_size: batchSize } : {}) }),
+  },
+);
 export const getRequirementReview = (projectId: number, analysisId: number): Promise<RequirementAnalysis> =>
   request(`/api/projects/${projectId}/requirement-reviews/${analysisId}`);
 export const updateAtomicRequirement = (projectId: number, analysisId: number, candidateId: string,

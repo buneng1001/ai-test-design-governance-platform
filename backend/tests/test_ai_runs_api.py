@@ -110,6 +110,24 @@ def test_retryable_errors_are_bounded_and_non_retryable_errors_stop_immediately(
     assert auth["status"] == "failed"
     assert len(auth["attempts"]) == 1
     assert auth["attempts"][0]["retryable"] is False
+    assert timeout["attempts"][0]["error_category"] == "timeout"
+    assert timeout["attempts"][0]["retry_after_ms"] == 250
+    assert auth["attempts"][0]["error_category"] == "authentication"
+
+
+def test_run_progress_metadata_is_persisted_and_exported(client: TestClient) -> None:
+    project_id = create_project(client)
+    asset_id = create_asset(client, project_id)
+
+    created = client.post(f"/api/projects/{project_id}/ai-runs", json=run_input(asset_id)).json()
+
+    assert created["source"] == "mock"
+    assert created["stage"] == "model_call"
+    assert created["batch_number"] == 1
+    assert created["batch_total"] == 1
+    assert created["total_count"] == 1
+    exported = client.get(f"/api/projects/{project_id}/ai-runs/audit-export").json()
+    assert exported["runs"][0]["source"] == "mock"
 
 
 def test_unconfigured_real_provider_is_distinguished_from_mock(client: TestClient) -> None:

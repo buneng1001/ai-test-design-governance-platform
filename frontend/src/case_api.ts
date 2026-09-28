@@ -1,10 +1,16 @@
 // 用例生成、评审与发布领域请求。
 import { request, downloadResponseFile, sessionHeaders } from "./api_client";
 import type { CaseGeneration, CaseReviewBatch, TestTask } from "./api_types";
+import type { AIRunControl } from "./api_types_ai";
+
+export type CaseGenerationRunOptions = {
+  templateMappingId: number; acceptTemplateLimitations: boolean; strictConflicts: boolean;
+  modules: string[]; mode: "mock" | "real" | "template"; batchSize?: number;
+};
 
 export const generateCases = (projectId: number, designId: number, templateMappingId: number,
   acceptTemplateLimitations = false, strictConflicts = false, modules: string[] = [],
-    mode: "mock" | "real" = "mock"): Promise<CaseGeneration> => request(
+    mode: "mock" | "real" | "template" = "mock"): Promise<CaseGeneration> => request(
   `/api/projects/${projectId}/test-designs/${designId}/case-generations`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       ...(templateMappingId > 0 ? { template_mapping_id: templateMappingId } : {}),
@@ -12,6 +18,37 @@ export const generateCases = (projectId: number, designId: number, templateMappi
       variants: ["normal", "boundary", "invalid", "scenario"], strict_conflicts: strictConflicts, modules, mode,
     }),
   },
+);
+const caseRunBody = (options: CaseGenerationRunOptions) => ({
+  ...(options.templateMappingId > 0 ? { template_mapping_id: options.templateMappingId } : {}),
+  accept_template_limitations: options.acceptTemplateLimitations,
+  variants: ["normal", "boundary", "invalid", "scenario"], strict_conflicts: options.strictConflicts,
+  modules: [...new Set(options.modules.map((item) => item.trim()).filter(Boolean))].sort(),
+  mode: options.mode, ...(options.batchSize ? { batch_size: options.batchSize } : {}),
+});
+export const startCaseGenerationRun = (projectId: number, designId: number,
+  options: CaseGenerationRunOptions): Promise<AIRunControl> => request(
+  `/api/projects/${projectId}/test-designs/${designId}/case-generation-runs`, {
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(caseRunBody(options)),
+  },
+);
+export const advanceCaseGenerationRun = (projectId: number, designId: number, runId: string,
+  options: CaseGenerationRunOptions): Promise<AIRunControl | CaseGeneration> => request(
+  `/api/projects/${projectId}/test-designs/${designId}/case-generation-runs/${runId}/advance`, {
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(caseRunBody(options)),
+  },
+);
+export const resumeCaseGenerationRun = (projectId: number, designId: number, runId: string,
+  options: CaseGenerationRunOptions): Promise<AIRunControl | CaseGeneration> => request(
+  `/api/projects/${projectId}/test-designs/${designId}/case-generation-runs/${runId}/resume`, {
+    method: "POST", headers: { ...sessionHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(caseRunBody(options)),
+  },
+);
+export const getCaseGeneration = (projectId: number, generationId: number): Promise<CaseGeneration> => request(
+  `/api/projects/${projectId}/case-generations/${generationId}`,
 );
 export const createCaseReviews = (projectId: number, generationId: number,
   mode: "mock" | "real" = "mock"): Promise<CaseReviewBatch> => request(

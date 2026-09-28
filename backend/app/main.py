@@ -9,9 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # 这些导入保持历史兼容，已有调用方可以继续从 app.main 获取相关符号。
 from app.ai_repository import AIRunRepository
+from app.ai_run_control_repository import AIRunControlRepository
 from app.ai_schemas import AIAttempt, AIDispositionInput, AIRun, AIRunInput, AIModelConfig
 from app.ai_service import (
-    ModelRequest, MockModelService, OpenAICompatibleModelService, UnavailableModelService,
+    ModelRequest, ModelService, MockModelService, OpenAICompatibleModelService, UnavailableModelService,
     validate_output, validate_requirement_analysis_output,
 )
 from app.asset_repository import AssetRepository
@@ -63,7 +64,10 @@ from app.ai_run_api import register_ai_run_routes as _register_ai_run_routes
 from app.workflow_api import register_workflow_routes
 
 
-def create_app(database_path: Path | None = None, local_credentials_path: Path | None = None) -> FastAPI:
+def create_app(
+    database_path: Path | None = None, local_credentials_path: Path | None = None,
+    model_service: ModelService | None = None,
+) -> FastAPI:
     """创建应用并按历史顺序组装所有依赖和路由。"""
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
     repository = ProjectRepository(resolved_database_path)
@@ -72,6 +76,7 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
     review_repository = RequirementReviewRepository(resolved_database_path)
     design_repository = DesignRepository(resolved_database_path)
     ai_run_repository = AIRunRepository(resolved_database_path)
+    ai_run_control_repository = AIRunControlRepository(resolved_database_path)
     template_repository = TemplateMappingRepository(resolved_database_path)
     case_generation_repository = CaseGenerationRepository(resolved_database_path)
     case_review_repository = CaseReviewRepository(resolved_database_path)
@@ -87,12 +92,12 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
         execution_batch_repository, execution_result_repository, quality_repository,
         change_impact_repository, ai_run_repository, evaluation_repository,
     )
-    model_service = MockModelService()
+    model_service = model_service or MockModelService()
     real_model_service = OpenAICompatibleModelService()
     unavailable_model_service = UnavailableModelService()
     context = _AppRouteContext(
         repository, asset_repository, requirement_repository, review_repository, design_repository,
-        ai_run_repository, template_repository, case_generation_repository, case_review_repository,
+        ai_run_repository, ai_run_control_repository, template_repository, case_generation_repository, case_review_repository,
         task_repository, execution_batch_repository, execution_result_repository, quality_repository,
         change_impact_repository, evaluation_repository, report_service, model_service,
         real_model_service, unavailable_model_service,
@@ -101,6 +106,7 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         repository.migrate()
+        ai_run_control_repository.recover_after_restart()
         yield
 
     app = FastAPI(title="AI 测试设计与治理平台", lifespan=lifespan)
@@ -116,7 +122,7 @@ def create_app(database_path: Path | None = None, local_credentials_path: Path |
     register_template_routes(app, repository, template_repository)
     register_case_routes(
         app, repository, requirement_repository, review_repository, design_repository, template_repository,
-        case_generation_repository, ai_run_repository, model_service, real_model_service,
+        case_generation_repository, ai_run_repository, ai_run_control_repository, model_service, real_model_service,
     )
     register_case_review_routes(
         app, repository, case_generation_repository, case_review_repository, ai_run_repository,

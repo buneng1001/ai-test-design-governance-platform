@@ -55,7 +55,7 @@ test("测试用例页使用当前工作流中的已确认测试设计生成候�
   });
   render(<WorkflowShell projectId={1} testObject="虚构设备" softwareVersion="v1.0.0" />);
 
-  expect(await screen.findByRole("button", { name: "生成候选测试用例" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "创建用例生成运行" })).toBeInTheDocument();
   expect(screen.getByText(/当前已确认测试设计将使用默认 XLSX 用例模板/)).toBeInTheDocument();
 });
 

@@ -29,6 +29,32 @@ export interface AIRun {
   status: "succeeded" | "validation_failed" | "failed";
   validation_status: "passed" | "failed" | "not_run";
   is_mock: boolean;
-  attempts: Array<{ attempt: number; status: string; error_code: string | null; diagnostic?: string | null }>;
+  source?: "mock" | "real" | "template";
+  stage?: string;
+  batch_number?: number;
+  batch_total?: number;
+  completed_count?: number;
+  total_count?: number;
+  estimated_remaining_ms?: number | null;
+  recovery_point?: string | null;
+  attempts: Array<{ attempt: number; status: string; error_code: string | null; diagnostic?: string | null;
+    error_category?: string | null; retry_after_ms?: number | null; recovery_point?: string | null }>;
   disposition: { decision: string; reason: string } | null;
 }
+
+/** 后端持久化的工作流运行控制记录；输入摘要不由客户端填写。 */
+export interface AIRunControl {
+  id: string;
+  project_id: number;
+  workflow: "requirement_analysis" | "case_generation";
+  input_fingerprint: string;
+  status: "running" | "stopped" | "completed";
+  next_batch: number;
+  batch_total: number;
+  completed_count: number;
+  final_asset_type: string | null;
+  final_asset_id: number | null;
+}
+
+export const isAIRunControl = (value: unknown): value is AIRunControl => typeof value === "object"
+  && value !== null && "workflow" in value && "next_batch" in value && "completed_count" in value;

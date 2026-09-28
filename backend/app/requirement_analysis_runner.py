@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from datetime import UTC, datetime
+from time import sleep
 
 from app.ai_repository import AIRunRepository
+from app.ai_run_control_repository import AIRunControlRepository, BatchAlreadyClaimedError
 from app.ai_schemas import AIAttempt, AIRun, AIModelConfig, MockScenario
-from app.ai_service import ModelRequest, ModelService, validate_requirement_analysis_output
+from app.ai_run_reliability import error_category, redact_diagnostic, retry_delay_ms
+from app.ai_service import ModelRequest, ModelService, local_structural_repair, validate_requirement_analysis_output
 from app.model_config_service import provider_error_type, service_error
 from app.review_schemas import StructuredAnalysisOutput
 
@@ -27,6 +31,10 @@ class RequirementAnalysisBatchError(Exception):
         super().__init__(str(detail))
 
 
+class RequirementAnalysisStopped(Exception):
+    pass
+
+
 def run_requirement_analysis_batches(
     *,
     project_id: int,
@@ -39,6 +47,9 @@ def run_requirement_analysis_batches(
     max_retries: int,
     batch_size: int,
     ai_runs: AIRunRepository,
+    controls: AIRunControlRepository | None = None,
+    run_control_id: str | None = None,
+    max_new_batches: int | None = None,
     base_url: str = "",
     api_key: str = "",
 ) -> list[CompletedAnalysisBatch]:
@@ -46,7 +57,28 @@ def run_requirement_analysis_batches(
     if not batches:
         raise RequirementAnalysisBatchError(422, {"message": "需求资料中没有可分析的来源片段"})
     completed: list[CompletedAnalysisBatch] = []
+    if controls is not None and run_control_id is not None:
+        completed = [CompletedAnalysisBatch(
+            batch_number=item["batch_number"],
+            source_reference_ids=item["output"].get("source_reference_ids", []),
+            output=StructuredAnalysisOutput.model_validate(item["output"].get("model_output", item["output"])),
+            ai_run_id=item["ai_run_id"],
+        ) for item in controls.batch_results(run_control_id)]
     for batch_number, batch_context in enumerate(batches, start=1):
+        lease_id: str | None = None
+        if controls is not None and run_control_id is not None:
+            control = controls.require(run_control_id)
+            if control.status == "stopped":
+                raise RequirementAnalysisBatchError(409, {"message": "AI 运行已停止", "run_id": run_control_id})
+            if batch_number < control.next_batch:
+                continue
+            try:
+                claim = controls.claim_next_batch(run_control_id)
+            except BatchAlreadyClaimedError as exc:
+                raise RequirementAnalysisBatchError(409, {"message": "AI 批次正在由其他恢复操作执行", "run_id": run_control_id}) from exc
+            if claim.batch_number != batch_number:
+                raise RequirementAnalysisBatchError(409, {"message": "AI 批次检查点已变化", "run_id": run_control_id})
+            lease_id = claim.lease_id
         request = ModelRequest(
             task_type="requirement_review",
             prompt_version="requirement-analysis.v1",
@@ -57,9 +89,16 @@ def run_requirement_analysis_batches(
             base_url=base_url,
             api_key=api_key,
         )
-        output, attempts, validation_errors, run_status, diagnostic, error_code = _complete_batch(
-            model_service, request, max_retries,
-        )
+        try:
+            output, attempts, validation_errors, run_status, diagnostic, error_code = _complete_batch(
+                model_service, request, max_retries,
+                should_continue=lambda: controls is None or run_control_id is None
+                or controls.require(run_control_id).status == "running",
+            )
+        except RequirementAnalysisStopped as exc:
+            if lease_id is not None and controls is not None:
+                controls.release_batch_claim(run_control_id, lease_id)
+            raise RequirementAnalysisBatchError(409, {"message": "AI 运行已停止", "run_id": run_control_id}) from exc
         ai_run = ai_runs.create_run(AIRun(
             id=0,
             project_id=project_id,
@@ -74,8 +113,20 @@ def run_requirement_analysis_batches(
             is_mock=mode == "mock",
             created_at=datetime.now(UTC),
             attempts=attempts,
+            source="template" if mode == "template" else mode,
+            stage="requirement_analysis",
+            batch_number=batch_number,
+            batch_total=len(batches),
+            completed_count=batch_number if output else batch_number - 1,
+            total_count=len(input_context),
+            estimated_remaining_ms=max(0, (len(batches) - batch_number) * sum(
+                item.elapsed_ms for item in attempts
+            )),
+            recovery_point=f"requirement-analysis.batch-{batch_number + 1}" if output and batch_number < len(batches) else None,
         ))
         if output is None:
+            if lease_id is not None and controls is not None:
+                controls.release_batch_claim(run_control_id, lease_id)
             error_type = "invalid_response" if run_status == "validation_failed" else provider_error_type(error_code)
             detail = service_error(
                 "model_call", model_parameters.provider, model_parameters.model, error_type,
@@ -84,6 +135,14 @@ def run_requirement_analysis_batches(
             detail["batch_number"] = batch_number
             detail["ai_run_id"] = ai_run.id
             raise RequirementAnalysisBatchError(422 if run_status == "validation_failed" else 502, detail)
+        if controls is not None and run_control_id is not None:
+            controls.record_validated_batch(run_control_id, batch_number, {
+                "model_output": output.model_dump(mode="json"),
+                "source_reference_ids": [
+                    str(item["source_reference"]["reference_id"])
+                    for item in batch_context if isinstance(item.get("source_reference"), dict)
+                ],
+            }, ai_run.id, lease_id)
         completed.append(CompletedAnalysisBatch(
             batch_number=batch_number,
             source_reference_ids=[
@@ -93,11 +152,14 @@ def run_requirement_analysis_batches(
             output=output,
             ai_run_id=ai_run.id,
         ))
+        if max_new_batches is not None and len(completed) >= control.next_batch - 1 + max_new_batches:
+            break
     return completed
 
 
 def _complete_batch(
     service: ModelService, request: ModelRequest, max_retries: int,
+    should_continue: Callable[[], bool],
 ) -> tuple[StructuredAnalysisOutput | None, list[AIAttempt], list[str], str, str | None, str | None]:
     attempts: list[AIAttempt] = []
     validation_errors: list[str] = []
@@ -118,16 +180,36 @@ def _complete_batch(
             error_code, diagnostic = response.error_code, response.diagnostic
             attempts.append(AIAttempt(
                 attempt=attempt_number, started_at=started_at, elapsed_ms=elapsed_ms, status="failed",
-                error_code=error_code, retryable=response.retryable, diagnostic=diagnostic,
+                error_code=error_code, retryable=response.retryable, diagnostic=redact_diagnostic(diagnostic),
+                error_category=error_category(error_code),
+                retry_after_ms=retry_delay_ms(attempt_number) if response.retryable else None,
+                recovery_point=f"requirement-analysis.retry-{attempt_number + 1}" if response.retryable else None,
             ))
             if response.retryable and attempt_number <= max_retries:
+                if not should_continue():
+                    raise RequirementAnalysisStopped()
+                sleep(retry_delay_ms(attempt_number) / 1000)
+                if not should_continue():
+                    raise RequirementAnalysisStopped()
                 continue
             return None, attempts, validation_errors, "failed", diagnostic, error_code
         output, validation_errors = validate_requirement_analysis_output(response.raw_output, request.input_context)
         if validation_errors:
+            output, validation_errors = validate_requirement_analysis_output(
+                local_structural_repair(response.raw_output), request.input_context,
+            )
+            if output is not None:
+                attempts.append(AIAttempt(
+                    attempt=attempt_number, started_at=started_at, elapsed_ms=elapsed_ms,
+                    status="succeeded", error_code="schema_local_repaired", retryable=False,
+                    error_category="structure", recovery_point="local_structural_repair",
+                ))
+                return output, [], [], "succeeded", None, None
+        if validation_errors:
             attempts.append(AIAttempt(
                 attempt=attempt_number, started_at=started_at, elapsed_ms=elapsed_ms,
                 status="validation_failed", error_code="schema_invalid", retryable=False,
+                error_category="structure", recovery_point="structural_repair_required",
             ))
             return None, attempts, validation_errors, "validation_failed", None, "schema_invalid"
         attempts.append(AIAttempt(

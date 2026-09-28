@@ -25,9 +25,13 @@ export function AIRunPanel({ projectId }: AIRunPanelProps) {
           {runs.map((run) => (
             <article key={run.id}>
               <strong>{run.task_type}</strong>
-              <span>{run.is_mock ? "Mock AI 运行" : "真实模型运行"}</span>
-              <span>状态：{run.status} / 校验：{run.validation_status}</span>
-              <span>尝试次数：{run.attempts.length} · Prompt 版本：{run.prompt_version}</span>
+              <span>{run.source === "template" ? "模板回退（显式选择）" : run.is_mock ? "Mock AI 运行" : "真实模型运行"}</span>
+              <span>阶段：{run.stage ?? "model_call"} · 批次：{run.batch_number ?? 1}/{run.batch_total ?? 1} ·
+                完成：{run.completed_count ?? 0}/{run.total_count ?? 0}</span>
+              <span>状态：{run.status} / 校验：{run.validation_status} {run.estimated_remaining_ms != null
+                ? `· 预计剩余约 ${Math.ceil(run.estimated_remaining_ms / 1000)} 秒` : ""}</span>
+              <span>尝试次数：{run.attempts.length} · Prompt 版本：{run.prompt_version}
+                {run.recovery_point ? ` · 恢复点：${run.recovery_point}` : ""}</span>
               {run.attempts.some((attempt) => attempt.diagnostic) && (
                 <span>诊断：{run.attempts.find((attempt) => attempt.diagnostic)?.diagnostic}</span>
               )}
