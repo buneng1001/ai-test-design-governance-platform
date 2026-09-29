@@ -1,6 +1,11 @@
 import json
 import sqlite3
+from pathlib import Path
+from shutil import copy2
 
+from fastapi.testclient import TestClient
+
+from app.main import create_app
 from app.project_repository import ProjectRepository
 from app.repository import MIGRATIONS
 from test_case_generation_api import _setup as setup_case_generation
@@ -113,3 +118,44 @@ def test_migrate_keeps_historical_requirement_review_design_and_case_records_rea
     ]
     assert restored_generation["candidates"][0]["requirement_references"]
     assert [item["stable_case_id"] for item in batch_payload["revisions"] if item["stable_case_id"]] == stable_case_ids
+
+
+def test_v010_rc2_synthetic_fixture_migrates_without_losing_historical_records(tmp_path: Path) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "v010_rc2_synthetic.sqlite3"
+    database_path = tmp_path / "v010-rc2-upgrade.sqlite3"
+    copy2(fixture, database_path)
+    tracked_tables = ("requirement_versions", "requirement_analyses", "test_designs", "case_generations", "case_review_batches")
+    with sqlite3.connect(database_path) as connection:
+        payloads_before = {
+            table: [row[0] for row in connection.execute(f"SELECT payload_json FROM {table} ORDER BY id")]
+            for table in tracked_tables
+        }
+        assert connection.execute("SELECT config_json FROM ai_model_configs").fetchone() is not None
+
+    repository = ProjectRepository(database_path)
+    repository.migrate()
+    with sqlite3.connect(database_path) as connection:
+        payloads_after_first_migration = {
+            table: [row[0] for row in connection.execute(f"SELECT payload_json FROM {table} ORDER BY id")]
+            for table in tracked_tables
+        }
+        assert connection.execute("SELECT config_json FROM ai_model_configs").fetchall() == []
+    repository.migrate()
+    with sqlite3.connect(database_path) as connection:
+        payloads_after_second_migration = {
+            table: [row[0] for row in connection.execute(f"SELECT payload_json FROM {table} ORDER BY id")]
+            for table in tracked_tables
+        }
+    assert payloads_after_first_migration == payloads_before == payloads_after_second_migration
+
+    with TestClient(create_app(database_path, local_credentials_path=tmp_path / ".env.local")) as client:
+        version = client.get("/api/projects/1/requirement-versions").json()[0]
+        review = client.get("/api/projects/1/requirement-reviews/1").json()
+        design = client.get("/api/projects/1/test-designs/1").json()
+        generation = client.get("/api/projects/1/case-generations/1").json()
+        batch = client.get("/api/projects/1/case-review-batches/1").json()
+
+    assert version["id"] == 1 and review["id"] == 1 and design["id"] == 1 and generation["id"] == 1
+    assert all(item["stable_requirement_id"] for item in review["atomic_requirements"])
+    assert generation["candidates"] and all(item["requirement_references"] for item in generation["candidates"])
+    assert all(item["stable_case_id"] for item in batch["revisions"] if item["participation_status"] == "included")

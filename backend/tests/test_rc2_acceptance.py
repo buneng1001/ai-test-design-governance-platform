@@ -1,7 +1,9 @@
 import base64
 import csv
 import io
+import json
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,6 +32,25 @@ def _register_requirement(client: TestClient, project_id: int, filename: str, co
     assert response.status_code == 201
     return {"asset_id": response.json()["id"], "filename": filename, "media_type": "text/markdown",
             "content_base64": _encode_content_base64(content)}
+
+
+def _write_real_model_release_evidence(review: dict, generation: dict) -> None:
+    """仅在受控发布验收进程中写入脱敏事实，不记录或推导凭据。"""
+    evidence_path = os.getenv("RC2_RELEASE_EVIDENCE_PATH")
+    if not evidence_path:
+        return
+    evidence = {
+        "commit_sha": os.getenv("RC2_RELEASE_EVIDENCE_COMMIT_SHA", "unknown"),
+        "provider": os.getenv("RC2_REAL_MODEL_PROVIDER", "custom"),
+        "model": os.environ["RC2_REAL_MODEL_NAME"],
+        "synthetic_inputs": ["SRS.md: 设备应返回当前状态。", "implementation-spec.md: 状态响应必须包含时间戳。"],
+        "generated_requirement_count": len(review["requirements"]),
+        "generated_case_count": len(generation["candidates"]),
+        "real_run_ids": [review["ai_run_id"], generation["ai_run_id"]],
+        "credential_leak_check": "passed",
+    }
+    Path(evidence_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(evidence_path).write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _prepare_version(client: TestClient, project_id: int) -> dict:
@@ -304,3 +325,4 @@ def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
     assert generated["ai_run_status"] == "succeeded"
     audit = client.get(f"/api/projects/{project['id']}/ai-runs/audit-export")
     assert os.environ["RC2_REAL_MODEL_API_KEY"] not in audit.text
+    _write_real_model_release_evidence(reviewed, generated)
