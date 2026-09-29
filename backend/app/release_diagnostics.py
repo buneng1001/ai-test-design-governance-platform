@@ -8,10 +8,10 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from app.ai_service import ModelRequest, ModelResponse, _extract_structured_content, local_structural_repair
+from app.ai_output_processing import local_structural_repair, validate_requirement_analysis_output
+from app.ai_service import ModelRequest, ModelResponse, extract_structured_content
 from app.case_generation_contract import validate_case_generation_output
 from app.review_schemas import StructuredAnalysisOutput
-from app.ai_service import validate_requirement_analysis_output
 
 
 _SECRET_FIELD = re.compile(r"(api[._-]?key|authorization|access[._-]?token|secret|password)", re.IGNORECASE)
@@ -25,10 +25,9 @@ def record_real_model_failure(
     schema_errors: list[str] | None = None,
 ) -> Path | None:
     """在显式指定的 Git 忽略目录保存失败响应；未配置目录时完全不落盘。"""
-    directory = os.getenv("RC2_LOCAL_DIAGNOSTIC_DIR")
-    if not directory or not request.api_key:
+    destination = _local_diagnostic_directory()
+    if destination is None or not request.api_key:
         return None
-    destination = Path(directory)
     destination.mkdir(parents=True, exist_ok=True)
     payload = {
         "provider": request.model_parameters.provider,
@@ -51,6 +50,15 @@ def record_real_model_failure(
     return path
 
 
+def _local_diagnostic_directory() -> Path | None:
+    configured = os.getenv("RC2_LOCAL_DIAGNOSTIC_DIR")
+    if not configured:
+        return None
+    destination = Path(configured).resolve()
+    expected = (Path.cwd() / ".ticket11-release-diagnostics").resolve()
+    return destination if destination == expected else None
+
+
 def replay_release_diagnostic(path: Path) -> dict[str, str]:
     """仅以本地捕获数据重放每个契约阶段，不发起任何网络请求。"""
     diagnostic = json.loads(path.read_text(encoding="utf-8"))
@@ -63,7 +71,7 @@ def replay_release_diagnostic(path: Path) -> dict[str, str]:
     }
     provider_response = diagnostic.get("provider_response")
     try:
-        raw_output = _extract_structured_content(provider_response) if provider_response else diagnostic.get("raw_output")
+        raw_output = extract_structured_content(provider_response) if provider_response else diagnostic.get("raw_output")
         stages["json_extraction"] = "passed"
     except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
         stages["json_extraction"] = "failed"

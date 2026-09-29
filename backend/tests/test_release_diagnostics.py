@@ -6,7 +6,8 @@ from app.release_diagnostics import record_real_model_failure, replay_release_di
 
 
 def test_local_failure_diagnostic_is_redacted_bounded_and_replayable(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RC2_LOCAL_DIAGNOSTIC_DIR", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RC2_LOCAL_DIAGNOSTIC_DIR", str(tmp_path / ".ticket11-release-diagnostics"))
     api_key = "test-secret-key"
     request = ModelRequest(
         task_type="requirement_review", prompt_version="test", model_parameters=AIModelConfig(
@@ -40,3 +41,15 @@ def test_local_failure_diagnostic_is_redacted_bounded_and_replayable(tmp_path, m
     assert replay["json_extraction"] == "passed"
     assert replay["requirement_schema"] == "failed"
     assert replay["source_relationships"] == "not_run"
+
+
+def test_local_failure_diagnostic_rejects_non_ignored_destination(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RC2_LOCAL_DIAGNOSTIC_DIR", str(tmp_path / "diagnostics"))
+    request = ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="deepseek", model="deepseek-v4-flash"),
+        input_asset_versions=(), scenario="normal", base_url="https://api.example.test", api_key="test-secret-key",
+    )
+
+    assert record_real_model_failure(request, "model_call", ModelResponse(error_code="provider_timeout")) is None

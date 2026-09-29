@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ai_schemas import AIModelConfig
+from app.ai_service import ModelRequest, ModelResponse, OpenAICompatibleModelService
+
 
 def _encode_content_base64(content: str) -> str:
     return base64.b64encode(content.encode("utf-8")).decode("ascii")
@@ -59,6 +62,23 @@ def test_real_model_acceptance_uses_configured_provider(monkeypatch) -> None:
     assert _real_model_session_config()["provider"] == "deepseek"
 
 
+def test_real_model_acceptance_disables_provider_fallback(monkeypatch) -> None:
+    calls = []
+
+    def fake_request(*_args, **_kwargs):
+        calls.append(None)
+        return ModelResponse(error_code="provider_http_400")
+
+    monkeypatch.setenv("RC2_REAL_MODEL_SINGLE_CALL", "1")
+    monkeypatch.setattr("app.ai_service._request_json", fake_request)
+    response = OpenAICompatibleModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="deepseek", model="deepseek-v4-flash"),
+        input_asset_versions=(), scenario="normal", base_url="https://api.example.test", api_key="test-key",
+    ))
+    assert response.error_code == "provider_http_400" and len(calls) == 1
+
+
 def _write_real_model_release_evidence(review: dict, generation: dict) -> None:
     """仅在受控发布验收进程中写入脱敏事实，不记录或推导凭据。"""
     evidence_path = os.getenv("RC2_RELEASE_EVIDENCE_PATH")
@@ -74,8 +94,10 @@ def _write_real_model_release_evidence(review: dict, generation: dict) -> None:
         "real_run_ids": [review["ai_run_id"], generation["ai_run_id"]],
         "credential_leak_check": "passed",
     }
+    rendered = json.dumps(evidence, ensure_ascii=False, indent=2) + "\n"
+    assert os.environ["RC2_REAL_MODEL_API_KEY"] not in rendered
     Path(evidence_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(evidence_path).write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    Path(evidence_path).write_text(rendered, encoding="utf-8")
 
 
 def _prepare_version(client: TestClient, project_id: int) -> dict:
@@ -267,7 +289,8 @@ def test_mock_rc2_full_acceptance_flow(client: TestClient) -> None:
     not _real_model_env_ready(),
     reason="设置 RC2_REAL_MODEL_PROVIDER、RC2_REAL_MODEL_BASE_URL、RC2_REAL_MODEL_API_KEY、RC2_REAL_MODEL_NAME 后运行真实模型验收",
 )
-def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
+def test_real_model_requirement_analysis_acceptance(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("RC2_REAL_MODEL_SINGLE_CALL", "1")
     project = _create_project(client)
     files = [
         _register_requirement(client, project["id"], "SRS.md", "设备应返回当前状态。"),
@@ -282,7 +305,7 @@ def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
     assert config.status_code == 200 and "api_key" not in config.text.lower()
     analysis = client.post(
         f"/api/projects/{project['id']}/requirement-versions/{version['id']}/requirement-review",
-        headers={"X-Session-ID": session_id}, json={"mode": "real"},
+        headers={"X-Session-ID": session_id}, json={"mode": "real", "max_retries": 0},
     )
     assert analysis.status_code == 201, analysis.text
     reviewed = analysis.json()
@@ -336,7 +359,8 @@ def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
     generation = client.post(
         f"/api/projects/{project['id']}/test-designs/{design.json()['id']}/case-generations",
         headers={"X-Session-ID": session_id},
-        json={"mode": "real", "variants": ["normal"], "batch_size": 100, "accept_template_limitations": True},
+        json={"mode": "real", "max_retries": 0, "variants": ["normal"], "batch_size": 100,
+              "accept_template_limitations": True},
     )
     assert generation.status_code == 201, generation.text
     generated = generation.json()
