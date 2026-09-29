@@ -64,6 +64,30 @@ test("取消当前筛选结果只提交筛选后的选择集合", async () => {
   expect(fetchMock.mock.calls[3]?.[1]?.body).toBe(JSON.stringify({ selected_requirement_ids: [] }));
 });
 
+test("全局评审发现可在确认表中处置，不会永久阻塞已选需求", async () => {
+  const user = userEvent.setup();
+  const withGlobalFinding = { ...analysis, findings: [{
+    finding_id: "finding-global", finding_type: "ambiguity", summary: "缺少状态失效条件",
+    reason: "材料没有说明状态何时失效", source_reference: null, status: "pending_confirmation",
+  }] };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 42, version: 1, name: "当前任务" }]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(runControl), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(withGlobalFinding), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...withGlobalFinding, findings: [{
+      ...withGlobalFinding.findings[0], status: "resolved",
+    }] }), { status: 200 }));
+
+  render(<RequirementReviewPanel projectId={1} />);
+  await user.click(await screen.findByRole("button", { name: "创建结构分析运行" }));
+  await user.click(await screen.findByRole("button", { name: "执行下一批" }));
+  expect(await screen.findByText("需人工处理的全局发现")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "标记已处理" }));
+
+  expect(fetchMock.mock.calls[3]?.[0]).toContain("/requirement-reviews/1/findings/finding-global");
+  expect(await screen.findByText((_, element) => element?.textContent === "问题：缺少状态失效条件（resolved）")).toBeInTheDocument();
+});
+
 test("停止后的继续会先恢复持久化运行，再显式推进一个批次", async () => {
   const user = userEvent.setup();
   const stopped = { ...runControl, status: "stopped" };

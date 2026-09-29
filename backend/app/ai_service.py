@@ -1,16 +1,15 @@
 import hashlib
 import json
+import os
 import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from typing import Protocol
 
-from pydantic import ValidationError
-
-from app.ai_schemas import AIModelConfig, AIOutputEnvelope, AITaskType, MockScenario
+from app.ai_output_processing import local_structural_repair, validate_output, validate_requirement_analysis_output
+from app.ai_schemas import AIModelConfig, AITaskType, MockScenario
 from app.case_generation_contract import build_mock_case_generation, case_generation_prompt
-from app.review_schemas import StructuredAnalysisOutput
 
 
 @dataclass(frozen=True)
@@ -31,6 +30,11 @@ class ModelResponse:
     error_code: str | None = None
     retryable: bool = False
     diagnostic: str | None = None
+    # 仅供受控的本地发布诊断使用；调用方不得把这些字段写入领域数据或审计 API。
+    provider_response: object | None = None
+    http_status: int | None = None
+    finish_reason: str | None = None
+    response_length: int | None = None
 
 
 MAX_MOCK_REQUIREMENTS = 100
@@ -112,10 +116,14 @@ class OpenAICompatibleModelService:
     def complete(self, request: ModelRequest) -> ModelResponse:
         prompt = _prompt_for_request(request)
         response = _request_json(request, prompt, include_response_format=True)
-        if response.error_code == "provider_http_400":
+        if response.error_code == "provider_http_400" and not _single_call_real_acceptance():
             # 部分 OpenAI 兼容服务不接受 response_format，降级为 Prompt 强制 JSON。
             response = _request_json(request, prompt, include_response_format=False)
         return response
+
+
+def _single_call_real_acceptance() -> bool:
+    return os.getenv("RC2_REAL_MODEL_SINGLE_CALL") == "1"
 
 
 def _request_json(request: ModelRequest, prompt: str, include_response_format: bool) -> ModelResponse:
@@ -137,18 +145,40 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
     )
     try:
         with urlopen(http_request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            response_bytes = response.read()
+            payload = json.loads(response_bytes.decode("utf-8"))
+            http_status = getattr(response, "status", 200)
         finish_reason = _finish_reason(payload)
         if finish_reason == "length":
             return ModelResponse(
                 error_code="provider_response_truncated",
                 diagnostic="finish_reason=length",
+                provider_response=payload,
+                http_status=http_status,
+                finish_reason=finish_reason,
+                response_length=len(response_bytes),
             )
-        return ModelResponse(raw_output=_extract_structured_content(payload))
+        try:
+            raw_output = _extract_structured_content(payload)
+        except (ValueError, KeyError, IndexError, TypeError) as error:
+            return ModelResponse(
+                error_code="provider_json_invalid", diagnostic=str(error)[:160], provider_response=payload,
+                http_status=http_status, finish_reason=finish_reason, response_length=len(response_bytes),
+            )
+        return ModelResponse(
+            raw_output=raw_output, provider_response=payload, http_status=http_status,
+            finish_reason=finish_reason, response_length=len(response_bytes),
+        )
     except HTTPError as error:
         retryable = error.code == 429 or error.code >= 500
+        response_length = None
+        try:
+            response_length = len(error.read())
+        except OSError:
+            pass
         return ModelResponse(error_code=f"provider_http_{error.code}", retryable=retryable,
-                             diagnostic=f"http_status={error.code}")
+                             diagnostic=f"http_status={error.code}", http_status=error.code,
+                             response_length=response_length)
     except TimeoutError as error:
         return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error).__name__)
     except URLError as error:
@@ -190,7 +220,7 @@ def _finish_reason(payload: object) -> str | None:
     return reason if isinstance(reason, str) else None
 
 
-def _extract_structured_content(payload: object) -> object:
+def extract_structured_content(payload: object) -> object:
     """兼容常见 OpenAI 兼容服务的 JSON、代码块和多段文本响应。"""
     if not isinstance(payload, dict):
         raise ValueError("模型响应不是 JSON 对象")
@@ -224,124 +254,7 @@ def _extract_structured_content(payload: object) -> object:
     return json.loads(text)
 
 
-def validate_output(raw_output: object) -> tuple[dict | None, list[str]]:
-    try:
-        output = AIOutputEnvelope.model_validate(raw_output)
-    except Exception as error:
-        return None, [str(error)]
-    return output.model_dump(mode="json"), []
-
-
-def local_structural_repair(raw_output: object) -> object:
-    """只清理包装层和未知字段，绝不补写业务语义。"""
-    if not isinstance(raw_output, dict):
-        return raw_output
-    if "items" in raw_output:
-        return {key: raw_output[key] for key in ("contract_version", "items") if key in raw_output}
-    known = {"contract_version", "requirements", "test_items", "acceptance_criteria", "findings", "conflicts"}
-    return {key: value for key, value in raw_output.items() if key in known}
-
-
-
-
-def validate_requirement_analysis_output(
-    raw_output: object, input_context: tuple[dict[str, object], ...] = ()
-) -> tuple[StructuredAnalysisOutput | None, list[str]]:
-    try:
-        normalized = _normalize_requirement_output(raw_output, input_context)
-        return StructuredAnalysisOutput.model_validate(normalized), []
-    except ValidationError as error:
-        return None, [
-            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
-            for item in error.errors()[:10]
-        ]
-
-
-def _normalize_requirement_output(raw_output: object, input_context: tuple[dict[str, object], ...]) -> object:
-    if not isinstance(raw_output, dict):
-        return raw_output
-    normalized = dict(raw_output)
-    normalized.setdefault("contract_version", "requirement-analysis.v1")
-    references = [
-        item.get("source_reference") for item in input_context
-        if isinstance(item.get("source_reference"), dict)
-    ]
-    for collection_name in ("requirements", "test_items", "acceptance_criteria", "findings"):
-        collection = normalized.get(collection_name)
-        if isinstance(collection, list):
-            normalized[collection_name] = [
-                _normalize_output_item(
-                    item,
-                    references,
-                    optional_finding_source=collection_name == "findings",
-                )
-                for item in collection
-            ]
-    conflicts = normalized.get("conflicts")
-    if isinstance(conflicts, list):
-        normalized["conflicts"] = [_normalize_output_item(item, references) for item in conflicts]
-    return normalized
-
-
-def _normalize_output_item(
-    item: object,
-    references: list[object],
-    optional_finding_source: bool = False,
-) -> object:
-    if not isinstance(item, dict):
-        return item
-    normalized = dict(item)
-    if "requirement_type" in normalized:
-        normalized["requirement_type"] = _normalize_requirement_type(normalized["requirement_type"])
-    if "analysis_note" in normalized and not str(normalized["analysis_note"]).strip():
-        normalized["analysis_note"] = "模型未提供补充分析说明。"
-    for field in ("source_references", "source_reference", "srs_source", "implementation_source"):
-        if field in normalized:
-            value = normalized[field]
-            if field == "source_references" and isinstance(value, list):
-                normalized[field] = [
-                    _resolve_source_reference(item, references, index)
-                    for index, item in enumerate(value)
-                ]
-            else:
-                resolved = _resolve_source_reference(value, references)
-                normalized[field] = None if optional_finding_source and resolved is value else resolved
-    return normalized
-
-
-def _normalize_requirement_type(value: object) -> str:
-    """把常见中文分类归一到平台契约，避免单个分类词使整批结果失效。"""
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        aliases = {
-            "功能": "functional", "功能性": "functional", "业务功能": "functional",
-            "接口": "interface", "接口类": "interface", "数据": "data", "数据类": "data",
-            "质量": "quality", "非功能": "quality", "约束": "constraint", "限制": "constraint",
-            "流程": "workflow", "工作流": "workflow",
-        }
-        return aliases.get(normalized, normalized if normalized in {
-            "functional", "interface", "data", "quality", "constraint", "workflow", "other",
-        } else "other")
-    return "other"
-
-
-def _resolve_source_reference(value: object, references: list[object], field_index: int | None = None) -> object:
-    if isinstance(value, dict) and {"reference_id", "asset_id", "filename", "locator"}.issubset(value):
-        return value
-    text = str(value).strip() if isinstance(value, (str, int)) else ""
-    if not text:
-        return value
-    if text.startswith("S") and text[1:].isdigit():
-        reference_index = int(text[1:]) - 1
-        if 0 <= reference_index < len(references):
-            return references[reference_index]
-    for reference in references:
-        if not isinstance(reference, dict):
-            continue
-        candidates = (reference.get("reference_id"), reference.get("filename"), reference.get("locator"))
-        if any(isinstance(candidate, str) and (text == candidate or candidate in text) for candidate in candidates):
-            return reference
-    return value
+_extract_structured_content = extract_structured_content
 
 
 def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:

@@ -11,6 +11,7 @@ from app.ai_run_control_repository import ConcurrentRunResumeError, InputFingerp
 from app.ai_schemas import AIAttempt, AIRun, AIModelConfig
 from app.ai_run_reliability import error_category, retry_delay_ms
 from app.ai_service import ModelRequest, MockModelService, OpenAICompatibleModelService, local_structural_repair
+from app.release_diagnostics import record_real_model_failure
 from app.case_generation_contract import validate_case_generation_output
 from app.model_config_api import get_session_model_config
 from app.model_config_service import provider_error_type, service_error
@@ -261,9 +262,35 @@ def register_case_routes(
     def start_case_generation_run(project_id: int, design_id: int, data: CaseGenerationInput) -> dict:
         return generate_cases(project_id, design_id, data.model_copy(update={"start_only": True}))  # type: ignore[return-value]
 
+    def frozen_case_run_input(control, data: CaseGenerationInput, run_id: str) -> CaseGenerationInput:
+        # 只允许省略已冻结参数；显式改动仍应被拒绝，避免恢复时悄悄改变可追溯的生成输入。
+        payload_fields = {
+            "template_mapping_id": "mapping_id", "mode": "mode", "batch_size": "batch_size",
+            "variants": "variants", "accept_template_limitations": "accept_template_limitations",
+            "strict_conflicts": "strict_conflicts", "modules": "modules",
+        }
+        for field, payload_field in payload_fields.items():
+            if field in data.model_fields_set and getattr(data, field) != control.payload[payload_field]:
+                raise HTTPException(status_code=409, detail="运行输入已变化，不能恢复")
+        return data.model_copy(update={
+            "template_mapping_id": control.payload["mapping_id"], "mode": control.payload["mode"],
+            "batch_size": control.payload["batch_size"], "variants": control.payload["variants"],
+            "accept_template_limitations": control.payload["accept_template_limitations"],
+            "strict_conflicts": control.payload["strict_conflicts"], "modules": control.payload["modules"],
+            "run_control_id": run_id, "advance_only": True,
+        })
+
     @router.post("/api/projects/{project_id}/test-designs/{design_id}/case-generation-runs/{run_id}/advance")
     def advance_case_generation_run(project_id: int, design_id: int, run_id: str, data: CaseGenerationInput) -> dict:
-        result = generate_cases(project_id, design_id, data.model_copy(update={"run_control_id": run_id, "advance_only": True}))
+        control = controls.require(run_id)
+        if control.project_id != project_id or control.workflow != "case_generation":
+            raise HTTPException(status_code=404, detail="AI 运行不存在")
+        if control.payload.get("design_id") != design_id:
+            raise HTTPException(status_code=409, detail="运行输入已变化，不能恢复")
+        # 首次请求可能由默认模板自动创建映射；推进时必须复用控制记录冻结的输入，
+        # 否则前端没有显式模板 ID 会重新创建映射，导致指纹不一致而无法继续。
+        advanced = frozen_case_run_input(control, data, run_id)
+        result = generate_cases(project_id, design_id, advanced)
         return result if isinstance(result, dict) else result.model_dump(mode="json")
 
     @router.post("/api/projects/{project_id}/test-designs/{design_id}/case-generation-runs/{run_id}/resume")
@@ -279,13 +306,7 @@ def register_case_routes(
             raise HTTPException(status_code=409, detail="运行输入已变化，不能恢复") from exc
         except ConcurrentRunResumeError as exc:
             raise HTTPException(status_code=409, detail="已有恢复操作正在执行") from exc
-        resumed = data.model_copy(update={
-            "template_mapping_id": control.payload["mapping_id"], "mode": control.payload["mode"],
-            "batch_size": control.payload["batch_size"], "variants": control.payload["variants"],
-            "accept_template_limitations": control.payload["accept_template_limitations"],
-            "strict_conflicts": control.payload["strict_conflicts"], "modules": control.payload["modules"],
-            "run_control_id": run_id, "advance_only": True,
-        })
+        resumed = frozen_case_run_input(control, data, run_id)
         result = generate_cases(project_id, design_id, resumed)
         return result if isinstance(result, dict) else result.model_dump(mode="json")
 
@@ -411,6 +432,7 @@ def _run(
                                      retry_after_ms=retry_delay_ms(number) if retryable else None,
                                      recovery_point=f"case-generation.retry-{number + 1}" if retryable else None))
             if not retryable or number == max_retries + 1:
+                record_real_model_failure(request, "model_call", raw_response)
                 return None, [], attempts, "failed", "not_run"
             if not should_continue():
                 raise CaseGenerationStopped()
@@ -437,6 +459,7 @@ def _run(
             attempts.append(AIAttempt(attempt=number, started_at=started, elapsed_ms=0, status="validation_failed",
                                      error_code="schema_invalid", error_category="structure",
                                      recovery_point="structural_repair_required"))
+            record_real_model_failure(request, "case_schema", raw_response, errors)
             return None, errors, attempts, "validation_failed", "failed"
         attempts.append(AIAttempt(attempt=number, started_at=started, elapsed_ms=0, status="succeeded"))
         return output, [], attempts, "succeeded", "passed"

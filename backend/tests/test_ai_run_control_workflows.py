@@ -62,6 +62,31 @@ def test_case_generation_rejects_changed_normalized_input_on_advance(client: Tes
     assert changed.status_code == 409
 
 
+def test_case_generation_resume_reuses_frozen_nondefault_input_when_client_omits_it(client: TestClient) -> None:
+    project_id, design_id, mapping_id = _setup(client)
+    started = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generation-runs",
+        json={"template_mapping_id": mapping_id, "mode": "template", "batch_size": 1, "variants": ["normal"]},
+    ).json()
+    run_id = started["id"]
+    assert client.post(f"/api/projects/{project_id}/ai-workflow-runs/{run_id}/stop").status_code == 200
+
+    # 模拟浏览器刷新后仅恢复运行标识；服务端必须采用创建时冻结的非默认输入继续。
+    resumed = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generation-runs/{run_id}/resume", json={}
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["payload"]["mode"] == "template"
+    completed = client.post(
+        f"/api/projects/{project_id}/test-designs/{design_id}/case-generation-runs/{run_id}/advance", json={}
+    )
+    while completed.status_code == 200 and "source" not in completed.json():
+        completed = client.post(
+            f"/api/projects/{project_id}/test-designs/{design_id}/case-generation-runs/{run_id}/advance", json={}
+        )
+    assert completed.status_code == 200 and completed.json()["source"] == "template"
+
+
 def test_requirement_analysis_advances_stops_and_resumes_without_duplicate_asset(client: TestClient) -> None:
     project_id, version_id = setup_version(client)
     started = client.post(

@@ -12,6 +12,7 @@ from app.ai_run_control_repository import AIRunControlRepository, BatchAlreadyCl
 from app.ai_schemas import AIAttempt, AIRun, AIModelConfig, MockScenario
 from app.ai_run_reliability import error_category, redact_diagnostic, retry_delay_ms
 from app.ai_service import ModelRequest, ModelService, local_structural_repair, validate_requirement_analysis_output
+from app.release_diagnostics import record_real_model_failure
 from app.model_config_service import provider_error_type, service_error
 from app.review_schemas import StructuredAnalysisOutput
 
@@ -192,6 +193,7 @@ def _complete_batch(
                 if not should_continue():
                     raise RequirementAnalysisStopped()
                 continue
+            record_real_model_failure(request, "model_call", response)
             return None, attempts, validation_errors, "failed", diagnostic, error_code
         output, validation_errors = validate_requirement_analysis_output(response.raw_output, request.input_context)
         if validation_errors:
@@ -211,6 +213,7 @@ def _complete_batch(
                 status="validation_failed", error_code="schema_invalid", retryable=False,
                 error_category="structure", recovery_point="structural_repair_required",
             ))
+            record_real_model_failure(request, "requirement_schema", response, validation_errors)
             return None, attempts, validation_errors, "validation_failed", None, "schema_invalid"
         attempts.append(AIAttempt(
             attempt=attempt_number, started_at=started_at, elapsed_ms=elapsed_ms,

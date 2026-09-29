@@ -31,6 +31,13 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
     templateMappingId: 0, acceptTemplateLimitations: false, strictConflicts,
     modules: modules.split(",").map((item) => item.trim()).filter(Boolean), mode,
   });
+  const frozenRunOptions = (control: NonNullable<typeof runControl>) => ({
+    templateMappingId: control.payload?.mapping_id ?? 0,
+    acceptTemplateLimitations: control.payload?.accept_template_limitations ?? false,
+    strictConflicts: control.payload?.strict_conflicts ?? false,
+    modules: control.payload?.modules ?? [], mode: control.payload?.mode ?? "mock",
+    batchSize: control.payload?.batch_size, variants: control.payload?.variants,
+  });
   useEffect(() => {
     if (!runControl || runControl.status !== "completed" || !runControl.final_asset_id || generation) return;
     void getCaseGeneration(projectId, runControl.final_asset_id).then((result) => {
@@ -51,7 +58,7 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
     if (!control || isRunning) return;
     try {
       setIsRunning(true); setError("");
-      const result = await advanceCaseGenerationRun(projectId, designId, control.id, runOptions());
+      const result = await advanceCaseGenerationRun(projectId, designId, control.id, frozenRunOptions(control));
       if (isAIRunControl(result)) remember(result);
       else { setGeneration(result); remember(null); }
     } catch (reason) { setError(reason instanceof Error ? reason.message : "候选测试用例生成失败"); }
@@ -66,7 +73,7 @@ export function CaseGenerationPanel({ projectId, designId = 1 }: { projectId: nu
     if (!runControl || isRunning) return;
     try {
       setIsRunning(true); setError("");
-      const result = await resumeCaseGenerationRun(projectId, designId, runControl.id, runOptions());
+      const result = await resumeCaseGenerationRun(projectId, designId, runControl.id, frozenRunOptions(runControl));
       if (isAIRunControl(result)) remember(result);
       else { setGeneration(result); remember(null); }
     } catch (reason) { setError(reason instanceof Error ? reason.message : "继续生成失败"); }

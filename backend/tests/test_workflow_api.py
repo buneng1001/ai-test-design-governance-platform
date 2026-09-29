@@ -80,6 +80,15 @@ def test_workflow_view_unlocks_tabs_and_recovers_from_persisted_assets(client: T
     assert restored["asset_ids"]["test_design_id"] == design["id"]
     assert restored["tabs"][4]["status"] == "locked"
 
+    generated = client.post(
+        f"/api/projects/{project_id}/requirement-reviews/{suggestions['asset_ids']['requirement_analysis_id']}"
+        "/suggestions/generate"
+    )
+    assert generated.status_code == 200
+    pending_suggestions = client.get(f"/api/projects/{project_id}/workflow").json()
+    assert pending_suggestions["current_step"] == "suggestions"
+    assert pending_suggestions["tabs"][2]["status"] == "needs_attention"
+
 
 def test_new_requirement_version_marks_old_downstream_draft_for_reconfirmation(client: TestClient) -> None:
     project_id = _project(client)

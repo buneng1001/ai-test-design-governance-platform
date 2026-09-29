@@ -54,6 +54,11 @@ export interface AIRunControl {
   completed_count: number;
   final_asset_type: string | null;
   final_asset_id: number | null;
+  payload: {
+    mapping_id?: number; mode?: "mock" | "real" | "template"; batch_size?: number;
+    variants?: Array<"normal" | "boundary" | "invalid" | "scenario">;
+    accept_template_limitations?: boolean; strict_conflicts?: boolean; modules?: string[];
+  };
 }
 
 export const isAIRunControl = (value: unknown): value is AIRunControl => typeof value === "object"

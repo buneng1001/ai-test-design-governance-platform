@@ -1,10 +1,15 @@
 import base64
 import csv
 import io
+import json
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+from app.ai_schemas import AIModelConfig
+from app.ai_service import ModelRequest, ModelResponse, OpenAICompatibleModelService
 
 
 def _encode_content_base64(content: str) -> str:
@@ -30,6 +35,69 @@ def _register_requirement(client: TestClient, project_id: int, filename: str, co
     assert response.status_code == 201
     return {"asset_id": response.json()["id"], "filename": filename, "media_type": "text/markdown",
             "content_base64": _encode_content_base64(content)}
+
+
+def _real_model_env_ready() -> bool:
+    return all(os.getenv(name) for name in (
+        "RC2_REAL_MODEL_PROVIDER", "RC2_REAL_MODEL_BASE_URL", "RC2_REAL_MODEL_API_KEY", "RC2_REAL_MODEL_NAME",
+    ))
+
+
+def _real_model_session_config() -> dict[str, str]:
+    return {
+        "provider": os.environ["RC2_REAL_MODEL_PROVIDER"], "model": os.environ["RC2_REAL_MODEL_NAME"],
+        "base_url": os.environ["RC2_REAL_MODEL_BASE_URL"], "api_key": os.environ["RC2_REAL_MODEL_API_KEY"],
+    }
+
+
+def test_real_model_acceptance_uses_configured_provider(monkeypatch) -> None:
+    monkeypatch.delenv("RC2_REAL_MODEL_PROVIDER", raising=False)
+    monkeypatch.setenv("RC2_REAL_MODEL_BASE_URL", "https://api.example.test")
+    monkeypatch.setenv("RC2_REAL_MODEL_API_KEY", "test-key")
+    monkeypatch.setenv("RC2_REAL_MODEL_NAME", "deepseek-v4-flash")
+    assert _real_model_env_ready() is False
+
+    monkeypatch.setenv("RC2_REAL_MODEL_PROVIDER", "deepseek")
+    assert _real_model_env_ready() is True
+    assert _real_model_session_config()["provider"] == "deepseek"
+
+
+def test_real_model_acceptance_disables_provider_fallback(monkeypatch) -> None:
+    calls = []
+
+    def fake_request(*_args, **_kwargs):
+        calls.append(None)
+        return ModelResponse(error_code="provider_http_400")
+
+    monkeypatch.setenv("RC2_REAL_MODEL_SINGLE_CALL", "1")
+    monkeypatch.setattr("app.ai_service._request_json", fake_request)
+    response = OpenAICompatibleModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="deepseek", model="deepseek-v4-flash"),
+        input_asset_versions=(), scenario="normal", base_url="https://api.example.test", api_key="test-key",
+    ))
+    assert response.error_code == "provider_http_400" and len(calls) == 1
+
+
+def _write_real_model_release_evidence(review: dict, generation: dict) -> None:
+    """仅在受控发布验收进程中写入脱敏事实，不记录或推导凭据。"""
+    evidence_path = os.getenv("RC2_RELEASE_EVIDENCE_PATH")
+    if not evidence_path:
+        return
+    evidence = {
+        "commit_sha": os.getenv("RC2_RELEASE_EVIDENCE_COMMIT_SHA", "unknown"),
+        "provider": os.environ["RC2_REAL_MODEL_PROVIDER"],
+        "model": os.environ["RC2_REAL_MODEL_NAME"],
+        "synthetic_inputs": ["SRS.md: 设备应返回当前状态。", "implementation-spec.md: 状态响应必须包含时间戳。"],
+        "generated_requirement_count": len(review["requirements"]),
+        "generated_case_count": len(generation["candidates"]),
+        "real_run_ids": [review["ai_run_id"], generation["ai_run_id"]],
+        "credential_leak_check": "passed",
+    }
+    rendered = json.dumps(evidence, ensure_ascii=False, indent=2) + "\n"
+    assert os.environ["RC2_REAL_MODEL_API_KEY"] not in rendered
+    Path(evidence_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(evidence_path).write_text(rendered, encoding="utf-8")
 
 
 def _prepare_version(client: TestClient, project_id: int) -> dict:
@@ -218,13 +286,11 @@ def test_mock_rc2_full_acceptance_flow(client: TestClient) -> None:
 
 
 @pytest.mark.skipif(
-    not all(
-        os.getenv(name)
-        for name in ("RC2_REAL_MODEL_BASE_URL", "RC2_REAL_MODEL_API_KEY", "RC2_REAL_MODEL_NAME")
-    ),
-    reason="设置 RC2_REAL_MODEL_BASE_URL、RC2_REAL_MODEL_API_KEY、RC2_REAL_MODEL_NAME 后运行真实模型验收",
+    not _real_model_env_ready(),
+    reason="设置 RC2_REAL_MODEL_PROVIDER、RC2_REAL_MODEL_BASE_URL、RC2_REAL_MODEL_API_KEY、RC2_REAL_MODEL_NAME 后运行真实模型验收",
 )
-def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
+def test_real_model_requirement_analysis_acceptance(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("RC2_REAL_MODEL_SINGLE_CALL", "1")
     project = _create_project(client)
     files = [
         _register_requirement(client, project["id"], "SRS.md", "设备应返回当前状态。"),
@@ -235,18 +301,71 @@ def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
         f"/api/projects/{project['id']}/requirement-packages/{package['id']}/publish"
     ).json()
     session_id = "rc2-real-model-acceptance"
-    config = client.put("/api/ai-session-config", headers={"X-Session-ID": session_id}, json={
-        "provider": "custom", "model": os.environ["RC2_REAL_MODEL_NAME"],
-        "base_url": os.environ["RC2_REAL_MODEL_BASE_URL"], "api_key": os.environ["RC2_REAL_MODEL_API_KEY"],
-    })
+    config = client.put("/api/ai-session-config", headers={"X-Session-ID": session_id}, json=_real_model_session_config())
     assert config.status_code == 200 and "api_key" not in config.text.lower()
     analysis = client.post(
         f"/api/projects/{project['id']}/requirement-versions/{version['id']}/requirement-review",
-        headers={"X-Session-ID": session_id}, json={"mode": "real"},
+        headers={"X-Session-ID": session_id}, json={"mode": "real", "max_retries": 0},
     )
     assert analysis.status_code == 201, analysis.text
-    assert analysis.json()["is_mock"] is False
-    assert analysis.json()["requirements"]
-    assert all(item["source_references"] for item in analysis.json()["requirements"])
+    reviewed = analysis.json()
+    assert reviewed["is_mock"] is False
+    assert reviewed["requirements"]
+    assert all(item["source_references"] for item in reviewed["requirements"])
+    for conflict in reviewed["conflicts"]:
+        resolved = client.patch(
+            f"/api/projects/{project['id']}/requirement-reviews/{reviewed['id']}"
+            f"/conflicts/{conflict['conflict_id']}",
+            json={"decision": "srs_preferred", "confirmer_name": "真实模型验收工程师", "decision_note": "受控验收确认"},
+        )
+        assert resolved.status_code == 200, resolved.text
+        reviewed = resolved.json()
+    confirmed_review = _confirm_requirements(client, project["id"], reviewed)
+    suggestions = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/suggestions/generate"
+    )
+    assert suggestions.status_code == 200, suggestions.text
+    for suggestion in suggestions.json()["suggestions"]:
+        disposed = client.patch(
+            f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}"
+            f"/suggestions/{suggestion['suggestion_id']}", json={"disposition": "rejected"},
+        )
+        assert disposed.status_code == 200, disposed.text
+    point_review = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review"
+    )
+    assert point_review.status_code == 200, point_review.text
+    test_point_review = point_review.json()["test_point_review"]
+    selected = client.patch(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review/selection",
+        json={"test_item_ids": [item["test_item_id"] for item in test_point_review["test_items"]]},
+    )
+    assert selected.status_code == 200, selected.text
+    handoff = client.post(
+        f"/api/projects/{project['id']}/requirement-reviews/{confirmed_review['id']}/test-point-review/confirm",
+        json={"confirmer_name": "真实模型验收工程师"},
+    )
+    assert handoff.status_code == 200, handoff.text
+    design = client.post(
+        f"/api/projects/{project['id']}/requirement-versions/{version['id']}/test-designs",
+        json={"dimension_names": ["功能"]},
+    )
+    assert design.status_code == 201, design.text
+    design_confirmed = client.post(
+        f"/api/projects/{project['id']}/test-designs/{design.json()['id']}/confirm",
+        json={"confirmer_name": "真实模型验收工程师"},
+    )
+    assert design_confirmed.status_code == 200, design_confirmed.text
+    generation = client.post(
+        f"/api/projects/{project['id']}/test-designs/{design.json()['id']}/case-generations",
+        headers={"X-Session-ID": session_id},
+        json={"mode": "real", "max_retries": 0, "variants": ["normal"], "batch_size": 100,
+              "accept_template_limitations": True},
+    )
+    assert generation.status_code == 201, generation.text
+    generated = generation.json()
+    assert generated["is_mock"] is False and generated["source"] == "real" and generated["candidates"]
+    assert generated["ai_run_status"] == "succeeded"
     audit = client.get(f"/api/projects/{project['id']}/ai-runs/audit-export")
     assert os.environ["RC2_REAL_MODEL_API_KEY"] not in audit.text
+    _write_real_model_release_evidence(reviewed, generated)
