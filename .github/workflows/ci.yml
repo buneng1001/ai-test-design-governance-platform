@@ -31,5 +31,7 @@ jobs:
         run: pnpm exec playwright install chromium
       - name: 浏览器级主流程验收
         run: pnpm test:e2e
+        env:
+          E2E_PYTHON: python
       - name: 前端类型检查与构建
         run: pnpm build
