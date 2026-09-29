@@ -320,6 +320,8 @@ def _normalize_output_item(
     normalized = dict(item)
     if "requirement_type" in normalized:
         normalized["requirement_type"] = _normalize_requirement_type(normalized["requirement_type"])
+    if "finding_type" in normalized:
+        normalized["finding_type"] = _normalize_finding_type(normalized["finding_type"])
     if "analysis_note" in normalized and not str(normalized["analysis_note"]).strip():
         normalized["analysis_note"] = "模型未提供补充分析说明。"
     for field in ("source_references", "source_reference", "srs_source", "implementation_source"):
@@ -350,6 +352,23 @@ def _normalize_requirement_type(value: object) -> str:
             "functional", "interface", "data", "quality", "constraint", "workflow", "other",
         } else "other")
     return "other"
+
+
+def _normalize_finding_type(value: object) -> str:
+    """兼容真实模型常用中文发现分类，仍只输出既有契约枚举。"""
+    if not isinstance(value, str):
+        return "other"
+    normalized = value.strip().lower()
+    aliases = {
+        "歧义": "ambiguity", "遗漏": "omission", "冲突": "conflict", "不可测试": "untestable",
+        "缺少验收标准": "missing_acceptance_criteria", "依赖不清": "dependency_unclear",
+        "缺少约束或异常处理": "missing_constraint_or_error_handling", "视觉推断待确认": "visual_inference_pending",
+    }
+    allowed = {
+        "ambiguity", "omission", "conflict", "untestable", "missing_acceptance_criteria", "dependency_unclear",
+        "missing_constraint_or_error_handling", "visual_inference_pending", "other",
+    }
+    return aliases.get(normalized, normalized if normalized in allowed else "other")
 
 
 def _resolve_source_reference(value: object, references: list[object], field_index: int | None = None) -> object:

@@ -136,6 +136,20 @@ def test_requirement_output_allows_unmapped_optional_finding_source() -> None:
     assert output.findings[0].source_reference is None
 
 
+def test_requirement_output_normalizes_chinese_finding_types_from_real_model_output() -> None:
+    output, errors = validate_requirement_analysis_output({
+        "requirements": [], "test_items": [], "acceptance_criteria": [],
+        "findings": [
+            {"finding_id": "F-1", "finding_type": "歧义", "summary": "存在歧义", "reason": "需要确认"},
+            {"finding_id": "F-2", "finding_type": "遗漏", "summary": "存在遗漏", "reason": "需要补充"},
+        ], "conflicts": [],
+    })
+
+    assert not errors
+    assert output is not None
+    assert [item.finding_type for item in output.findings] == ["ambiguity", "omission"]
+
+
 def test_requirement_prompt_reports_input_statistics_without_small_fixed_limits() -> None:
     context = tuple({
         "text": f"FR-{index:03d}：系统应支持第 {index} 项能力。",
