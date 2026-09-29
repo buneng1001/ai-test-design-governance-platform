@@ -31,6 +31,11 @@ class ModelResponse:
     error_code: str | None = None
     retryable: bool = False
     diagnostic: str | None = None
+    # 仅供受控的本地发布诊断使用；调用方不得把这些字段写入领域数据或审计 API。
+    provider_response: object | None = None
+    http_status: int | None = None
+    finish_reason: str | None = None
+    response_length: int | None = None
 
 
 MAX_MOCK_REQUIREMENTS = 100
@@ -137,18 +142,40 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
     )
     try:
         with urlopen(http_request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            response_bytes = response.read()
+            payload = json.loads(response_bytes.decode("utf-8"))
+            http_status = getattr(response, "status", 200)
         finish_reason = _finish_reason(payload)
         if finish_reason == "length":
             return ModelResponse(
                 error_code="provider_response_truncated",
                 diagnostic="finish_reason=length",
+                provider_response=payload,
+                http_status=http_status,
+                finish_reason=finish_reason,
+                response_length=len(response_bytes),
             )
-        return ModelResponse(raw_output=_extract_structured_content(payload))
+        try:
+            raw_output = _extract_structured_content(payload)
+        except (ValueError, KeyError, IndexError, TypeError) as error:
+            return ModelResponse(
+                error_code="provider_json_invalid", diagnostic=str(error)[:160], provider_response=payload,
+                http_status=http_status, finish_reason=finish_reason, response_length=len(response_bytes),
+            )
+        return ModelResponse(
+            raw_output=raw_output, provider_response=payload, http_status=http_status,
+            finish_reason=finish_reason, response_length=len(response_bytes),
+        )
     except HTTPError as error:
         retryable = error.code == 429 or error.code >= 500
+        response_length = None
+        try:
+            response_length = len(error.read())
+        except OSError:
+            pass
         return ModelResponse(error_code=f"provider_http_{error.code}", retryable=retryable,
-                             diagnostic=f"http_status={error.code}")
+                             diagnostic=f"http_status={error.code}", http_status=error.code,
+                             response_length=response_length)
     except TimeoutError as error:
         return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error).__name__)
     except URLError as error:

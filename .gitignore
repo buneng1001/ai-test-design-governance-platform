@@ -33,5 +33,6 @@ Thumbs.db
 # 项目临时文件
 .tmp/
 tmp/
+.ticket11-release-diagnostics/
 pytest-cache-files-*/
 data/*.db

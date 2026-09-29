@@ -34,6 +34,31 @@ def _register_requirement(client: TestClient, project_id: int, filename: str, co
             "content_base64": _encode_content_base64(content)}
 
 
+def _real_model_env_ready() -> bool:
+    return all(os.getenv(name) for name in (
+        "RC2_REAL_MODEL_PROVIDER", "RC2_REAL_MODEL_BASE_URL", "RC2_REAL_MODEL_API_KEY", "RC2_REAL_MODEL_NAME",
+    ))
+
+
+def _real_model_session_config() -> dict[str, str]:
+    return {
+        "provider": os.environ["RC2_REAL_MODEL_PROVIDER"], "model": os.environ["RC2_REAL_MODEL_NAME"],
+        "base_url": os.environ["RC2_REAL_MODEL_BASE_URL"], "api_key": os.environ["RC2_REAL_MODEL_API_KEY"],
+    }
+
+
+def test_real_model_acceptance_uses_configured_provider(monkeypatch) -> None:
+    monkeypatch.delenv("RC2_REAL_MODEL_PROVIDER", raising=False)
+    monkeypatch.setenv("RC2_REAL_MODEL_BASE_URL", "https://api.example.test")
+    monkeypatch.setenv("RC2_REAL_MODEL_API_KEY", "test-key")
+    monkeypatch.setenv("RC2_REAL_MODEL_NAME", "deepseek-v4-flash")
+    assert _real_model_env_ready() is False
+
+    monkeypatch.setenv("RC2_REAL_MODEL_PROVIDER", "deepseek")
+    assert _real_model_env_ready() is True
+    assert _real_model_session_config()["provider"] == "deepseek"
+
+
 def _write_real_model_release_evidence(review: dict, generation: dict) -> None:
     """仅在受控发布验收进程中写入脱敏事实，不记录或推导凭据。"""
     evidence_path = os.getenv("RC2_RELEASE_EVIDENCE_PATH")
@@ -41,7 +66,7 @@ def _write_real_model_release_evidence(review: dict, generation: dict) -> None:
         return
     evidence = {
         "commit_sha": os.getenv("RC2_RELEASE_EVIDENCE_COMMIT_SHA", "unknown"),
-        "provider": os.getenv("RC2_REAL_MODEL_PROVIDER", "custom"),
+        "provider": os.environ["RC2_REAL_MODEL_PROVIDER"],
         "model": os.environ["RC2_REAL_MODEL_NAME"],
         "synthetic_inputs": ["SRS.md: 设备应返回当前状态。", "implementation-spec.md: 状态响应必须包含时间戳。"],
         "generated_requirement_count": len(review["requirements"]),
@@ -239,11 +264,8 @@ def test_mock_rc2_full_acceptance_flow(client: TestClient) -> None:
 
 
 @pytest.mark.skipif(
-    not all(
-        os.getenv(name)
-        for name in ("RC2_REAL_MODEL_BASE_URL", "RC2_REAL_MODEL_API_KEY", "RC2_REAL_MODEL_NAME")
-    ),
-    reason="设置 RC2_REAL_MODEL_BASE_URL、RC2_REAL_MODEL_API_KEY、RC2_REAL_MODEL_NAME 后运行真实模型验收",
+    not _real_model_env_ready(),
+    reason="设置 RC2_REAL_MODEL_PROVIDER、RC2_REAL_MODEL_BASE_URL、RC2_REAL_MODEL_API_KEY、RC2_REAL_MODEL_NAME 后运行真实模型验收",
 )
 def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
     project = _create_project(client)
@@ -256,10 +278,7 @@ def test_real_model_requirement_analysis_acceptance(client: TestClient) -> None:
         f"/api/projects/{project['id']}/requirement-packages/{package['id']}/publish"
     ).json()
     session_id = "rc2-real-model-acceptance"
-    config = client.put("/api/ai-session-config", headers={"X-Session-ID": session_id}, json={
-        "provider": "custom", "model": os.environ["RC2_REAL_MODEL_NAME"],
-        "base_url": os.environ["RC2_REAL_MODEL_BASE_URL"], "api_key": os.environ["RC2_REAL_MODEL_API_KEY"],
-    })
+    config = client.put("/api/ai-session-config", headers={"X-Session-ID": session_id}, json=_real_model_session_config())
     assert config.status_code == 200 and "api_key" not in config.text.lower()
     analysis = client.post(
         f"/api/projects/{project['id']}/requirement-versions/{version['id']}/requirement-review",

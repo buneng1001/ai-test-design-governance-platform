@@ -77,9 +77,15 @@ Mock 全闭环验收覆盖多文件需求分析、冲突处理、需求确认、
 .\.venv\Scripts\python.exe -m pytest backend/tests/test_rc2_acceptance.py
 ```
 
-真实模型验收默认跳过。设置 `RC2_REAL_MODEL_BASE_URL`、`RC2_REAL_MODEL_API_KEY` 和
-`RC2_REAL_MODEL_NAME` 后，会以受控的小型需求包运行需求分析与用例生成，验证真实模型的结构化输出实际形成需求和候选用例；
+真实模型验收默认跳过。设置 `RC2_REAL_MODEL_PROVIDER`、`RC2_REAL_MODEL_BASE_URL`、
+`RC2_REAL_MODEL_API_KEY` 和 `RC2_REAL_MODEL_NAME` 后，会以受控的小型需求包运行需求分析与用例生成，
+验证真实模型的结构化输出实际形成需求和候选用例。`RC2_REAL_MODEL_PROVIDER` 必须是实际供应商标识
+（例如 `deepseek`、`siliconflow`、`kimi`、`glm` 或 `custom`），以便正确传递供应商专用的结构化输出参数。
 密钥只通过当前进程环境变量提供。CI 不设置这些变量，因此始终只运行 Mock 测试。
+
+若真实验收失败，可显式设置 `RC2_LOCAL_DIAGNOSTIC_DIR=.ticket11-release-diagnostics` 保存脱敏的本地诊断；
+该目录已被 Git 忽略，只包含 provider、model、失败阶段、HTTP 状态、错误码、完成原因、响应长度和最多 10 条
+Schema 错误，以及供离线重放的合成模型响应。诊断不会记录 API Key。
 
 五页签外的资产来源、AI 审计、执行批次与结果、治理指标、变更影响、模板/任务及详细报告位于“高级治理与历史详情”；
 它们仍可按需使用，也可继续通过各自 API 访问，但不再作为上传到导出的主流程阻塞条件。

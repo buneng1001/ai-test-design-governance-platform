@@ -7,6 +7,42 @@ from app.ai_service import (
 )
 
 
+def test_real_service_sends_configured_provider_parameters_and_keeps_safe_metadata(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status = 200
+
+        def read(self) -> bytes:
+            return json.dumps({
+                "choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+                    "contract_version": "requirement-analysis.v1", "requirements": [], "test_items": [],
+                    "acceptance_criteria": [], "findings": [], "conflicts": [],
+                })}}],
+            }).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    def fake_urlopen(request, **_kwargs):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr("app.ai_service.urlopen", fake_urlopen)
+    response = OpenAICompatibleModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="deepseek", model="deepseek-v4-flash"),
+        input_asset_versions=(), scenario="normal", input_context=(), base_url="https://example.com", api_key="key",
+    ))
+
+    assert captured["body"]["thinking"] == {"type": "disabled"}
+    assert response.http_status == 200 and response.finish_reason == "stop"
+    assert response.response_length is not None and response.provider_response is not None
+
+
 def test_extract_structured_content_accepts_common_provider_response_formats() -> None:
     expected = {"contract_version": "requirement-analysis.v1", "requirements": []}
 

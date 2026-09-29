@@ -11,6 +11,7 @@ from app.ai_run_control_repository import ConcurrentRunResumeError, InputFingerp
 from app.ai_schemas import AIAttempt, AIRun, AIModelConfig
 from app.ai_run_reliability import error_category, retry_delay_ms
 from app.ai_service import ModelRequest, MockModelService, OpenAICompatibleModelService, local_structural_repair
+from app.release_diagnostics import record_real_model_failure
 from app.case_generation_contract import validate_case_generation_output
 from app.model_config_api import get_session_model_config
 from app.model_config_service import provider_error_type, service_error
@@ -431,6 +432,7 @@ def _run(
                                      retry_after_ms=retry_delay_ms(number) if retryable else None,
                                      recovery_point=f"case-generation.retry-{number + 1}" if retryable else None))
             if not retryable or number == max_retries + 1:
+                record_real_model_failure(request, "model_call", raw_response)
                 return None, [], attempts, "failed", "not_run"
             if not should_continue():
                 raise CaseGenerationStopped()
@@ -457,6 +459,7 @@ def _run(
             attempts.append(AIAttempt(attempt=number, started_at=started, elapsed_ms=0, status="validation_failed",
                                      error_code="schema_invalid", error_category="structure",
                                      recovery_point="structural_repair_required"))
+            record_real_model_failure(request, "case_schema", raw_response, errors)
             return None, errors, attempts, "validation_failed", "failed"
         attempts.append(AIAttempt(attempt=number, started_at=started, elapsed_ms=0, status="succeeded"))
         return output, [], attempts, "succeeded", "passed"
