@@ -1,0 +1,15 @@
+{
+  "fixture": "v010_rc2_synthetic.sqlite3",
+  "sha256": "43e1212329b9b471fa62a747a3a2864badac969627b80d88c7833ad559ee9379",
+  "source_git_tag": "v0.1.0-rc.2",
+  "source_commit": "47ee118",
+  "source_generation": "在分离工作树中运行该标签的 Mock rc.2 验收闭环，仅使用内置合成需求与 Mock 模型。",
+  "historical_assets": {
+    "requirements": 2,
+    "requirement_review": 1,
+    "test_design": 1,
+    "case_generation": 1,
+    "case_review_batch": 1
+  },
+  "compatibility_overlay": "标签版本早于 ai_model_configs 表。为验证后续历史版本可能遗留的明文配置清理，生成后仅添加一条结构兼容、值为虚构占位符的 ai_model_configs 记录；不含真实业务数据或真实凭据。"
+}

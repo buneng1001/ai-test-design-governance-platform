@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -122,6 +123,9 @@ def test_migrate_keeps_historical_requirement_review_design_and_case_records_rea
 
 def test_v010_rc2_synthetic_fixture_migrates_without_losing_historical_records(tmp_path: Path) -> None:
     fixture = Path(__file__).parent / "fixtures" / "v010_rc2_synthetic.sqlite3"
+    manifest = json.loads(fixture.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+    assert manifest["source_git_tag"] == "v0.1.0-rc.2"
+    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == manifest["sha256"]
     database_path = tmp_path / "v010-rc2-upgrade.sqlite3"
     copy2(fixture, database_path)
     tracked_tables = ("requirement_versions", "requirement_analyses", "test_designs", "case_generations", "case_review_batches")
@@ -130,7 +134,9 @@ def test_v010_rc2_synthetic_fixture_migrates_without_losing_historical_records(t
             table: [row[0] for row in connection.execute(f"SELECT payload_json FROM {table} ORDER BY id")]
             for table in tracked_tables
         }
-        assert connection.execute("SELECT config_json FROM ai_model_configs").fetchone() is not None
+        legacy_config = json.loads(connection.execute("SELECT config_json FROM ai_model_configs").fetchone()[0])
+        assert legacy_config["api_key"]
+        assert all("api_key" not in payload.lower() for payloads in payloads_before.values() for payload in payloads)
 
     repository = ProjectRepository(database_path)
     repository.migrate()
