@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { createProject, deleteProject, getProject, listProjects, Project, ProjectInput, updateProject } from "./api";
 import { WorkflowShell } from "./WorkflowShell";
+import { WorkflowPrototype } from "./WorkflowPrototype";
 import "./styles.css";
 
 const emptyProject: ProjectInput = {
@@ -13,6 +14,11 @@ const emptyProject: ProjectInput = {
 };
 
 export function App() {
+  if (window.location.pathname === "/prototype/v0-2-workflow") return <WorkflowPrototype />;
+  return <ProjectApp />;
+}
+
+function ProjectApp() {
   const [initialProjectId] = useState(() => parseProjectId(window.location.pathname));
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
