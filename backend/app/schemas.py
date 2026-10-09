@@ -29,3 +29,4 @@ class Project(ProjectInput):
     id: int
     created_at: datetime
     updated_at: datetime
+    archived_at: datetime | None = None

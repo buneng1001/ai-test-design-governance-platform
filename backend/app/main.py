@@ -62,6 +62,8 @@ from app.template_repository import TemplateMappingRepository
 from app.test_point_review_api import register_test_point_review_routes
 from app.ai_run_api import register_ai_run_routes as _register_ai_run_routes
 from app.workflow_api import register_workflow_routes
+from app.v020_api import register_v020_routes
+from app.v020_repository import V020Repository
 
 
 def create_app(
@@ -86,6 +88,7 @@ def create_app(
     quality_repository = QualityRepository(resolved_database_path)
     change_impact_repository = ChangeImpactRepository(resolved_database_path)
     evaluation_repository = EvaluationRepository(resolved_database_path)
+    v020_repository = V020Repository(resolved_database_path)
     report_service = ReportService(
         asset_repository, requirement_repository, review_repository, design_repository,
         template_repository, case_generation_repository, case_review_repository, task_repository,
@@ -163,6 +166,7 @@ def create_app(
     register_review_suggestion_routes(app, context)
     register_test_point_review_routes(app, context)
     register_workflow_routes(app, context)
+    register_v020_routes(app, repository, asset_repository, requirement_repository, v020_repository)
     register_design_routes(
         app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
     )

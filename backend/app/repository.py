@@ -395,6 +395,85 @@ MIGRATIONS = (
     ALTER TABLE ai_run_controls ADD COLUMN active_batch_number INTEGER;
     ALTER TABLE ai_run_controls ADD COLUMN active_lease_id TEXT;
     """,
+    """
+    ALTER TABLE projects ADD COLUMN archived_at TEXT;
+    CREATE TABLE IF NOT EXISTS v020_workspaces (
+        project_id INTEGER PRIMARY KEY REFERENCES projects(id),
+        supplemental_notes TEXT NOT NULL DEFAULT '',
+        active_requirement_version_id INTEGER REFERENCES requirement_versions(id),
+        template_mode TEXT NOT NULL DEFAULT 'default',
+        template_mapping_id INTEGER,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS v020_runs (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        page TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS v020_runs_project_page_created
+        ON v020_runs(project_id, page, created_at DESC);
+    CREATE TABLE IF NOT EXISTS v020_analysis_rows (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        run_id TEXT NOT NULL REFERENCES v020_runs(id),
+        selected INTEGER NOT NULL DEFAULT 0,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS v020_analysis_rows_project_run
+        ON v020_analysis_rows(project_id, run_id);
+    CREATE TABLE IF NOT EXISTS v020_suggestions (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        run_id TEXT NOT NULL REFERENCES v020_runs(id),
+        disposition TEXT NOT NULL DEFAULT 'pending',
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS v020_review_suggestions (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        run_id TEXT NOT NULL REFERENCES v020_runs(id),
+        disposition TEXT NOT NULL DEFAULT 'pending',
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS v020_case_generations (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        run_id TEXT NOT NULL REFERENCES v020_runs(id),
+        scope_ids_json TEXT NOT NULL,
+        template_json TEXT NOT NULL,
+        supplemental_requirements TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS v020_cases (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        generation_id TEXT NOT NULL REFERENCES v020_case_generations(id),
+        included INTEGER NOT NULL DEFAULT 1,
+        removed INTEGER NOT NULL DEFAULT 0,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS v020_exports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        page TEXT NOT NULL,
+        format TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        record_id TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

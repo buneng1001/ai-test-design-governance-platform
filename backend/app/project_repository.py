@@ -107,6 +107,16 @@ class ProjectRepository:
                 return None
         return self.get(project_id)
 
+    def set_archived(self, project_id: int, archived: bool) -> Project | None:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ?",
+                (self._now() if archived else None, self._now(), project_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get(project_id)
+
     def delete(self, project_id: int) -> bool:
         """删除项目及其业务数据，保留跨项目的模型配置。"""
         with self.connect() as connection:
@@ -160,4 +170,5 @@ class ProjectRepository:
             settings=ProjectSettings.model_validate(json.loads(row["settings_json"])),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
         )
