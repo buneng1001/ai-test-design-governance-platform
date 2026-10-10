@@ -158,6 +158,14 @@ def get_session_model_config(session_id: str | None) -> ResolvedModelConfig | No
     return resolved if resolved.api_key else None
 
 
+def get_session_model_status(session_id: str | None) -> SessionModelConfigStatus | None:
+    """供工作页预检复用已存在的模型配置与真实连接状态。"""
+    if not session_id:
+        return None
+    config = _read_stored_config(session_id)
+    return _status(session_id, config) if config else None
+
+
 def _store_config(session_id: str, config: SessionModelConfigInput, allow_remember: bool = False) -> StoredModelConfig:
     stored = StoredModelConfig.model_validate(config.model_dump(exclude={"api_key", "remember_api_key"}))
     if config.remember_api_key:

@@ -24,6 +24,7 @@ def build_delivery_package(
     suggestions = workspace.list_payloads("v020_suggestions", project_id)
     reviews = workspace.list_payloads("v020_review_suggestions", project_id)
     cases = workspace.list_payloads("v020_cases", project_id)
+    generations = workspace.case_generations(project_id)
     exports = workspace.export_history(project_id)
     manifest = {
         "product_name": "AI 测试用例生成平台",
@@ -47,7 +48,12 @@ def build_delivery_package(
         "02-analysis/analysis.json": {"runs": _page_runs(runs, "analysis"), "rows": analysis_rows},
         "03-suggestions/suggestions.json": {"runs": _page_runs(runs, "suggestions"), "items": suggestions},
         "04-review/review.json": {"runs": _page_runs(runs, "review"), "items": reviews},
-        "05-cases/cases.json": {"runs": _page_runs(runs, "cases"), "items": cases},
+        "05-cases/cases.json": {
+            "runs": _page_runs(runs, "cases"), "generations": generations, "items": cases,
+            "selected_template": {
+                "mode": state["template_mode"], "mapping_id": state["template_mapping_id"],
+            },
+        },
         "exports/export-history.json": exports,
     }
     output = io.BytesIO()
@@ -68,4 +74,3 @@ def _page_status(runs: list[dict], page: str) -> str:
     return {"completed": "已完成", "running": "正在执行", "failed": "失败"}.get(
         selected[-1].get("status", ""), "未执行"
     )
-

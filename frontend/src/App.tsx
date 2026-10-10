@@ -1,17 +1,14 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { createProject, deleteProject, getProject, listProjects, Project, ProjectInput, updateProject } from "./api";
-import { WorkflowShell } from "./WorkflowShell";
+import { createProject, getProject, Project, ProjectInput, updateProject } from "./api";
 import { WorkflowPrototype } from "./WorkflowPrototype";
+import { WorkflowShell } from "./WorkflowShell";
+import { downloadDeliveryPackage, listProjectSummaries, setProjectArchived } from "./v020_api";
+import type { ProjectSummary } from "./v020_types";
 import "./styles.css";
 
-const emptyProject: ProjectInput = {
-  name: "",
-  test_object: "",
-  software_version: "",
-  description: "",
-  settings: { requirement_language: "zh-CN" },
-};
+const emptyProject: ProjectInput = { name: "", test_object: "", software_version: "", description: "",
+  settings: { requirement_language: "zh-CN" } };
 
 export function App() {
   if (window.location.pathname === "/prototype/v0-2-workflow") return <WorkflowPrototype />;
@@ -19,216 +16,70 @@ export function App() {
 }
 
 function ProjectApp() {
-  const [initialProjectId] = useState(() => parseProjectId(window.location.pathname));
-  const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectInput, setProjectInput] = useState<ProjectInput>(emptyProject);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [error, setError] = useState("");
-  const [saveStatus, setSaveStatus] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadInitialView = async () => {
-      try {
-        const result = initialProjectId ? await getProject(initialProjectId) : await listProjects();
-        if (Array.isArray(result)) {
-          setProjects(result);
-        } else {
-          setActiveProject(result);
-          setProjectInput(toInput(result));
-        }
-      } catch (reason) {
-        setError(errorMessage(reason));
-      } finally {
-        setLoading(false);
-      }
-    };
-    void loadInitialView();
-  }, [initialProjectId]);
-
-  const openProject = (project: Project) => {
-    window.history.pushState({}, "", `/projects/${project.id}`);
-    setActiveProject(project);
-    setProjectInput(toInput(project));
-    setError("");
-  };
-
-  const submitCreate = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!validate(projectInput, setError)) return;
-    try {
-      openProject(await createProject(projectInput));
-    } catch (reason) {
-      setError(errorMessage(reason));
-    }
-  };
-
-  const submitUpdate = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!activeProject || !validate(projectInput, setError)) return;
-    try {
-      const updated = await updateProject(activeProject.id, projectInput);
-      setActiveProject(updated);
-      setProjectInput(toInput(updated));
-      setError("");
-      setSaveStatus(`✓ 已保存 · ${new Date().toLocaleTimeString()}`);
-    } catch (reason) {
-      setError(errorMessage(reason));
-    }
-  };
-
+  const [showCreate, setShowCreate] = useState(false); const [showArchived, setShowArchived] = useState(false);
+  const [search, setSearch] = useState(""); const [error, setError] = useState(""); const [loading, setLoading] = useState(true);
+  const initialProjectId = useMemo(() => parseProjectId(window.location.pathname), []);
+  const loadProjects = useCallback(async (archived = false) => {
+    setProjects(await listProjectSummaries(archived));
+  }, []);
+  useEffect(() => { void (async () => { try {
+    if (initialProjectId) { const project = await getProject(initialProjectId); setActiveProject(project); setProjectInput(toInput(project)); }
+    else await loadProjects(false);
+  } catch (reason) { setError(message(reason)); } finally { setLoading(false); } })(); }, [initialProjectId, loadProjects]);
+  const openProject = async (projectId: number) => { try { const project = await getProject(projectId); setActiveProject(project);
+    setProjectInput(toInput(project)); window.history.pushState({}, "", `/projects/${project.id}`); setError(""); }
+  catch (reason) { setError(message(reason)); } };
+  const openManager = async () => { window.history.pushState({}, "", "/"); setActiveProject(null); setShowArchived(false);
+    setLoading(true); try { await loadProjects(false); } catch (reason) { setError(message(reason)); } finally { setLoading(false); } };
+  const submitCreate = async (event: FormEvent) => { event.preventDefault(); if (!validate(projectInput, setError)) return;
+    try { const project = await createProject(projectInput); await openProject(project.id); } catch (reason) { setError(message(reason)); } };
+  const submitUpdate = async (event: FormEvent) => { event.preventDefault(); if (!activeProject || !validate(projectInput, setError)) return;
+    try { const project = await updateProject(activeProject.id, projectInput); setActiveProject(project); setProjectInput(toInput(project)); }
+    catch (reason) { setError(message(reason)); } };
+  const toggleArchiveView = async (archived: boolean) => { setShowArchived(archived); try { setProjects(await listProjectSummaries(archived)); }
+    catch (reason) { setError(message(reason)); } };
+  const filtered = projects.filter((project) => [project.name, project.test_object, project.software_version]
+    .some((value) => value.toLowerCase().includes(search.trim().toLowerCase())));
   if (loading) return <main className="shell"><p>正在加载测试设计项目…</p></main>;
-
-  if (activeProject) {
-    return (
-      <main className="shell">
-        <button className="link-button" onClick={() => window.location.assign("/")}>← 返回项目列表</button>
-        <p className="eyebrow">项目工作台</p>
-        <h1>{activeProject.name}</h1>
-        <p className="object-name">测试对象：{activeProject.test_object}</p>
-        <p className="object-name">软件版本：{activeProject.software_version}</p>
-        <section className="project-context">
-          <h2>项目上下文</h2>
-          <ProjectForm input={projectInput} setInput={setProjectInput} submitLabel="保存修改" onSubmit={submitUpdate} />
-          <button type="button" className="danger-button" onClick={async () => {
-            if (!window.confirm(`确定删除项目“${activeProject.name}”及其全部数据吗？此操作不可恢复。`)) return;
-            try {
-              await deleteProject(activeProject.id);
-              window.location.assign("/");
-            } catch (reason) {
-              setError(errorMessage(reason));
-            }
-          }}>删除项目及全部数据</button>
-          {error && <p role="alert" className="error">{error}</p>}
-          {saveStatus && <p role="status" className="success">{saveStatus}</p>}
-        </section>
-        <WorkflowShell projectId={activeProject.id} testObject={activeProject.test_object}
-          softwareVersion={activeProject.software_version} />
-      </main>
-    );
-  }
-
-  return (
-    <main className="shell">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">AI 测试设计与治理平台</p>
-          <h1>测试设计项目</h1>
-          <p>围绕测试对象管理需求资料与后续测试设计资产。</p>
-        </div>
-        {!showCreateForm && (
-          <button onClick={() => { setShowCreateForm(true); setProjectInput(emptyProject); }}>
-            创建测试设计项目
-          </button>
-        )}
-      </header>
-      {showCreateForm && (
-        <section className="panel">
-          <h2>创建测试设计项目</h2>
-          <ProjectForm
-            input={projectInput}
-            setInput={setProjectInput}
-            submitLabel="创建并进入工作台"
-            onSubmit={submitCreate}
-          />
-          {error && <p role="alert" className="error">{error}</p>}
-        </section>
-      )}
-      {!showCreateForm && projects.length === 0 && (
-        <section className="empty-state">
-          <h2>还没有测试设计项目</h2>
-          <p>创建第一个项目，明确测试对象和项目边界。</p>
-        </section>
-      )}
-      <section className="project-grid" aria-label="测试设计项目列表">
-        {projects.map((project) => (
-          <button className="project-card" key={project.id} onClick={() => openProject(project)}>
-            <strong>{project.name}</strong>
-            <span>{project.test_object}</span>
-          </button>
-        ))}
-      </section>
-    </main>
-  );
+  if (activeProject) return <main className="product-shell"><WorkflowShell projectId={activeProject.id} projectName={activeProject.name}
+    testObject={activeProject.test_object} softwareVersion={activeProject.software_version} onOpenProjects={() => void openManager()} />
+    <details className="project-settings"><summary>项目设置</summary><ProjectForm input={projectInput} setInput={setProjectInput} submitLabel="保存项目设置" onSubmit={submitUpdate} /></details>
+    {error && <p role="alert" className="error floating-error">{error}</p>}</main>;
+  return <main className="project-manager-shell"><header className="manager-header"><div><p className="eyebrow">AI 测试用例生成平台</p>
+    <h1>测试设计项目</h1><p>选择项目后进入“上传文档 → 需求分析 → 新增建议 → 审核 → 测试用例”。</p></div>
+    <button type="button" onClick={() => { setShowCreate(true); setProjectInput(emptyProject); }}>新建测试设计项目</button></header>
+    <section className="manager-toolbar"><input aria-label="搜索项目" value={search} placeholder="搜索项目名称、测试对象或版本" onChange={(e) => setSearch(e.target.value)} />
+      <div><button type="button" className={!showArchived ? "selected secondary" : "secondary"} onClick={() => void toggleArchiveView(false)}>进行中的项目</button>
+        <button type="button" className={showArchived ? "selected secondary" : "secondary"} onClick={() => void toggleArchiveView(true)}>已归档</button></div></section>
+    {showCreate && <section className="panel create-project-panel"><header><h2>创建测试设计项目</h2><button type="button" className="secondary" onClick={() => setShowCreate(false)}>取消</button></header>
+      <ProjectForm input={projectInput} setInput={setProjectInput} submitLabel="创建并进入工作台" onSubmit={submitCreate} /></section>}
+    <section className="formal-project-grid" aria-label="测试设计项目列表">{filtered.map((project) => <article className="formal-project-card" key={project.id}>
+      <button type="button" className="project-open" onClick={() => void openProject(project.id)}><strong>{project.name}</strong>
+        <span>{project.test_object} · {project.software_version}</span><small>最近更新：{new Date(project.updated_at).toLocaleString()}</small>
+        <small>需求版本：{project.current_requirement_version ?? "未建立"} · 分析：{project.latest_analysis_status} · 用例：{project.latest_case_status}</small>
+        <small>最近导出：{project.latest_export_at ? new Date(project.latest_export_at).toLocaleString() : "无"}</small></button>
+      <div><button type="button" className="secondary" onClick={() => void downloadDeliveryPackage(project.id).catch((reason) => setError(message(reason)))}>下载交付包</button>
+        <button type="button" className="secondary" onClick={() => void setProjectArchived(project.id, !showArchived).then(() => loadProjects(showArchived))}>{showArchived ? "恢复项目" : "归档项目"}</button></div>
+    </article>)}</section>
+    {!filtered.length && <section className="empty-state"><h2>{showArchived ? "没有已归档项目" : "还没有测试设计项目"}</h2><p>新建项目后，资料、分析范围、用例和历史记录都会按项目保存。</p></section>}
+    {error && <p role="alert" className="error">{error}</p>}
+  </main>;
 }
 
-interface ProjectFormProps {
-  input: ProjectInput;
-  setInput: (input: ProjectInput) => void;
-  submitLabel: string;
-  onSubmit: (event: FormEvent) => void;
+function ProjectForm({ input, setInput, submitLabel, onSubmit }: { input: ProjectInput; setInput: (value: ProjectInput) => void;
+  submitLabel: string; onSubmit: (event: FormEvent) => void }) {
+  const setField = (field: keyof Omit<ProjectInput, "settings">, value: string) => setInput({ ...input, [field]: value });
+  return <form onSubmit={onSubmit} className="project-form"><label>项目名称<span><i className="required-mark">*</i><input aria-label="项目名称" value={input.name} required maxLength={100} onChange={(e) => setField("name", e.target.value)} /></span></label>
+    <label>测试对象<span><i className="required-mark">*</i><input aria-label="测试对象" value={input.test_object} required maxLength={200} onChange={(e) => setField("test_object", e.target.value)} /></span></label>
+    <label>软件版本<span><i className="required-mark">*</i><input aria-label="软件版本" value={input.software_version} required maxLength={100} onChange={(e) => setField("software_version", e.target.value)} /></span></label>
+    <label>项目描述<textarea aria-label="项目描述" value={input.description} maxLength={2000} onChange={(e) => setField("description", e.target.value)} /></label>
+    <label>需求资料默认语言<select value={input.settings.requirement_language} onChange={(e) => setInput({ ...input, settings: { requirement_language: e.target.value as "zh-CN" | "en-US" } })}><option value="zh-CN">简体中文</option><option value="en-US">English</option></select></label>
+    <button type="submit">{submitLabel}</button></form>;
 }
-
-function ProjectForm({ input, setInput, submitLabel, onSubmit }: ProjectFormProps) {
-  const setField = (field: keyof Omit<ProjectInput, "settings">, value: string) => {
-    setInput({ ...input, [field]: value });
-  };
-  return (
-    <form onSubmit={onSubmit} className="project-form">
-      <label>
-        项目名称
-        <span><i className="required-mark">*</i><input aria-label="项目名称" value={input.name} maxLength={100}
-          required onChange={(event) => setField("name", event.target.value)} /></span>
-      </label>
-      <label>
-        测试对象
-        <span><i className="required-mark">*</i><input aria-label="测试对象"
-          value={input.test_object}
-          maxLength={200}
-          required
-          onChange={(event) => setField("test_object", event.target.value)}
-        /></span>
-      </label>
-      <label>
-        软件版本
-        <span><i className="required-mark">*</i><input aria-label="软件版本" value={input.software_version}
-          maxLength={100} required
-          onChange={(event) => setField("software_version", event.target.value)} /></span>
-      </label>
-      <label>
-        项目描述
-        <textarea
-          value={input.description}
-          maxLength={2000}
-          onChange={(event) => setField("description", event.target.value)}
-        />
-      </label>
-      <label>
-        需求资料默认语言
-        <select value={input.settings.requirement_language} onChange={(event) => setInput({
-          ...input,
-          settings: { requirement_language: event.target.value as "zh-CN" | "en-US" },
-        })}>
-          <option value="zh-CN">简体中文</option>
-          <option value="en-US">English</option>
-        </select>
-      </label>
-      <button type="submit">{submitLabel}</button>
-    </form>
-  );
-}
-
-const parseProjectId = (path: string): number | null => {
-  const match = path.match(/^\/projects\/(\d+)$/);
-  return match ? Number(match[1]) : null;
-};
-
-const toInput = ({ name, test_object, software_version, description, settings }: Project): ProjectInput => ({
-  name,
-  test_object,
-  software_version,
-  description,
-  settings,
-});
-
-const validate = (input: ProjectInput, setError: (message: string) => void): boolean => {
-  if (!input.name.trim() || !input.test_object.trim() || !input.software_version.trim()) {
-    setError("请填写项目名称、测试对象和软件版本");
-    return false;
-  }
-  setError("");
-  return true;
-};
-
-const errorMessage = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";
+const parseProjectId = (path: string): number | null => { const match = path.match(/^\/projects\/(\d+)$/); return match ? Number(match[1]) : null; };
+const toInput = ({ name, test_object, software_version, description, settings }: Project): ProjectInput => ({ name, test_object, software_version, description, settings });
+const validate = (input: ProjectInput, setError: (value: string) => void) => { if (!input.name.trim() || !input.test_object.trim() || !input.software_version.trim()) { setError("请填写项目名称、测试对象和软件版本"); return false; } setError(""); return true; };
+const message = (reason: unknown): string => reason instanceof Error ? reason.message : "请求未完成";

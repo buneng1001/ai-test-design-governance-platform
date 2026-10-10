@@ -4,13 +4,14 @@ import { confirmTemplate, TemplateMappingVersion, TemplateSheet, uploadTemplate,
 
 interface Props {
   projectId: number;
+  onConfirmed?: (mapping: TemplateMappingVersion) => void;
 }
 
 const roleLabels: Record<TemplateSheet["role"], string> = {
   case: "用例表", instruction: "说明表", dictionary: "字典表", statistics: "统计表", unknown: "未知",
 };
 
-export function TemplateMappingPanel({ projectId }: Props) {
+export function TemplateMappingPanel({ projectId, onConfirmed }: Props) {
   const [mapping, setMapping] = useState<TemplateMappingVersion | null>(null);
   const [error, setError] = useState("");
 
@@ -42,7 +43,9 @@ export function TemplateMappingPanel({ projectId }: Props) {
         setError(validation.diagnostics.map((item) => item.message).join("；"));
         return;
       }
-      setMapping(await confirmTemplate(projectId, mapping.id, "测试工程师", mapping.sheets));
+      const confirmed = await confirmTemplate(projectId, mapping.id, "测试工程师", mapping.sheets);
+      setMapping(confirmed);
+      onConfirmed?.(confirmed);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "模板映射确认失败");

@@ -64,11 +64,14 @@ from app.ai_run_api import register_ai_run_routes as _register_ai_run_routes
 from app.workflow_api import register_workflow_routes
 from app.v020_api import register_v020_routes
 from app.v020_repository import V020Repository
+from app.v020_run_api import register_v020_run_routes
+from app.v020_run_repository import V020RunRepository
+from app.v020_run_service import V020RunService
 
 
 def create_app(
     database_path: Path | None = None, local_credentials_path: Path | None = None,
-    model_service: ModelService | None = None,
+    model_service: ModelService | None = None, real_model_service: ModelService | None = None,
 ) -> FastAPI:
     """创建应用并按历史顺序组装所有依赖和路由。"""
     resolved_database_path = database_path or Path(os.getenv("APP_DATABASE_PATH", "data/app.db"))
@@ -89,6 +92,7 @@ def create_app(
     change_impact_repository = ChangeImpactRepository(resolved_database_path)
     evaluation_repository = EvaluationRepository(resolved_database_path)
     v020_repository = V020Repository(resolved_database_path)
+    v020_run_repository = V020RunRepository(resolved_database_path)
     report_service = ReportService(
         asset_repository, requirement_repository, review_repository, design_repository,
         template_repository, case_generation_repository, case_review_repository, task_repository,
@@ -96,7 +100,7 @@ def create_app(
         change_impact_repository, ai_run_repository, evaluation_repository,
     )
     model_service = model_service or MockModelService()
-    real_model_service = OpenAICompatibleModelService()
+    real_model_service = real_model_service or OpenAICompatibleModelService()
     unavailable_model_service = UnavailableModelService()
     context = _AppRouteContext(
         repository, asset_repository, requirement_repository, review_repository, design_repository,
@@ -112,7 +116,7 @@ def create_app(
         ai_run_control_repository.recover_after_restart()
         yield
 
-    app = FastAPI(title="AI 测试设计与治理平台", lifespan=lifespan)
+    app = FastAPI(title="AI 测试用例生成平台", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -166,7 +170,13 @@ def create_app(
     register_review_suggestion_routes(app, context)
     register_test_point_review_routes(app, context)
     register_workflow_routes(app, context)
-    register_v020_routes(app, repository, asset_repository, requirement_repository, v020_repository)
+    register_v020_routes(
+        app, repository, asset_repository, requirement_repository, v020_repository, template_repository,
+    )
+    register_v020_run_routes(app, V020RunService(
+        repository, requirement_repository, v020_repository, v020_run_repository,
+        template_repository, real_model_service,
+    ), v020_run_repository)
     register_design_routes(
         app, repository, requirement_repository, review_repository, design_repository, ai_run_repository
     )

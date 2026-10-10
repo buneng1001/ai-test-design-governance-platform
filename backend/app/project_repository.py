@@ -141,6 +141,11 @@ class ProjectRepository:
             connection.execute("DELETE FROM execution_batch_conclusions WHERE batch_id IN "
                                "(SELECT id FROM execution_batches WHERE project_id = ?)", (project_id,))
             for table in (
+                "v020_exports", "v020_cases", "v020_case_generations", "v020_review_suggestions",
+                "v020_suggestions", "v020_analysis_rows", "v020_runs", "v020_workspaces",
+            ):
+                connection.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+            for table in (
                 "requirement_analyses", "test_designs", "template_mappings", "case_review_batches",
                 "case_generations", "ai_runs", "test_tasks", "execution_result_conflicts",
                 "execution_result_records", "execution_records", "execution_batches", "regression_selections",

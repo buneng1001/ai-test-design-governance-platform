@@ -22,6 +22,7 @@ class ModelRequest:
     input_context: tuple[dict[str, object], ...] = ()
     base_url: str = ""
     api_key: str = ""
+    prompt_override: str = ""
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,9 @@ class ModelResponse:
     http_status: int | None = None
     finish_reason: str | None = None
     response_length: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 MAX_MOCK_REQUIREMENTS = 100
@@ -165,9 +169,13 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
                 error_code="provider_json_invalid", diagnostic=str(error)[:160], provider_response=payload,
                 http_status=http_status, finish_reason=finish_reason, response_length=len(response_bytes),
             )
+        usage = payload.get("usage", {}) if isinstance(payload, dict) else {}
         return ModelResponse(
             raw_output=raw_output, provider_response=payload, http_status=http_status,
             finish_reason=finish_reason, response_length=len(response_bytes),
+            input_tokens=_usage_value(usage, "prompt_tokens", "input_tokens"),
+            output_tokens=_usage_value(usage, "completion_tokens", "output_tokens"),
+            total_tokens=_usage_value(usage, "total_tokens"),
         )
     except HTTPError as error:
         retryable = error.code == 429 or error.code >= 500
@@ -202,6 +210,16 @@ def _provider_request_parameters(provider: str, model: str) -> dict[str, object]
     if provider == "deepseek" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}:
         return {"thinking": {"type": "disabled"}}
     return {}
+
+
+def _usage_value(usage: object, *keys: str) -> int | None:
+    if not isinstance(usage, dict):
+        return None
+    for key in keys:
+        value = usage.get(key)
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
 
 
 def analysis_max_tokens(provider: str, model: str) -> int:
@@ -314,6 +332,8 @@ def _mock_requirement_analysis(request: ModelRequest) -> dict[str, object]:
 
 
 def _prompt_for_request(request: ModelRequest) -> str:
+    if request.prompt_override:
+        return request.prompt_override
     if request.task_type == "case_generation":
         return case_generation_prompt(request.input_context)
     if request.task_type != "requirement_review":

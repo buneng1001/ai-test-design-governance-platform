@@ -140,3 +140,15 @@ button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; backgro
   .workflow-sidebar { position: static; max-height: none; margin-bottom: 20px; }
   .workflow-tabs { position: sticky; top: 0; z-index: 3; padding: 8px; background: #f4f6f2; }
 }
+
+/* v0.2 正式项目管理入口。 */
+.project-manager-shell { width: min(1320px, calc(100% - 40px)); margin: 0 auto; padding: 42px 0 90px; }
+.manager-header { display: flex; align-items: start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.manager-header h1 { margin: 5px 0 8px; font-size: clamp(32px, 5vw, 50px); }.manager-header p { color: #617184; }
+.manager-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; padding: 14px; border: 1px solid #d7e2eb; border-radius: 13px; background: #fff; }
+.manager-toolbar > input { max-width: 520px; }.manager-toolbar > div { display: flex; gap: 8px; }.manager-toolbar .selected { box-shadow: inset 0 -3px #1682b0; }
+.create-project-panel { margin-bottom: 20px; }.create-project-panel > header { display: flex; justify-content: space-between; gap: 16px; }
+.formal-project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 15px; }.formal-project-card { display: grid; gap: 12px; padding: 17px; border: 1px solid #d7e2eb; border-radius: 14px; background: #fff; box-shadow: 0 8px 24px rgb(25 54 83 / 6%); }
+.formal-project-card .project-open { display: grid; gap: 7px; padding: 0; color: inherit; background: transparent; text-align: left; }.formal-project-card .project-open strong { color: #164f73; font-size: 19px; }.formal-project-card .project-open span { color: #344d63; }.formal-project-card .project-open small { color: #687a8c; }.formal-project-card > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.floating-error { position: fixed; z-index: 40; right: 24px; bottom: 24px; max-width: 520px; padding: 13px 16px; border-radius: 10px; background: #fff0f1; box-shadow: 0 12px 35px rgb(70 20 25 / 20%); }
+@media (max-width: 700px) { .project-manager-shell { width: min(100% - 20px, 1320px); padding-top: 22px; }.manager-header, .manager-toolbar { align-items: stretch; flex-direction: column; }.manager-toolbar > input { max-width: none; } }

@@ -74,6 +74,20 @@ class V020Repository:
             "updated_at": self.now(),
         }
 
+    def save_template(self, project_id: int, mode: str, mapping_id: int | None) -> None:
+        current = self.workspace_row(project_id)
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO v020_workspaces(
+                    project_id, supplemental_notes, active_requirement_version_id,
+                    template_mode, template_mapping_id, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id) DO UPDATE SET template_mode=excluded.template_mode,
+                    template_mapping_id=excluded.template_mapping_id, updated_at=excluded.updated_at""",
+                (project_id, current["supplemental_notes"], current["active_requirement_version_id"],
+                 mode, mapping_id, self.now()),
+            )
+
     def list_project_summaries(self, archived: bool) -> list[dict]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -99,7 +113,7 @@ class V020Repository:
             "latest_export_at": row["latest_export_at"],
         } for row in rows]
 
-    def list_payloads(self, table: str, project_id: int) -> list[dict]:
+    def list_payloads(self, table: str, project_id: int, run_id: str | None = None) -> list[dict]:
         allowed = {
             "v020_runs", "v020_analysis_rows", "v020_suggestions", "v020_review_suggestions", "v020_cases",
         }
@@ -109,7 +123,20 @@ class V020Repository:
             rows = connection.execute(
                 f"SELECT payload_json FROM {table} WHERE project_id = ? ORDER BY created_at", (project_id,)
             ).fetchall()
-        return [json.loads(row["payload_json"]) for row in rows]
+        payloads = [json.loads(row["payload_json"]) for row in rows]
+        return [item for item in payloads if run_id is None or item.get("run_id") == run_id]
+
+    def case_generations(self, project_id: int) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM v020_case_generations WHERE project_id=? ORDER BY created_at, rowid",
+                (project_id,),
+            ).fetchall()
+        return [{
+            "id": row["id"], "project_id": row["project_id"], "run_id": row["run_id"],
+            "scope_ids": json.loads(row["scope_ids_json"]), "template": json.loads(row["template_json"]),
+            "supplemental_requirements": row["supplemental_requirements"], "created_at": row["created_at"],
+        } for row in rows]
 
     def export_history(self, project_id: int) -> list[dict]:
         with self.connect() as connection:
@@ -117,6 +144,18 @@ class V020Repository:
                 "SELECT * FROM v020_exports WHERE project_id = ? ORDER BY created_at", (project_id,)
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_export(self, project_id: int, page: str, format_name: str, filename: str,
+                      record_id: str | None = None) -> dict:
+        now = self.now()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO v020_exports(project_id, page, format, filename, record_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, page, format_name, filename, record_id, now),
+            )
+        return {"id": cursor.lastrowid, "project_id": project_id, "page": page,
+                "format": format_name, "filename": filename, "record_id": record_id, "created_at": now}
 
     @staticmethod
     def status_label(status: str | None, empty: str) -> str:
@@ -127,4 +166,3 @@ class V020Repository:
     @staticmethod
     def now() -> str:
         return datetime.now(UTC).isoformat()
-
