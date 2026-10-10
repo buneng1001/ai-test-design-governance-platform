@@ -25,6 +25,7 @@ export function UploadWorkspace({ projectId, workspace, onChanged }: {
     finally { setBusy(false); }
   };
   const version = workspace.requirement_version;
+  const parsedMaterials = workspace.parse_result?.materials ?? version?.materials ?? [];
   return <section className="workflow-page">
     <PageHeader title="上传文档" subtitle="上传并解析后直接核对章节、表格、正文片段与失败原因。" badge="本页面不调用 AI" />
     <label className="field-stack">补充说明（可选）<textarea value={notes} maxLength={4000}
@@ -40,11 +41,11 @@ export function UploadWorkspace({ projectId, workspace, onChanged }: {
     {error && <p role="alert" className="error">{error}</p>}
     <section className="result-card" aria-label="文档解析结果">
       <header><div><h3>文档解析结果</h3><p>解析仅使用本地程序，不会产生模型调用或 Token 消耗。</p></div>
-        <button type="button" className="secondary" disabled={!version}
+        <button type="button" className="secondary" disabled={!parsedMaterials.length}
           onClick={() => void downloadPageResult(projectId, "upload", "json").catch((reason) => setError(message(reason)))}>
           下载解析结果</button></header>
-      {!version && <p className="empty-hint">尚未上传资料。</p>}
-      {version?.materials.map((material) => <article className="material-result" key={material.asset_id}>
+      {!parsedMaterials.length && <p className="empty-hint">尚未上传资料。</p>}
+      {parsedMaterials.map((material) => <article className="material-result" key={material.asset_id}>
         <header><strong>{material.filename}</strong><span className={`status-pill ${material.parse_status}`}>
           {statusLabel(material.parse_status)}</span></header>
         <p>{material.format.toUpperCase()} · {formatBytes(material.size_bytes)} · {material.fragments.length} 个来源片段</p>

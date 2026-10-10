@@ -76,7 +76,9 @@ function RunComparison({ workspace }: { workspace: WorkspaceState }) {
   return <details className="comparison-card"><summary>比较最近一次直接调用与 Skill 工作流</summary><div>
     {[direct, skill].map((run, index) => <article key={run?.id ?? index}><strong>{run?.source_label ?? (index ? "Skill 工作流未运行" : "直接调用未运行")}</strong>
       {run && <><span>{run.result_summary?.count ?? 0} 条结果</span><span>耗时 {((run.duration_ms ?? 0) / 1000).toFixed(1)} 秒</span>
-        <span>{run.actual_usage?.status === "available" ? `${run.actual_usage.total_tokens ?? "-"} Token` : "实际 Token 不可获得"}</span></>}</article>)}</div></details>;
+        <span>{run.actual_usage?.status === "available" ? `${run.actual_usage.total_tokens ?? "-"} Token` : "实际 Token 不可获得"}</span>
+        <ul>{workspace.analysis_rows.filter((row) => row.run_id === run.id).slice(0, 5).map((row) =>
+          <li key={row.id}>{row.module} / {row.function_point} / {row.test_point}</li>)}</ul></>}</article>)}</div></details>;
 }
 function matches(row: AnalysisRow, filters: typeof emptyFilters): boolean {
   const keyword = filters.keyword.trim().toLowerCase();

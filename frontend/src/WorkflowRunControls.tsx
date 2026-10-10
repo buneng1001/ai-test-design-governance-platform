@@ -82,7 +82,9 @@ export function RunEvidenceCard({ run }: { run: RunEvidence }) {
   return <section className={`run-evidence ${run.status}`} aria-label="运行状态">
     <header><strong>运行状态：{statusLabel(run.status)}</strong><span>{run.source_label}</span></header>
     <p>当前阶段：{run.stage} · 耗时：{run.duration_ms === null ? "正在计时" : `${(run.duration_ms / 1000).toFixed(1)} 秒`}</p>
+    <p>模型：{run.provider} · {run.model} · {run.credential_source}；Prompt：{run.prompt_version}{run.skill_version ? ` · Skill ${run.skill_version}` : ""}</p>
     <p>输入：{inputSummary({ input_summary: run.input_summary })}；预计输入 {run.estimated_input_tokens.toLocaleString()} Token</p>
+    <p>人工补充：{run.supplemental_notes || "无"}{run.template_filename ? `；模板：${run.template_filename}` : ""}{run.supplemental_requirements ? `；生成要求：${run.supplemental_requirements}` : ""}</p>
     <p>实际用量：{usageText(run)}；实际费用：{run.actual_cost ? costText(run.actual_cost) : "运行结束后更新"}</p>
     {run.stage_events.length > 0 && <ol className="stage-events">{run.stage_events.map((event) =>
       <li key={`${event.stage}-${event.status}`}>{event.stage}：{event.detail}</li>)}</ol>}

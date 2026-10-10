@@ -1,4 +1,4 @@
-import type { RequirementVersion, TemplateMappingVersion } from "./api_types";
+import type { RequirementPackage, RequirementVersion, TemplateMappingVersion } from "./api_types";
 
 export type RunMode = "direct" | "skill" | "local";
 export type RunPage = "analysis" | "suggestions" | "review" | "cases";
@@ -20,6 +20,7 @@ export interface RunEvidence {
   input_summary: { file_count: number; fragment_count: number; analysis_row_count: number;
     selected_row_count: number; requirement_version_id: number; roles: string[] };
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
+  supplemental_notes: string; supplemental_requirements: string; template_filename: string | null;
   estimated_cost: CostAvailability; actual_usage: UsageAvailability | null; actual_cost: CostAvailability | null;
   stage: string; stage_events: Array<{ stage: string; status: string; detail: string }>;
   duration_ms: number | null; started_at: string; completed_at: string | null; error: string | null;
@@ -60,6 +61,7 @@ export interface GeneratedCase {
 export interface ExportRecord { id: number; page: string; format: string; filename: string; record_id: string | null; created_at: string; }
 export interface WorkspaceState {
   project_id: number; supplemental_notes: string; requirement_version: RequirementVersion | null;
+  parse_result?: RequirementPackage | null;
   template: { mode: "default" | "uploaded"; mapping_id: number | null };
   analysis_rows: AnalysisRow[]; suggestions: Suggestion[]; review_suggestions: ReviewSuggestion[];
   cases: GeneratedCase[]; case_generations: CaseGenerationRecord[]; runs: RunEvidence[]; exports: ExportRecord[];

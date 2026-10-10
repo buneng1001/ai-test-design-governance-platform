@@ -54,6 +54,14 @@ class RequirementRepository:
             package.published_version_id = row["published_version_id"]
         return package
 
+    def latest_package(self, project_id: int) -> RequirementPackage | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM requirement_packages WHERE project_id=? ORDER BY created_at DESC, id DESC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+        return self.get_package(project_id, row["id"]) if row else None
+
     def publish(self, package: RequirementPackage) -> RequirementVersion | None:
         with self.connect() as connection:
             row = connection.execute(

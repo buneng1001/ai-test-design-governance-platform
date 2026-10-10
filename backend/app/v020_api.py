@@ -88,10 +88,12 @@ def register_v020_routes(
             raise HTTPException(status_code=404, detail="测试设计项目不存在")
         state = workspace.workspace_row(project_id)
         version = requirements.get_version(project_id, state["active_requirement_version_id"])
+        parse_result = requirements.latest_package(project_id)
         return {
             "project_id": project_id,
             "supplemental_notes": state["supplemental_notes"],
             "requirement_version": version.model_dump(mode="json") if version else None,
+            "parse_result": parse_result.model_dump(mode="json") if parse_result else None,
             "template": {
                 "mode": state["template_mode"],
                 "mapping_id": state["template_mapping_id"],
@@ -108,7 +110,7 @@ def register_v020_routes(
     @router.get("/projects/{project_id}/delivery-package")
     def download_delivery_package(project_id: int) -> Response:
         try:
-            content = build_delivery_package(project_id, projects, requirements, workspace)
+            content = build_delivery_package(project_id, projects, requirements, workspace, templates)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return Response(

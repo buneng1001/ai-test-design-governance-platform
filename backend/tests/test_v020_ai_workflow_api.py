@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.ai_service import ModelResponse
 from app.main import create_app
+from app.v020_export import _case_xlsx
 
 
 def _project_and_material(client: TestClient) -> int:
@@ -151,6 +152,8 @@ def test_case_generation_uses_only_selected_rows_and_supports_editing(client: Te
     assert exported_xlsx.status_code == 200
     with zipfile.ZipFile(io.BytesIO(exported_xlsx.content)) as workbook:
         assert "xl/worksheets/sheet1.xml" in workbook.namelist()
+        sheet_xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        assert "人工编辑后的标题" not in sheet_xml
     assert len(client.get(f"/api/v0.2/projects/{project_id}/workspace").json()["exports"]) == 2
     exact_export = client.get(
         f"/api/v0.2/projects/{project_id}/exports/cases?format=json&run_id={body['run']['id']}"
@@ -220,3 +223,20 @@ def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path
     assert "Step 00" not in service.prompts[0]
     assert "Step 00" in service.prompts[1] and "Step 08" in service.prompts[1]
     assert skill.json()["run"]["actual_usage"]["total_tokens"] == 200
+
+
+def test_case_xlsx_respects_confirmed_template_field_mapping() -> None:
+    content = _case_xlsx([{
+        "id": "case-1", "title": "映射后的标题", "objective": "目标", "preconditions": ["前置"],
+        "test_input": "输入", "steps": [{"order": 1, "action": "操作", "expected": "预期"}],
+        "overall_expectation": "整体预期", "evidence_requirements": ["截图"], "priority": "P1",
+        "module": "状态管理", "test_item": "状态切换",
+    }], {"sheets": [{
+        "name": "客户用例", "role": "case", "participates": True,
+        "columns": [{"index": 1, "name": "客户标题"}, {"index": 2, "name": "业务模块"}],
+        "field_mapping": {"客户标题": "title", "业务模块": "module"},
+    }]})
+    with zipfile.ZipFile(io.BytesIO(content)) as workbook:
+        xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "客户标题" in xml and "映射后的标题" in xml
+    assert "业务模块" in xml and "状态管理" in xml

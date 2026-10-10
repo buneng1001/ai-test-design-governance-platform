@@ -43,8 +43,26 @@ def test_upload_and_parse_is_one_persisted_non_ai_operation(client: TestClient) 
     state = restored.json()
     assert state["supplemental_notes"] == uploaded["supplemental_notes"]
     assert state["requirement_version"]["id"] == uploaded["requirement_version"]["id"]
+    assert state["parse_result"]["id"] == uploaded["requirement_package"]["id"]
     assert state["analysis_rows"] == []
     assert state["runs"] == []
+
+
+def test_failed_parse_result_remains_visible_after_workspace_reload(client: TestClient) -> None:
+    project = _project(client)
+    response = client.post(f"/api/v0.2/projects/{project['id']}/materials", json={
+        "supplemental_notes": "保留失败原因",
+        "files": [{"filename": "broken.pdf", "media_type": "application/pdf",
+                   "content_base64": base64.b64encode(b"not-a-pdf").decode()}],
+    })
+    assert response.status_code == 201
+    assert response.json()["requirement_version"] is None
+
+    restored = client.get(f"/api/v0.2/projects/{project['id']}/workspace").json()
+    assert restored["requirement_version"] is None
+    assert restored["parse_result"]["materials"][0]["filename"] == "broken.pdf"
+    assert restored["parse_result"]["materials"][0]["parse_status"] in {"failed", "rejected"}
+    assert restored["parse_result"]["materials"][0]["diagnostics"]
 
 
 def test_project_archive_restore_and_summary_are_persisted(client: TestClient) -> None:
@@ -91,6 +109,7 @@ def test_delivery_package_lists_all_pages_and_excludes_credentials(client: TestC
             "03-suggestions/suggestions.json",
             "04-review/review.json",
             "05-cases/cases.json",
+            "05-cases/template-mapping.json",
             "exports/export-history.json",
         }.issubset(set(archive.namelist()))
         manifest = json.loads(archive.read("manifest.json"))
