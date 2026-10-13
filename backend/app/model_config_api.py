@@ -25,6 +25,7 @@ from app.model_config_service import (
 _DATABASE_PATH: Path | None = None
 _LOCAL_CREDENTIALS_PATH: Path | None = None
 _TEMPORARY_CREDENTIALS: dict[tuple[str, str], str] = {}
+CONNECTION_TEST_NETWORK_TIMEOUT_SECONDS = 20
 
 
 def register_model_config_routes(app: FastAPI, database_path: Path, local_credentials_path: Path) -> None:
@@ -108,24 +109,26 @@ def register_model_config_routes(app: FastAPI, database_path: Path, local_creden
                 f"{stored.base_url.rstrip('/')}/chat/completions",
                 data=json.dumps({
                     "model": stored.model,
-                    "messages": [{"role": "user", "content": "Respond with JSON: {\"connected\": true}"}],
-                    "temperature": 0, "response_format": {"type": "json_object"},
+                    "messages": [{"role": "user", "content": "Reply with: OK"}],
+                    "temperature": 0,
+                    "max_tokens": 16,
+                    "stream": False,
                     **_provider_request_parameters(stored.provider, stored.model),
-                    **({"enable_thinking": False} if stored.provider == "siliconflow" and any(
-                        marker in stored.model for marker in ("Qwen3", "DeepSeek-V3.2", "DeepSeek-V3.1")
-                    ) else {}),
                 }).encode("utf-8"),
                 headers={"Authorization": f"Bearer {resolved.api_key}", "Content-Type": "application/json"},
                 method="POST",
             )
-            with urlopen(request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
+            with urlopen(request, timeout=CONNECTION_TEST_NETWORK_TIMEOUT_SECONDS) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             if not payload["choices"][0]["message"]["content"]:
                 raise ValueError("empty response")
         except HTTPError as error:
             return _connection_failure(session_id, stored, resolved, _http_error_type(error.code), f"HTTP {error.code}")
         except TimeoutError:
-            return _connection_failure(session_id, stored, resolved, "timeout")
+            return _connection_failure(
+                session_id, stored, resolved, "response_timeout",
+                f"单次网络等待上限 {CONNECTION_TEST_NETWORK_TIMEOUT_SECONDS} 秒",
+            )
         except URLError:
             return _connection_failure(session_id, stored, resolved, "connection")
         except (ValueError, KeyError, IndexError, TypeError):

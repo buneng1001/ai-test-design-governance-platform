@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from urllib.error import HTTPError
 
@@ -106,6 +107,25 @@ def test_connection_failure_uses_structured_redacted_error(monkeypatch, client) 
     }
 
 
+def test_connection_test_reports_response_deadline(monkeypatch, client) -> None:
+    def response_timeout(*_, **__):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("app.model_config_api.urlopen", response_timeout)
+    result = client.post("/api/ai-session-config/test", json=payload(
+        provider="siliconflow", model="Qwen/Qwen3.5-27B",
+        base_url="https://api.siliconflow.cn/v1", api_key="silicon-secret",
+    ), headers={"X-Session-ID": "test-session"})
+
+    assert result.json()["error"] == {
+        "stage": "connection_test", "provider": "siliconflow", "model": "Qwen/Qwen3.5-27B",
+        "error_type": "response_timeout", "retryable": True,
+        "user_message": "模型服务在连接测试时未及时返回",
+        "suggested_action": "检查模型负载后重试，或改用其他可用模型",
+        "detail": "单次网络等待上限 20 秒",
+    }
+
+
 def test_connection_test_keeps_provider_specific_structured_output_parameters(monkeypatch, client) -> None:
     class FakeResponse:
         def __enter__(self): return self
@@ -113,17 +133,28 @@ def test_connection_test_keeps_provider_specific_structured_output_parameters(mo
         def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
 
     captured = {}
-    def fake_urlopen(request, **_):
-        captured["body"] = request.data.decode("utf-8")
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
         return FakeResponse()
 
     monkeypatch.setattr("app.model_config_api.urlopen", fake_urlopen)
     result = client.post("/api/ai-session-config/test", json=payload(
-        provider="siliconflow", model="deepseek-ai/DeepSeek-V3.2",
+        provider="siliconflow", model="Qwen/Qwen3.5-27B",
         base_url="https://api.siliconflow.cn/v1", api_key="silicon-secret",
     ), headers={"X-Session-ID": "test-session"})
     assert result.json()["success"] is True
-    assert '"enable_thinking": false' in captured["body"]
+    assert captured == {
+        "body": {
+            "model": "Qwen/Qwen3.5-27B",
+            "messages": [{"role": "user", "content": "Reply with: OK"}],
+            "temperature": 0,
+            "max_tokens": 16,
+            "stream": False,
+            "enable_thinking": False,
+        },
+        "timeout": 20,
+    }
 
 
 def test_remembered_key_is_loaded_after_restart_without_returning_key(tmp_path) -> None:

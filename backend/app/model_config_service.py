@@ -159,6 +159,7 @@ def service_error(stage: str, provider: str, model: str, error_type: str, detail
         "invalid_response": (False, "模型服务返回了无法解析的响应", "确认模型支持当前 OpenAI 兼容接口"),
         "invalid_configuration": (False, "模型配置无效", "检查 Endpoint、模型名称和 API Key"),
         "timeout": (True, "模型服务连接超时", "检查网络或模型负载后重试"),
+        "response_timeout": (True, "模型服务在连接测试时未及时返回", "检查模型负载后重试，或改用其他可用模型"),
         "connection": (True, "无法连接模型服务", "检查 Endpoint、网络、VPN 或代理"),
         "server": (True, "模型服务暂时不可用", "稍后重试"),
         "missing_credential": (False, "未找到当前服务商的 API Key", "输入临时 Key，或在本地凭据配置中保存该服务商的 Key"),
