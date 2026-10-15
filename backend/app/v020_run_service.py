@@ -1,4 +1,5 @@
 import json
+from math import ceil
 from datetime import UTC, datetime
 from time import perf_counter
 from uuid import uuid4
@@ -10,6 +11,7 @@ from app.model_config_api import get_session_model_config, get_session_model_sta
 from app.project_repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
 from app.template_repository import TemplateMappingRepository
+from app.v020_context import input_fingerprint, prepare_analysis_fragments
 from app.v020_local_generation import local_analysis, local_cases, local_review, local_suggestions
 from app.v020_prompts import PROMPT_VERSIONS, SKILL_VERSIONS, build_prompt
 from app.v020_repository import V020Repository
@@ -23,6 +25,13 @@ class V020RunError(Exception):
     def __init__(self, status_code: int, message: str) -> None:
         self.status_code = status_code
         super().__init__(message)
+
+
+def estimate_input_tokens(value: str) -> int:
+    """对中文按至少一字一 Token、ASCII 按四字符一 Token 做保守估算。"""
+    non_ascii = sum(1 for character in value if ord(character) > 127)
+    ascii_count = len(value) - non_ascii
+    return max(1, non_ascii + ceil(ascii_count / 4))
 
 
 class V020RunService:
@@ -55,23 +64,27 @@ class V020RunService:
             context["supplemental_requirements"] = supplemental_requirements
         input_summary = self._input_summary(context)
         serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        estimated_tokens = max(1, len(serialized) // 4)
-        if estimated_tokens > 80_000:
+        max_output_tokens = 10_000 if page == "analysis" else 4_000
+        estimated_source = serialized if mode == "local" else build_prompt(page, mode, context)
+        estimated_tokens = estimate_input_tokens(estimated_source)
+        if estimated_tokens + max_output_tokens > 32_000:
             raise V020RunError(
-                422, "当前资料范围超过单次模型上下文能力，请按资料文件或章节缩小范围后再运行。",
+                422, "当前输入与预留输出合计超过 32k 保守上下文上限，请按资料文件或章节缩小范围后再运行。",
             )
-        provider = model = credential_source = "不适用"
+        provider = model = credential_source = model_endpoint = "不适用"
         verification_status = "本地模式无需验证"
         if mode != "local":
             resolved, status = self._verified_model(session_id)
             provider, model = resolved.provider, resolved.model
+            model_endpoint = resolved.base_url
             credential_source, verification_status = resolved.credential_source, status.verification_status
-        prompt_version = PROMPT_VERSIONS[page].get(mode) if mode != "local" else f"{page}.local.v1"
+        prompt_version = PROMPT_VERSIONS[page].get(mode) if mode != "local" else f"{page}.local.v2"
         return {
             "page": page,
             "mode": mode,
             "provider": provider,
             "model": model,
+            "model_endpoint": model_endpoint,
             "credential_source": credential_source,
             "verification_status": verification_status,
             "input_summary": input_summary,
@@ -81,7 +94,7 @@ class V020RunService:
             "prompt_version": prompt_version,
             "skill_version": SKILL_VERSIONS[page] if mode == "skill" else None,
             "estimated_input_tokens": estimated_tokens,
-            "max_output_tokens": 10_000 if page == "analysis" else 4_000,
+            "max_output_tokens": max_output_tokens,
             "estimated_cost": {
                 "status": "unavailable", "reason": "当前模型未登记可审计的输入/输出单价，无法估算费用。",
             },
@@ -111,9 +124,19 @@ class V020RunService:
         if page == "cases":
             context["template"] = self._template(project_id, template_mode, template_mapping_id)
             context["supplemental_requirements"] = supplemental_requirements
+        fingerprint = input_fingerprint(page, mode, preflight, context)
+        reusable = self.runs.reusable_run(project_id, page, mode, fingerprint)
+        if reusable is not None:
+            self.runs.set_active_run(project_id, page, reusable["id"])
+            return {
+                "run": {**reusable, "reused": True},
+                "reused": True,
+                **self.runs.result_for_run(project_id, page, reusable),
+            }
         started = datetime.now(UTC)
         started_clock = perf_counter()
         run = self._running_record(project_id, page, mode, preflight, started)
+        run["input_fingerprint"] = fingerprint
         self.runs.create_run(run)
         try:
             raw, usage = self._produce(page, mode, context, preflight, session_id)
@@ -135,7 +158,8 @@ class V020RunService:
                 "result_summary": self._result_summary(page, normalized),
             })
             self.runs.update_run(run)
-            return {"run": run, **result}
+            self.runs.set_active_run(project_id, page, run["id"])
+            return {"run": run, "reused": False, **result}
         except V020RunError as error:
             run.update({
                 "status": "failed", "stage": "失败",
@@ -170,8 +194,10 @@ class V020RunService:
         result = {"item": item, "analysis_row": None}
         if disposition == "accepted":
             row = self._feedback_analysis_row(project_id, kind, item)
-            self.runs.save_analysis_rows(project_id, item["run_id"], [row])
-            result["analysis_row"] = row
+            existing = self.runs.equivalent_analysis_row(project_id, row)
+            if existing is None:
+                self.runs.save_analysis_rows(project_id, item["run_id"], [row])
+            result["analysis_row"] = existing or row
         return result
 
     def skip_review(self, project_id: int) -> dict:
@@ -231,19 +257,25 @@ class V020RunService:
             raise V020RunError(422, f"模型输出结构校验失败：{str(error)[:400]}") from error
         key = "rows" if page == "analysis" else "candidates" if page == "cases" else "suggestions"
         items = [item.model_dump(mode="json") for item in getattr(parsed, key)]
+        if page == "review":
+            run["role_reports"] = [item.model_dump(mode="json") for item in parsed.reports]
         if page == "analysis":
             source_by_id = {
                 f"input-{index}": fragment["source_reference"]
                 for index, fragment in enumerate(context["fragments"], start=1)
             }
             normalized = []
-            for item in items:
+            for index, item in enumerate(items, start=1):
                 source = source_by_id.get(item["source_reference_id"])
                 if source is None:
                     raise V020RunError(422, "模型输出引用了输入范围外的来源。")
                 normalized.append({
                     "id": f"analysis-{uuid4().hex}", "project_id": run["project_id"], "run_id": run["id"],
-                    **item, "source": f"{source['filename']} · {source['locator']}",
+                    **item, "total_index": index,
+                    "function_point": item["test_item"], "test_point": item["test_item"],
+                    "ai_reason": item["test_basis"], "information_gap": "", "status": "ready",
+                    "source": f"{source['filename']} · {source['locator']}",
+                    "test_source": f"{source['filename']} · {source['locator']}",
                     "source_reference": source, "selected": False, "origin": "analysis", "mode": run["mode"],
                 })
             return normalized
@@ -252,21 +284,37 @@ class V020RunService:
             if any(item["analysis_row_id"] not in allowed for item in items):
                 raise V020RunError(422, "模型输出包含未勾选或无法追溯的测试点。")
             row_by_id = {row["id"]: row for row in context["selected_rows"]}
-            for item in items:
+            for index, item in enumerate(items, start=1):
                 source = row_by_id[item["analysis_row_id"]]
                 item.update({"module": source["module"], "test_item": source["test_item"],
-                             "test_point": source["test_point"], "source": source["source"]})
+                             "test_point": source["test_item"], "source": source["source"],
+                             "test_type": source["test_type"], "software_version": context["software_version"],
+                             "attachment": item.get("attachment", ""),
+                             "external_case_number": f"TC-{index:04d}"})
         if page in {"suggestions", "review"}:
-            allowed_rows = {row["id"] for row in context["analysis_rows"]}
+            row_by_id = {row["id"]: row for row in context["analysis_rows"]}
+            allowed_rows = set(row_by_id)
             if any(item.get("related_analysis_row_id") not in allowed_rows | {None} for item in items):
                 raise V020RunError(422, "模型输出引用了输入范围外的需求分析结果。")
+            if any(
+                item.get("related_analysis_row_id")
+                and item["related_requirement_id"]
+                != row_by_id[item["related_analysis_row_id"]]["related_requirement_id"]
+                for item in items
+            ):
+                raise V020RunError(422, "模型输出的关联需求 ID 与引用的需求分析结果不一致。")
+            for item in items:
+                item["source_analysis_run_id"] = context["analysis_run_id"]
         if page == "review":
             allowed_roles = set(context["roles"])
             if any(item["role"] not in allowed_roles for item in items):
                 raise V020RunError(422, "模型输出包含未选择的审核身份。")
         return [{
             "id": f"{page}-{uuid4().hex}", "project_id": run["project_id"], "run_id": run["id"],
-            **item, **({"disposition": "pending"} if page in {"suggestions", "review"}
+            **item,
+            **({"content": item["test_item"], "ai_reason": item["test_basis"],
+                "test_source": "新增建议" if page == "suggestions" else "AI 角色审核",
+                "disposition": "pending"} if page in {"suggestions", "review"}
                        else {"included": True, "removed": False, "mode": run["mode"]}),
         } for item in items]
 
@@ -308,18 +356,19 @@ class V020RunService:
             "requirement_version_id": version.id, "supplemental_notes": state["supplemental_notes"],
         }
         if page == "analysis":
-            base["fragments"] = [fragment.model_dump(mode="json") for material in version.materials
-                                 for fragment in material.fragments]
+            base["fragments"], base["source_fragment_count"] = prepare_analysis_fragments(version.materials)
             if not base["fragments"]:
                 raise V020RunError(409, "当前资料没有可用于需求分析的文本片段。")
         else:
-            rows = self.runs.analysis_rows(project_id)
+            rows = self.runs.active_analysis_rows(project_id)
             if not rows:
                 raise V020RunError(409, "请先完成需求分析。")
             base["analysis_rows"] = rows
+            active_run = self.runs.latest_completed_run(project_id, "analysis")
+            base["analysis_run_id"] = active_run["id"] if active_run else ""
             base["selected_rows"] = [row for row in rows if row["selected"]]
             if page == "review":
-                base["roles"] = roles
+                base["roles"] = sorted(roles)
         return base
 
     @staticmethod
@@ -329,6 +378,8 @@ class V020RunService:
         filenames = {item["source_reference"]["filename"] for item in fragments}
         return {
             "file_count": len(filenames), "fragment_count": len(fragments),
+            "source_fragment_count": context.get("source_fragment_count", 0),
+            "context_chunk_count": len(fragments),
             "analysis_row_count": len(rows), "selected_row_count": len(context.get("selected_rows", [])),
             "requirement_version_id": context["requirement_version_id"],
             "roles": context.get("roles", []),
@@ -343,6 +394,7 @@ class V020RunService:
                 "local": "本地模拟（未调用 AI）",
             }[mode],
             "provider": preflight["provider"], "model": preflight["model"],
+            "model_endpoint": preflight["model_endpoint"],
             "credential_source": preflight["credential_source"],
             "input_summary": preflight["input_summary"], "prompt_version": preflight["prompt_version"],
             "skill_version": preflight["skill_version"],
@@ -405,13 +457,17 @@ class V020RunService:
 
     @staticmethod
     def _feedback_analysis_row(project_id: int, kind: str, item: dict) -> dict:
-        content = item["content"]
+        content = item["test_item"]
         return {
             "id": f"analysis-{uuid4().hex}", "project_id": project_id, "run_id": item["run_id"],
-            "module": "AI 建议", "function_point": content[:40], "test_item": content[:60],
-            "test_point": content, "source_reference_id": item["id"],
+            "module": item["module"], "function_point": content[:80], "test_item": content,
+            "test_point": content, "test_basis": item["test_basis"], "source_reference_id": item["id"],
             "source": "新增建议" if kind == "suggestion" else "AI 角色审核",
+            "test_source": "新增建议" if kind == "suggestion" else "AI 角色审核",
             "source_reference": {"reference_id": item["id"], "filename": "AI 建议", "locator": kind},
-            "ai_reason": item["ai_reason"], "information_gap": "", "status": "ready",
+            "ai_reason": item["test_basis"], "information_gap": "", "status": "ready",
+            "test_type": item["test_type"], "priority": item["priority"],
+            "related_requirement_id": item["related_requirement_id"],
+            "source_analysis_run_id": item["source_analysis_run_id"],
             "selected": False, "origin": kind, "mode": "derived",
         }

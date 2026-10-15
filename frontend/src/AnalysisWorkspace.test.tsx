@@ -20,11 +20,15 @@ test("需求分析大表只渲染当前页并按结果 ID 持久化跨页勾选"
   }), { status: 200, headers: { "Content-Type": "application/json" } }));
   render(<AnalysisWorkspace projectId={1} workspace={workspace} onChanged={vi.fn(async () => undefined)} />);
 
+  expect(screen.getAllByRole("columnheader").map((item) => item.textContent)).toEqual([
+    "纳入范围", "总序号", "模块", "测试项", "测试项依据", "测试项来源", "测试类型", "优先级", "关联需求ID",
+  ]);
+
   expect(screen.getAllByRole("checkbox")).toHaveLength(20);
   expect(screen.getByText("第 1 / 2 页")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "下一页" }));
   expect(screen.getAllByRole("checkbox")).toHaveLength(5);
-  await user.click(screen.getByLabelText("选择-测试点 21"));
+  await user.click(screen.getByLabelText("选择-测试项 21"));
 
   expect(fetchMock).toHaveBeenCalledWith("/api/v0.2/projects/1/analysis-selection", expect.objectContaining({
     method: "PATCH", body: JSON.stringify({ row_ids: ["row-21"], selected: true }),
@@ -40,6 +44,8 @@ function analysisRow(index: number): AnalysisRow {
     function_point: `功能点 ${index}`, test_item: `测试项 ${index}`, test_point: `测试点 ${index}`,
     source_reference_id: `input-${index}`, source: "requirements.md · 第1节", source_reference: {},
     ai_reason: "需求明确", information_gap: "", status: "ready", selected: false,
-    origin: "analysis", mode: "local",
+    origin: "analysis", mode: "local", total_index: index, test_basis: "需求明确",
+    test_source: "requirements.md · 第1节", test_type: "功能测试", priority: "P1",
+    related_requirement_id: `REQ-${index}`,
   };
 }

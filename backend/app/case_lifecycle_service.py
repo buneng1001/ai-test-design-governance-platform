@@ -2,21 +2,21 @@ import base64
 import csv
 import io
 import zipfile
+from pathlib import Path
 from xml.sax.saxutils import escape
 from xml.etree import ElementTree
 
 from app.case_review_schemas import CaseRevision
 from app.template_service import STANDARD_FIELD_NAMES, _xlsx_rows, _xlsx_sheets
 from app.template_schemas import TemplateMappingVersion, TemplateSheet
+from app.v020_contracts import DEFAULT_CASE_HEADERS
 
-DEFAULT_HEADERS = [
-    "用例编号", "测试用例标题", "优先级", "预置条件", "输入", "操作步骤", "预期结果", "测试类型",
-    "模块", "测试项", "测试结果", "测试记录", "测试前备注信息", "计划执行时间", "附件", "软件版本",
-]
+DEFAULT_HEADERS = DEFAULT_CASE_HEADERS
+DEFAULT_TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "data" / "templates" / "default-test-case-template.xlsx"
 
 
 def default_template(project_id: int) -> tuple[TemplateMappingVersion, str]:
-    """返回项目默认的 16 列 XLSX 模板，不依赖用户上传文件。"""
+    """返回项目默认的 12 列 XLSX 模板，不依赖用户上传文件。"""
     field_mapping = {
         header: STANDARD_FIELD_NAMES[header] for header in DEFAULT_HEADERS
     }
@@ -26,7 +26,7 @@ def default_template(project_id: int) -> tuple[TemplateMappingVersion, str]:
                  for index, header in enumerate(DEFAULT_HEADERS, start=1)],
         participates=True, field_mapping=field_mapping,
     )
-    content = _build_xlsx([("用例表", [DEFAULT_HEADERS])])
+    content = DEFAULT_TEMPLATE_PATH.read_bytes()
     mapping = TemplateMappingVersion(
         id=0, project_id=project_id, version=0, filename="默认测试用例模板.xlsx", format="xlsx",
         status="confirmed", sheets=[sheet], retained_sheet_names=[sheet.name], confirmed_by="系统默认模板",

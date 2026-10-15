@@ -16,18 +16,21 @@ export interface UsageAvailability {
 }
 export interface RunEvidence {
   id: string; project_id: number; page: RunPage; mode: RunMode; status: "running" | "completed" | "failed";
-  source_label: string; provider: string; model: string; credential_source: string;
+  source_label: string; provider: string; model: string; model_endpoint?: string; credential_source: string;
   input_summary: { file_count: number; fragment_count: number; analysis_row_count: number;
-    selected_row_count: number; requirement_version_id: number; roles: string[] };
+    source_fragment_count?: number; context_chunk_count?: number; selected_row_count: number;
+    requirement_version_id: number; roles: string[] };
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
   supplemental_notes: string; supplemental_requirements: string; template_filename: string | null;
   estimated_cost: CostAvailability; actual_usage: UsageAvailability | null; actual_cost: CostAvailability | null;
   stage: string; stage_events: Array<{ stage: string; status: string; detail: string }>;
   duration_ms: number | null; started_at: string; completed_at: string | null; error: string | null;
   next_step: string; result_summary: { count: number; label: string } | null;
+  reused?: boolean;
+  role_reports?: Array<{ role: string; summary: string; strengths: string[]; concerns: string[] }>;
 }
 export interface RunPreflight {
-  page: RunPage; mode: RunMode; provider: string; model: string; credential_source: string;
+  page: RunPage; mode: RunMode; provider: string; model: string; model_endpoint?: string; credential_source: string;
   verification_status: string; input_summary: RunEvidence["input_summary"]; supplemental_notes: string;
   supplemental_requirements: string; template_filename: string | null;
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
@@ -42,14 +45,20 @@ export interface AnalysisRow {
   test_point: string; source_reference_id: string; source: string; source_reference: Record<string, unknown>;
   ai_reason: string; information_gap: string; status: "ready" | "needs_information"; selected: boolean;
   origin: "analysis" | "suggestion" | "review"; mode: string;
+  total_index: number; test_basis: string; test_source: string; test_type: string;
+  priority: "P0" | "P1" | "P2" | "P3"; related_requirement_id: string;
 }
 export interface Suggestion {
-  id: string; project_id: number; run_id: string; suggestion_type: string; priority: string; content: string;
-  related_analysis_row_id: string | null; ai_reason: string; disposition: "pending" | "accepted" | "rejected";
+  id: string; project_id: number; run_id: string; suggestion_action: "add" | "remove" | "risk";
+  module: string; test_item: string; test_basis: string; test_source: string; test_type: string; priority: string;
+  related_requirement_id: string; content: string; related_analysis_row_id: string | null; ai_reason: string;
+  disposition: "pending" | "accepted" | "rejected";
 }
 export interface ReviewSuggestion {
-  id: string; project_id: number; run_id: string; role: string; finding_type: string; content: string;
-  related_analysis_row_id: string | null; ai_reason: string; disposition: "pending" | "accepted" | "rejected";
+  id: string; project_id: number; run_id: string; role: string; suggestion_action: "add" | "remove" | "risk";
+  module: string; test_item: string; test_basis: string; test_source: string; test_type: string; priority: string;
+  related_requirement_id: string; content: string; related_analysis_row_id: string | null; ai_reason: string;
+  disposition: "pending" | "accepted" | "rejected";
 }
 export interface GeneratedCase {
   id: string; project_id: number; run_id: string; generation_id?: string; analysis_row_id: string; title: string;
@@ -57,13 +66,16 @@ export interface GeneratedCase {
   steps: Array<{ order: number; action: string; expected: string }>;
   overall_expectation: string; evidence_requirements: string[]; design_basis: string[]; priority: "P0" | "P1" | "P2" | "P3";
   included: boolean; removed: boolean; mode: RunMode; module?: string; test_item?: string; test_point?: string;
+  external_case_number?: string; test_type?: string; attachment?: string; software_version?: string;
 }
 export interface ExportRecord { id: number; page: string; format: string; filename: string; record_id: string | null; created_at: string; }
 export interface WorkspaceState {
   project_id: number; supplemental_notes: string; requirement_version: RequirementVersion | null;
   parse_result?: RequirementPackage | null;
   template: { mode: "default" | "uploaded"; mapping_id: number | null };
+  active_run_ids?: Partial<Record<RunPage, string>>;
   analysis_rows: AnalysisRow[]; suggestions: Suggestion[]; review_suggestions: ReviewSuggestion[];
+  analysis_history_rows?: AnalysisRow[];
   cases: GeneratedCase[]; case_generations: CaseGenerationRecord[]; runs: RunEvidence[]; exports: ExportRecord[];
 }
 export interface CaseTemplateState { mode: "default" | "uploaded"; mapping: TemplateMappingVersion | null; }

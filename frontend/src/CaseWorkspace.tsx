@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { TemplateMappingPanel } from "./TemplateMappingPanel";
+import { CaseTemplatePreview } from "./CaseTemplatePreview";
 import { Pagination } from "./AnalysisWorkspace";
-import { downloadPageResult, editV020Case, getCaseTemplate, runCases, selectCaseTemplate,
+import { downloadDefaultCaseTemplate, downloadPageResult, editV020Case, getCaseTemplate, runCases, selectCaseTemplate,
   setV020CaseInclusion, setV020CaseRemoved } from "./v020_api";
 import type { CaseTemplateState, GeneratedCase, WorkspaceState } from "./v020_types";
 import { PageHeader } from "./UploadWorkspace";
@@ -24,14 +25,23 @@ export function CaseWorkspace({ projectId, workspace, onChanged }: {
     [projectId, workspace.template.mode, workspace.template.mapping_id]);
   const selectedRows = workspace.analysis_rows.filter((row) => row.selected);
   const generationIds = workspace.case_generations.map((item) => item.id);
-  const currentGeneration = generationIds.at(-1);
+  const currentGenerationRecord = workspace.active_run_ids
+    ? workspace.case_generations.find((item) => item.run_id === workspace.active_run_ids?.cases)
+    : workspace.case_generations.at(-1);
+  const currentGeneration = currentGenerationRecord?.id;
+  const selectedGeneration = generation === "current" ? currentGeneration : generation;
+  const selectedGenerationRecord = workspace.case_generations.find((item) => item.id === selectedGeneration);
   const cases = useMemo(() => workspace.cases.filter((item) => {
-    const selectedGeneration = generation === "current" ? currentGeneration : generation;
-    return (!selectedGeneration || item.generation_id === selectedGeneration) && matches(item, filters);
-  }), [workspace.cases, filters, generation, currentGeneration]);
+    const belongsToGeneration = generation === "current"
+      ? Boolean(selectedGeneration) && item.generation_id === selectedGeneration
+      : item.generation_id === selectedGeneration;
+    return belongsToGeneration && matches(item, filters);
+  }), [workspace.cases, filters, generation, selectedGeneration]);
   const pageCount = Math.max(1, Math.ceil(cases.length / pageSize)); const currentPage = Math.min(page, pageCount);
   const visible = cases.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const latestRun = [...workspace.runs].reverse().find((run) => run.page === "cases");
+  const latestRun = workspace.active_run_ids
+    ? workspace.runs.find((run) => run.id === workspace.active_run_ids?.cases)
+    : [...workspace.runs].reverse().find((run) => run.page === "cases");
   const chooseTemplate = async (mode: "default" | "uploaded", mappingId: number | null = null) => {
     try { setTemplate(await selectCaseTemplate(projectId, mode, mappingId)); await onChanged(); }
     catch (reason) { setError(message(reason)); }
@@ -47,6 +57,7 @@ export function CaseWorkspace({ projectId, workspace, onChanged }: {
         onChange={() => void chooseTemplate("default")} /> 使用默认测试用例模板</label>
       <label><input type="radio" name="case-template" checked={template?.mode === "uploaded"}
         onChange={() => setTemplate((current) => ({ mode: "uploaded", mapping: current?.mode === "uploaded" ? current.mapping : null }))} /> 上传测试用例模板</label>
+      <button type="button" className="secondary" onClick={() => void downloadDefaultCaseTemplate(projectId)}>下载默认测试模板</button>
       {template?.mapping && <details open><summary>查看模板字段解析与映射</summary>
         <p>{template.mapping.filename} · {template.mapping.status === "confirmed" ? "映射已确认" : "待确认"}</p>
         {template.mapping.sheets.map((sheet) => <p key={sheet.name}><strong>{sheet.name}</strong>：{Object.entries(sheet.field_mapping).map(([column, field]) => `${column}→${field}`).join("，") || "暂无映射"}</p>)}</details>}
@@ -62,26 +73,21 @@ export function CaseWorkspace({ projectId, workspace, onChanged }: {
         supplementalRequirements={requirements}
         beforeAction={<label className="field-stack"><strong>4. 补充生成要求（可选）</strong><textarea value={requirements}
           placeholder="例如：优先输出 P0/P1；每个边界场景独立成用例。" onChange={(event) => setRequirements(event.target.value)} /></label>}
-        onRun={async (mode, confirmed) => { await runCases(projectId, mode, confirmed, template?.mode ?? "default",
-          template?.mode === "uploaded" ? template.mapping?.id ?? null : null, requirements); await onChanged(); }} /></section>
+        onRun={async (mode, confirmed) => { const result = await runCases(projectId, mode, confirmed, template?.mode ?? "default",
+          template?.mode === "uploaded" ? template.mapping?.id ?? null : null, requirements); await onChanged(); return result; }} /></section>
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "cases", "xlsx")}>导出 Excel</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "cases", "json")}>导出 JSON</button></div>
     <section className="case-results"><header><div><h3>候选测试用例</h3><p>支持本次生成与历史记录、筛选分页、编辑、移除恢复和纳入选择。</p></div>
       <label>查看<select value={generation} onChange={(event) => { setGeneration(event.target.value); setPage(1); }}><option value="current">本次生成</option>
-        {generationIds.slice(0, -1).reverse().map((id) => { const record = workspace.case_generations.find((item) => item.id === id);
+        {generationIds.filter((id) => id !== currentGeneration).reverse().map((id) => { const record = workspace.case_generations.find((item) => item.id === id);
           const run = workspace.runs.find((item) => item.id === record?.run_id); return <option key={id} value={id}>
             {new Date(record?.created_at ?? "").toLocaleString()} · {modeLabel(run?.mode ?? "")} · {record?.scope_ids.length ?? 0} 项范围
           </option>; })}</select></label></header>
       <CaseFilters cases={workspace.cases} filters={filters} setFilters={(next) => { setFilters(next); setPage(1); }} />
-      <div className="data-table-wrap"><table><thead><tr><th>纳入</th><th>用例标题与详情</th><th>模块</th><th>测试项 / 测试点</th><th>优先级</th><th>生成方式</th><th>操作</th></tr></thead>
-        <tbody>{visible.map((item) => <tr key={item.id} className={item.removed ? "removed-row" : ""}><td><input type="checkbox" aria-label={`纳入-${item.title}`}
-          checked={item.included && !item.removed} disabled={item.removed}
-          onChange={(event) => void setV020CaseInclusion(projectId, item.id, event.target.checked).then(onChanged)} /></td>
-          <td><details><summary>{item.title}</summary><p>目标：{item.objective}</p><p>前置：{item.preconditions.join("；")}</p>
-            <ol>{item.steps.map((step) => <li key={step.order}>{step.action} → {step.expected}</li>)}</ol><p>整体预期：{item.overall_expectation}</p></details></td>
-          <td>{item.module}</td><td>{item.test_item}<br /><small>{item.test_point}</small></td><td>{item.priority}</td><td>{modeLabel(item.mode)}</td>
-          <td><div className="table-actions"><button type="button" className="text-button" onClick={() => setEditing(item)}>编辑</button>
-            <button type="button" className="text-button" onClick={() => void setV020CaseRemoved(projectId, item.id, !item.removed).then(onChanged)}>{item.removed ? "恢复" : "移除"}</button></div></td></tr>)}</tbody></table></div>
+      <CaseTemplatePreview mapping={selectedGenerationRecord?.template ?? template?.mapping} cases={visible}
+        onToggle={(item, included) => void setV020CaseInclusion(projectId, item.id, included).then(onChanged)}
+        onEdit={setEditing}
+        onRemove={(item) => void setV020CaseRemoved(projectId, item.id, !item.removed).then(onChanged)} />
       <Pagination total={workspace.cases.length} filtered={cases.length} page={currentPage} pageSize={pageSize} setPage={setPage}
         setPageSize={(value) => { setPageSize(value); setPage(1); }} />
       <p className="quality-hint">质量提示：{qualityHint(cases)}</p>

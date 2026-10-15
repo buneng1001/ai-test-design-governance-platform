@@ -3,9 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { downloadPageResult, runAnalysis, updateAnalysisSelection } from "./v020_api";
 import type { AnalysisRow, WorkspaceState } from "./v020_types";
 import { PageHeader } from "./UploadWorkspace";
+import { RequirementPointTable } from "./RequirementPointTable";
 import { WorkflowRunControls } from "./WorkflowRunControls";
 
-const emptyFilters = { keyword: "", module: "", functionPoint: "", testItem: "", source: "", selected: "", status: "" };
+const emptyFilters = { keyword: "", module: "", testItem: "", source: "", selected: "", status: "" };
 
 export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
   projectId: number; workspace: WorkspaceState; onChanged: () => Promise<void>;
@@ -24,7 +25,9 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
   const currentPage = Math.min(page, pageCount);
   const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const selectedCount = displayRows.filter((row) => row.selected).length;
-  const latestRun = [...workspace.runs].reverse().find((run) => run.page === "analysis");
+  const latestRun = workspace.active_run_ids
+    ? workspace.runs.find((run) => run.id === workspace.active_run_ids?.analysis)
+    : [...workspace.runs].reverse().find((run) => run.page === "analysis");
   const setFilter = (name: keyof typeof emptyFilters, value: string) => { setFilters({ ...filters, [name]: value }); setPage(1); };
   const updateRows = async (ids: string[], selected: boolean) => {
     if (!ids.length) return;
@@ -38,17 +41,18 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
     await updateRows(filtered.map((row) => row.id), true);
   };
   return <section className="workflow-page">
-    <PageHeader title="需求分析" subtitle="识别模块、功能点、测试项和测试点；你的勾选就是正式测试用例范围。" />
+    <PageHeader title="需求分析" subtitle="按宽泛模块整理可验证测试项，并记录依据、来源、测试类型和关联需求；你的勾选就是正式测试用例范围。" />
     <WorkflowRunControls projectId={projectId} page="analysis" actionLabel="开始需求分析" latestRun={latestRun}
-      disabled={!workspace.requirement_version} onRun={async (mode, confirmed) => { await runAnalysis(projectId, mode, confirmed); await onChanged(); }} />
+      disabled={!workspace.requirement_version} onRun={async (mode, confirmed) => {
+        const result = await runAnalysis(projectId, mode, confirmed); await onChanged(); return result;
+      }} />
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "analysis", "xlsx")}>下载需求分析表（Excel）</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "analysis", "json")}>下载 JSON</button>
       <strong>已选 {selectedCount} 项，这些内容将用于生成测试用例</strong></div>
     <RunComparison workspace={workspace} />
     <section className="filter-bar" aria-label="需求分析筛选">
-      <Filter label="关键词"><input value={filters.keyword} placeholder="功能点、测试项或测试点" onChange={(e) => setFilter("keyword", e.target.value)} /></Filter>
+      <Filter label="关键词"><input value={filters.keyword} placeholder="模块、测试项或关联需求 ID" onChange={(e) => setFilter("keyword", e.target.value)} /></Filter>
       <SelectFilter label="功能模块" value={filters.module} values={unique(workspace.analysis_rows, "module")} onChange={(v) => setFilter("module", v)} />
-      <SelectFilter label="功能点" value={filters.functionPoint} values={unique(workspace.analysis_rows, "function_point")} onChange={(v) => setFilter("functionPoint", v)} />
       <SelectFilter label="测试项" value={filters.testItem} values={unique(workspace.analysis_rows, "test_item")} onChange={(v) => setFilter("testItem", v)} />
       <SelectFilter label="来源" value={filters.source} values={unique(workspace.analysis_rows, "source")} onChange={(v) => setFilter("source", v)} />
       <Filter label="勾选状态"><select value={filters.selected} onChange={(e) => setFilter("selected", e.target.value)}><option value="">全部</option><option value="yes">已选</option><option value="no">未选</option></select></Filter>
@@ -57,11 +61,8 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
       <button type="button" className="secondary" onClick={() => void updateRows(visible.map((row) => row.id), true)}>全选本页</button>
       <button type="button" className="secondary" onClick={() => void selectFiltered()}>全选当前筛选结果（{filtered.length}）</button>
     </section>
-    <div className="data-table-wrap"><table><thead><tr><th>纳入范围</th><th>功能模块</th><th>功能点</th><th>测试项</th><th>测试点与依据</th><th>来源</th><th>状态</th></tr></thead>
-      <tbody>{visible.map((row) => <tr key={row.id}><td><input aria-label={`选择-${row.test_point}`} type="checkbox" checked={row.selected}
-        onChange={(event) => void updateRows([row.id], event.target.checked)} /></td><td>{row.module}</td><td>{row.function_point}</td>
-        <td>{row.test_item}</td><td><details><summary>{row.test_point}</summary><p>推导：{row.ai_reason}</p><p>信息缺口：{row.information_gap || "无"}</p></details></td>
-        <td>{row.source}</td><td>{row.status === "ready" ? "可使用" : "信息不足"}</td></tr>)}</tbody></table></div>
+    <RequirementPointTable rows={visible} selectable
+      onSelectionChange={(id, selected) => void updateRows([id], selected)} />
     <Pagination total={workspace.analysis_rows.length} filtered={filtered.length} page={currentPage} pageSize={pageSize}
       setPage={setPage} setPageSize={(value) => { setPageSize(value); setPage(1); }} />
     {error && <p role="alert" className="error">{error}</p>}
@@ -70,6 +71,7 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
 
 function RunComparison({ workspace }: { workspace: WorkspaceState }) {
   const runs = workspace.runs.filter((run) => run.page === "analysis" && run.status === "completed");
+  const historyRows = workspace.analysis_history_rows ?? workspace.analysis_rows;
   const direct = [...runs].reverse().find((run) => run.mode === "direct");
   const skill = [...runs].reverse().find((run) => run.mode === "skill");
   if (!direct && !skill) return null;
@@ -77,13 +79,13 @@ function RunComparison({ workspace }: { workspace: WorkspaceState }) {
     {[direct, skill].map((run, index) => <article key={run?.id ?? index}><strong>{run?.source_label ?? (index ? "Skill 工作流未运行" : "直接调用未运行")}</strong>
       {run && <><span>{run.result_summary?.count ?? 0} 条结果</span><span>耗时 {((run.duration_ms ?? 0) / 1000).toFixed(1)} 秒</span>
         <span>{run.actual_usage?.status === "available" ? `${run.actual_usage.total_tokens ?? "-"} Token` : "实际 Token 不可获得"}</span>
-        <ul>{workspace.analysis_rows.filter((row) => row.run_id === run.id).slice(0, 5).map((row) =>
-          <li key={row.id}>{row.module} / {row.function_point} / {row.test_point}</li>)}</ul></>}</article>)}</div></details>;
+        <ul>{historyRows.filter((row) => row.run_id === run.id).slice(0, 5).map((row) =>
+          <li key={row.id}>{row.module} / {row.test_item} / {row.test_type}</li>)}</ul></>}</article>)}</div></details>;
 }
 function matches(row: AnalysisRow, filters: typeof emptyFilters): boolean {
   const keyword = filters.keyword.trim().toLowerCase();
-  return (!keyword || [row.module, row.function_point, row.test_item, row.test_point].some((v) => v.toLowerCase().includes(keyword)))
-    && (!filters.module || row.module === filters.module) && (!filters.functionPoint || row.function_point === filters.functionPoint)
+  return (!keyword || [row.module, row.test_item, row.related_requirement_id].some((v) => v.toLowerCase().includes(keyword)))
+    && (!filters.module || row.module === filters.module)
     && (!filters.testItem || row.test_item === filters.testItem) && (!filters.source || row.source === filters.source)
     && (!filters.selected || row.selected === (filters.selected === "yes")) && (!filters.status || row.status === filters.status);
 }

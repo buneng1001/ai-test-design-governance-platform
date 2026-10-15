@@ -474,6 +474,15 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS v020_active_results (
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        page TEXT NOT NULL,
+        run_id TEXT REFERENCES v020_runs(id),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, page)
+    );
+    """,
 )
 
 

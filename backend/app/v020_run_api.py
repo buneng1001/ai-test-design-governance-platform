@@ -1,4 +1,4 @@
-from fastapi import APIRouter, FastAPI, Header, HTTPException, status
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Response, status
 
 from app.v020_run_repository import V020RunRepository
 from app.v020_run_schemas import (
@@ -25,9 +25,12 @@ def register_v020_run_routes(
 
     @router.post("/analysis-runs", status_code=status.HTTP_201_CREATED)
     def analysis_run(
-        project_id: int, data: RunInput, x_session_id: str | None = Header(default=None),
+        project_id: int, data: RunInput, response: Response, x_session_id: str | None = Header(default=None),
     ) -> dict:
-        return _call(service.run, project_id, "analysis", data.mode, data.confirmed, x_session_id)
+        result = _call(service.run, project_id, "analysis", data.mode, data.confirmed, x_session_id)
+        if result.get("reused"):
+            response.status_code = status.HTTP_200_OK
+        return result
 
     @router.patch("/analysis-selection")
     def update_selection(project_id: int, data: SelectionInput) -> dict:
@@ -39,9 +42,12 @@ def register_v020_run_routes(
 
     @router.post("/suggestion-runs", status_code=status.HTTP_201_CREATED)
     def suggestion_run(
-        project_id: int, data: RunInput, x_session_id: str | None = Header(default=None),
+        project_id: int, data: RunInput, response: Response, x_session_id: str | None = Header(default=None),
     ) -> dict:
-        return _call(service.run, project_id, "suggestions", data.mode, data.confirmed, x_session_id)
+        result = _call(service.run, project_id, "suggestions", data.mode, data.confirmed, x_session_id)
+        if result.get("reused"):
+            response.status_code = status.HTTP_200_OK
+        return result
 
     @router.patch("/suggestions/{suggestion_id}")
     def dispose_suggestion(project_id: int, suggestion_id: str, data: DispositionInput) -> dict:
@@ -49,11 +55,14 @@ def register_v020_run_routes(
 
     @router.post("/review-runs", status_code=status.HTTP_201_CREATED)
     def review_run(
-        project_id: int, data: ReviewRunInput, x_session_id: str | None = Header(default=None),
+        project_id: int, data: ReviewRunInput, response: Response, x_session_id: str | None = Header(default=None),
     ) -> dict:
-        return _call(
+        result = _call(
             service.run, project_id, "review", data.mode, data.confirmed, x_session_id, roles=data.roles,
         )
+        if result.get("reused"):
+            response.status_code = status.HTTP_200_OK
+        return result
 
     @router.patch("/review-suggestions/{suggestion_id}")
     def dispose_review_suggestion(project_id: int, suggestion_id: str, data: DispositionInput) -> dict:
@@ -65,13 +74,16 @@ def register_v020_run_routes(
 
     @router.post("/case-runs", status_code=status.HTTP_201_CREATED)
     def case_run(
-        project_id: int, data: CaseRunInput, x_session_id: str | None = Header(default=None),
+        project_id: int, data: CaseRunInput, response: Response, x_session_id: str | None = Header(default=None),
     ) -> dict:
-        return _call(
+        result = _call(
             service.run, project_id, "cases", data.mode, data.confirmed, x_session_id,
             template_mode=data.template_mode, template_mapping_id=data.template_mapping_id,
             supplemental_requirements=data.supplemental_requirements,
         )
+        if result.get("reused"):
+            response.status_code = status.HTTP_200_OK
+        return result
 
     @router.patch("/cases/{case_id}")
     def edit_case(project_id: int, case_id: str, data: CaseEditInput) -> dict:

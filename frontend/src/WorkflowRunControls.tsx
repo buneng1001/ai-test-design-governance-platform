@@ -14,7 +14,7 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
   projectId: number; page: RunPage; actionLabel: string; latestRun?: RunEvidence; roles?: string[]; disabled?: boolean;
   supplementalRequirements?: string; templateMode?: "default" | "uploaded"; templateMappingId?: number | null;
   beforeAction?: React.ReactNode;
-  onRun: (mode: RunMode, confirmed: boolean) => Promise<void>;
+  onRun: (mode: RunMode, confirmed: boolean) => Promise<{ reused?: boolean } | void>;
 }) {
   const [mode, setMode] = useState<RunMode>("local");
   const [preflight, setPreflight] = useState<RunPreflight | null>(null);
@@ -22,6 +22,7 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
   const [runningSince, setRunningSince] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState("");
+  const [reuseNotice, setReuseNotice] = useState(false);
   useEffect(() => {
     if (runningSince === null) return;
     const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - runningSince) / 1000)), 1000);
@@ -29,19 +30,21 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
   }, [runningSince]);
 
   const prepare = async () => {
-    setBusy(true); setError(""); setPreflight(null);
+    setBusy(true); setError(""); setPreflight(null); setReuseNotice(false);
     try {
       const result = await getRunPreflight(projectId, page, mode, roles, {
         templateMode, templateMappingId, supplementalRequirements,
       });
-      if (mode === "local") { setElapsedSeconds(0); setRunningSince(Date.now()); await onRun(mode, true); }
+      if (mode === "local") { setElapsedSeconds(0); setRunningSince(Date.now());
+        const result = await onRun(mode, true); setReuseNotice(Boolean(result?.reused)); }
       else setPreflight(result);
     } catch (reason) { setError(message(reason)); }
     finally { setBusy(false); if (mode === "local") setRunningSince(null); }
   };
   const confirm = async () => {
-    setBusy(true); setError("");
-    try { setElapsedSeconds(0); setRunningSince(Date.now()); await onRun(mode, true); setPreflight(null); }
+    setBusy(true); setError(""); setReuseNotice(false);
+    try { setElapsedSeconds(0); setRunningSince(Date.now());
+      const result = await onRun(mode, true); setReuseNotice(Boolean(result?.reused)); setPreflight(null); }
     catch (reason) { setError(message(reason)); }
     finally { setBusy(false); setRunningSince(null); }
   };
@@ -74,6 +77,7 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
       <p>当前阶段：准备输入 / 调用模型 · 已用时间：{elapsedSeconds} 秒</p><p>正在等待本次运行返回；预计剩余时间不可获得，不显示虚构倒计时。</p></section>
       : latestRun ? <RunEvidenceCard run={latestRun} /> : <section className="run-evidence pending" aria-label="运行状态"><header><strong>运行状态：尚未执行</strong></header>
         <p>选择运行方式后点击“{actionLabel}”。</p></section>}
+    {reuseNotice && <p className="notice"><strong>已复用已有结果：</strong>输入与配置未变化，未再次调用模型，也未新增结果。</p>}
     {error && <p role="alert" className="error">{error}</p>}
   </section>;
 }
@@ -95,7 +99,7 @@ export function RunEvidenceCard({ run }: { run: RunEvidence }) {
 
 function inputSummary(value: Pick<RunPreflight, "input_summary">): string {
   const summary = value.input_summary;
-  if (summary.fragment_count) return `${summary.file_count} 份资料、${summary.fragment_count} 个来源片段`;
+  if (summary.context_chunk_count || summary.fragment_count) return `${summary.file_count} 份资料、${summary.source_fragment_count ?? summary.fragment_count} 个来源片段，整理为 ${summary.context_chunk_count ?? summary.fragment_count} 个模型上下文块`;
   return `${summary.analysis_row_count} 条分析结果、其中已选 ${summary.selected_row_count} 条${summary.roles.length ? `、角色 ${summary.roles.length} 个` : ""}`;
 }
 function costText(cost: { status: string; reason?: string; amount?: number; currency?: string }): string {

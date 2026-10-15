@@ -1,12 +1,27 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+
+from app.v020_contracts import TEST_TYPES
 
 
 RunMode = Literal["direct", "skill", "local"]
 RunPage = Literal["analysis", "suggestions", "review", "cases"]
 ReviewRole = Literal["product_manager", "project_manager", "test_manager"]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+def _recognized_test_type(value: str) -> str:
+    if value not in TEST_TYPES:
+        raise ValueError("测试类型必须使用平台认可的常见测试分类")
+    return value
+
+
+TestType = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=2000),
+    AfterValidator(_recognized_test_type),
+]
 
 
 class RunPreflightInput(BaseModel):
@@ -75,14 +90,12 @@ class TemplateSelectionInput(BaseModel):
 class AnalysisOutputRow(BaseModel):
     model_config = ConfigDict(extra="forbid")
     module: NonEmptyText
-    function_point: NonEmptyText
     test_item: NonEmptyText
-    test_point: NonEmptyText
+    test_basis: NonEmptyText
     source_reference_id: NonEmptyText
-    ai_reason: NonEmptyText
-    information_gap: str = ""
-    status: Literal["ready", "needs_information"] = "ready"
-
+    test_type: TestType
+    priority: Literal["P0", "P1", "P2", "P3"]
+    related_requirement_id: NonEmptyText
 
 class AnalysisModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -91,12 +104,14 @@ class AnalysisModelOutput(BaseModel):
 
 class SuggestionOutputItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    suggestion_type: Literal["function", "test_item", "test_point"]
-    priority: Literal["high", "medium", "low"]
-    content: NonEmptyText
+    suggestion_action: Literal["add", "remove", "risk"] = "add"
+    module: NonEmptyText
+    test_item: NonEmptyText
+    test_basis: NonEmptyText
+    test_type: TestType
+    priority: Literal["P0", "P1", "P2", "P3"]
+    related_requirement_id: NonEmptyText
     related_analysis_row_id: str | None = None
-    ai_reason: NonEmptyText
-
 
 class SuggestionModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -106,14 +121,26 @@ class SuggestionModelOutput(BaseModel):
 class ReviewOutputItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     role: ReviewRole
-    finding_type: Literal["risk", "omission", "conflict", "change"]
-    content: NonEmptyText
+    suggestion_action: Literal["add", "remove", "risk"]
+    module: NonEmptyText
+    test_item: NonEmptyText
+    test_basis: NonEmptyText
+    test_type: TestType
+    priority: Literal["P0", "P1", "P2", "P3"]
+    related_requirement_id: NonEmptyText
     related_analysis_row_id: str | None = None
-    ai_reason: NonEmptyText
+
+class ReviewRoleReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: ReviewRole
+    summary: NonEmptyText
+    strengths: list[NonEmptyText] = Field(default_factory=list, max_length=20)
+    concerns: list[NonEmptyText] = Field(default_factory=list, max_length=20)
 
 
 class ReviewModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    reports: list[ReviewRoleReport] = Field(min_length=1, max_length=3)
     suggestions: list[ReviewOutputItem] = Field(min_length=1, max_length=100)
 
 
@@ -126,9 +153,10 @@ class CaseOutputItem(BaseModel):
     test_input: NonEmptyText
     steps: list[dict] = Field(min_length=1, max_length=50)
     overall_expectation: NonEmptyText
-    evidence_requirements: list[NonEmptyText] = Field(min_length=1, max_length=20)
+    evidence_requirements: list[NonEmptyText] = Field(default_factory=list, max_length=20)
     design_basis: list[NonEmptyText] = Field(min_length=1, max_length=10)
     priority: Literal["P0", "P1", "P2", "P3"]
+    attachment: str = ""
 
 
 class CaseModelOutput(BaseModel):

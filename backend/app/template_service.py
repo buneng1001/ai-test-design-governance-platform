@@ -158,7 +158,7 @@ def _xlsx_sheets(workbook: zipfile.ZipFile) -> list[tuple[str, str]]:
     relationship_key = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
     for item in root.findall("main:sheets/main:sheet", NS):
         target = rels[item.attrib[relationship_key]].lstrip("/")
-        result.append((item.attrib["name"], "xl/" + target))
+        result.append((item.attrib["name"], target if target.startswith("xl/") else "xl/" + target))
     return result
 
 

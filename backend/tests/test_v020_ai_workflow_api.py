@@ -7,7 +7,10 @@ from fastapi.testclient import TestClient
 
 from app.ai_service import ModelResponse
 from app.main import create_app
+from app.template_service import inspect_template
+from app.v020_contracts import normalize_analysis_row
 from app.v020_export import _case_xlsx
+from app.v020_run_service import estimate_input_tokens
 
 
 def _project_and_material(client: TestClient) -> int:
@@ -36,7 +39,8 @@ def test_local_analysis_persists_run_evidence_and_cross_page_selection(client: T
     assert preflight.status_code == 200
     estimate = preflight.json()
     assert estimate["input_summary"]["file_count"] == 1
-    assert estimate["input_summary"]["fragment_count"] == 3
+    assert estimate["input_summary"]["source_fragment_count"] == 3
+    assert estimate["input_summary"]["context_chunk_count"] == 1
     assert estimate["estimated_input_tokens"] > 0
     assert estimate["estimated_cost"]["status"] == "unavailable"
 
@@ -64,6 +68,26 @@ def test_local_analysis_persists_run_evidence_and_cross_page_selection(client: T
     assert next(item for item in restored["analysis_rows"] if item["id"] == selected_id)["selected"] is True
 
 
+def test_same_input_reuses_completed_analysis_without_adding_rows(client: TestClient) -> None:
+    project_id = _project_and_material(client)
+    first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
+        "mode": "local", "confirmed": True,
+    })
+    second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
+        "mode": "local", "confirmed": True,
+    })
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["reused"] is True
+    assert second.json()["run"]["id"] == first.json()["run"]["id"]
+    assert [item["id"] for item in second.json()["rows"]] == [item["id"] for item in first.json()["rows"]]
+    workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+    assert len(workspace["runs"]) == 1
+    assert "reused" not in workspace["runs"][0]
+    assert len(workspace["analysis_rows"]) == len(first.json()["rows"])
+
+
 def test_suggestions_and_role_review_flow_back_unselected(client: TestClient) -> None:
     project_id = _project_and_material(client)
     analysis = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
@@ -85,12 +109,15 @@ def test_suggestions_and_role_review_flow_back_unselected(client: TestClient) ->
     assert accepted.status_code == 200
     assert accepted.json()["analysis_row"]["selected"] is False
     assert accepted.json()["analysis_row"]["origin"] == "suggestion"
+    active_rows = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()["analysis_rows"]
+    assert [row["total_index"] for row in active_rows] == list(range(1, len(active_rows) + 1))
 
     reviewed = client.post(f"/api/v0.2/projects/{project_id}/review-runs", json={
         "mode": "local", "confirmed": True, "roles": ["product_manager", "test_manager"],
     })
     assert reviewed.status_code == 201
     assert {item["role"] for item in reviewed.json()["suggestions"]} == {"product_manager", "test_manager"}
+    assert {item["role"] for item in reviewed.json()["run"]["role_reports"]} == {"product_manager", "test_manager"}
     review_item = reviewed.json()["suggestions"][0]
     accepted_review = client.patch(
         f"/api/v0.2/projects/{project_id}/review-suggestions/{review_item['id']}",
@@ -99,7 +126,127 @@ def test_suggestions_and_role_review_flow_back_unselected(client: TestClient) ->
     assert accepted_review.status_code == 200
     assert accepted_review.json()["analysis_row"]["selected"] is False
     assert accepted_review.json()["analysis_row"]["origin"] == "review"
+    review_export = client.get(f"/api/v0.2/projects/{project_id}/exports/review?format=json").json()
+    assert {item["role"] for item in review_export["reports"]} == {"product_manager", "test_manager"}
     assert client.post(f"/api/v0.2/projects/{project_id}/review-skip").status_code == 200
+
+
+def test_legacy_analysis_row_is_normalized_for_unified_table_and_case_generation() -> None:
+    normalized = normalize_analysis_row({
+        "id": "legacy-row", "test_item": "历史测试项", "source": "legacy.md · 第 1 行",
+        "source_reference_id": "legacy-source", "selected": True,
+    }, 7)
+
+    assert normalized["total_index"] == 7
+    assert normalized["test_basis"] == "历史结果未单列测试项依据"
+    assert normalized["test_source"] == "legacy.md · 第 1 行"
+    assert normalized["test_type"] == "功能测试"
+    assert normalized["priority"] == "P2"
+    assert normalized["related_requirement_id"] == "legacy-source"
+
+
+def test_token_estimate_is_conservative_for_chinese_materials() -> None:
+    assert estimate_input_tokens("中" * 1000) >= 1000
+    assert estimate_input_tokens("a" * 1000) == 250
+
+
+def test_later_stages_reuse_same_input_instead_of_stacking(client: TestClient) -> None:
+    project_id = _project_and_material(client)
+    rows = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
+        "mode": "local", "confirmed": True,
+    }).json()["rows"]
+    client.patch(f"/api/v0.2/projects/{project_id}/analysis-selection", json={
+        "row_ids": [rows[0]["id"]], "selected": True,
+    })
+
+    endpoints = [
+        ("suggestion-runs", {"mode": "local", "confirmed": True}),
+        ("review-runs", {"mode": "local", "confirmed": True, "roles": ["test_manager"]}),
+        ("case-runs", {"mode": "local", "confirmed": True, "template_mode": "default",
+                       "supplemental_requirements": ""}),
+    ]
+    for endpoint, payload in endpoints:
+        first = client.post(f"/api/v0.2/projects/{project_id}/{endpoint}", json=payload)
+        second = client.post(f"/api/v0.2/projects/{project_id}/{endpoint}", json=payload)
+        assert first.status_code == 201, first.text
+        assert second.status_code == 200, second.text
+        assert second.json()["reused"] is True
+        assert second.json()["run"]["id"] == first.json()["run"]["id"]
+
+    workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+    assert len([run for run in workspace["runs"] if run["page"] == "suggestions"]) == 1
+    assert len([run for run in workspace["runs"] if run["page"] == "review"]) == 1
+    assert len([run for run in workspace["runs"] if run["page"] == "cases"]) == 1
+    assert len(workspace["suggestions"]) == 1
+    assert len(workspace["review_suggestions"]) == 1
+    assert len(workspace["case_generations"]) == 1
+
+
+def test_reusing_older_case_input_switches_current_result_without_new_generation(client: TestClient) -> None:
+    project_id = _project_and_material(client)
+    rows = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
+        "mode": "local", "confirmed": True,
+    }).json()["rows"]
+    client.patch(f"/api/v0.2/projects/{project_id}/analysis-selection", json={
+        "row_ids": [rows[0]["id"]], "selected": True,
+    })
+    first = client.post(f"/api/v0.2/projects/{project_id}/case-runs", json={
+        "mode": "local", "confirmed": True, "template_mode": "default",
+        "supplemental_requirements": "只生成核心路径",
+    })
+    second = client.post(f"/api/v0.2/projects/{project_id}/case-runs", json={
+        "mode": "local", "confirmed": True, "template_mode": "default",
+        "supplemental_requirements": "补充异常路径",
+    })
+    reused = client.post(f"/api/v0.2/projects/{project_id}/case-runs", json={
+        "mode": "local", "confirmed": True, "template_mode": "default",
+        "supplemental_requirements": "只生成核心路径",
+    })
+
+    assert first.status_code == 201 and second.status_code == 201
+    assert reused.status_code == 200 and reused.json()["reused"] is True
+    workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+    assert workspace["active_run_ids"]["cases"] == first.json()["run"]["id"]
+    assert len(workspace["case_generations"]) == 2
+    exported = client.get(f"/api/v0.2/projects/{project_id}/exports/cases?format=json").json()
+    assert exported["run_id"] == first.json()["run"]["id"]
+
+
+def test_new_requirement_version_does_not_mix_old_accepted_suggestions(client: TestClient) -> None:
+    project_id = _project_and_material(client)
+    analysis = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
+        "mode": "local", "confirmed": True,
+    }).json()
+    client.patch(f"/api/v0.2/projects/{project_id}/analysis-selection", json={
+        "row_ids": [analysis["rows"][0]["id"]], "selected": True,
+    })
+    suggestion = client.post(f"/api/v0.2/projects/{project_id}/suggestion-runs", json={
+        "mode": "local", "confirmed": True,
+    }).json()["suggestions"][0]
+    client.patch(f"/api/v0.2/projects/{project_id}/suggestions/{suggestion['id']}", json={
+        "disposition": "accepted",
+    })
+    assert any(row["origin"] == "suggestion" for row in client.get(
+        f"/api/v0.2/projects/{project_id}/workspace"
+    ).json()["analysis_rows"])
+
+    upload = client.post(f"/api/v0.2/projects/{project_id}/materials", json={
+        "supplemental_notes": "改为关注升级流程。",
+        "files": [{
+            "filename": "upgrade.md", "media_type": "text/markdown",
+            "content_base64": base64.b64encode("# 升级\n系统必须校验升级包签名。".encode()).decode(),
+        }],
+    })
+    assert upload.status_code == 201
+    new_analysis = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
+        "mode": "local", "confirmed": True,
+    })
+    assert new_analysis.status_code == 201
+    restored = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+    assert all(row["run_id"] == new_analysis.json()["run"]["id"] for row in restored["analysis_rows"])
+    assert any(row["origin"] == "suggestion" for row in restored["analysis_history_rows"])
+    assert restored["suggestions"] == []
+    assert "suggestions" not in restored["active_run_ids"]
 
 
 def test_case_generation_uses_only_selected_rows_and_supports_editing(client: TestClient) -> None:
@@ -129,6 +276,10 @@ def test_case_generation_uses_only_selected_rows_and_supports_editing(client: Te
     assert generated.status_code == 201, generated.text
     body = generated.json()
     assert body["template"]["filename"] == "默认测试用例模板.xlsx"
+    assert [item["name"] for item in body["template"]["sheets"][0]["columns"]] == [
+        "用例编号", "测试用例标题", "优先级", "预置条件", "输入", "操作步骤", "预期结果",
+        "测试类型", "模块", "测试项", "附件", "软件版本",
+    ]
     assert body["scope_ids"] == selected_ids
     assert {item["analysis_row_id"] for item in body["cases"]} == set(selected_ids)
 
@@ -151,9 +302,10 @@ def test_case_generation_uses_only_selected_rows_and_supports_editing(client: Te
     exported_xlsx = client.get(f"/api/v0.2/projects/{project_id}/exports/cases?format=xlsx")
     assert exported_xlsx.status_code == 200
     with zipfile.ZipFile(io.BytesIO(exported_xlsx.content)) as workbook:
-        assert "xl/worksheets/sheet1.xml" in workbook.namelist()
         sheet_xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
         assert "人工编辑后的标题" not in sheet_xml
+        assert "v0.2.0" in sheet_xml
+        assert any(test_type in sheet_xml for test_type in ("功能测试", "异常测试"))
     assert len(client.get(f"/api/v0.2/projects/{project_id}/workspace").json()["exports"]) == 2
     exact_export = client.get(
         f"/api/v0.2/projects/{project_id}/exports/cases?format=json&run_id={body['run']['id']}"
@@ -162,6 +314,22 @@ def test_case_generation_uses_only_selected_rows_and_supports_editing(client: Te
     restored = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
     assert restored["case_generations"][0]["scope_ids"] == selected_ids
     assert restored["exports"][-1]["record_id"] == body["run"]["id"]
+
+    downloaded = client.get(f"/api/v0.2/projects/{project_id}/case-template/download")
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    with zipfile.ZipFile(io.BytesIO(downloaded.content)) as workbook:
+        sheet_xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    for header in body["template"]["sheets"][0]["field_mapping"]:
+        assert header in sheet_xml
+    format_name, parsed_sheets, diagnostics = inspect_template(
+        "默认测试用例模板.xlsx", base64.b64encode(downloaded.content).decode("ascii"),
+    )
+    assert format_name == "xlsx"
+    assert diagnostics == []
+    assert [column.name for column in parsed_sheets[0].columns] == [
+        item["name"] for item in body["template"]["sheets"][0]["columns"]
+    ]
 
 
 def test_real_mode_is_blocked_until_existing_model_config_is_verified(client: TestClient) -> None:
@@ -180,9 +348,9 @@ class CaptureModelService:
     def complete(self, request) -> ModelResponse:
         self.prompts.append(request.prompt_override)
         return ModelResponse(raw_output={"rows": [{
-            "module": "状态管理", "function_point": "状态切换", "test_item": "时延验证",
-            "test_point": "验证状态切换耗时", "source_reference_id": "input-1",
-            "ai_reason": "约束包含明确时限", "information_gap": "", "status": "ready",
+            "module": "状态管理", "test_item": "验证状态切换耗时",
+            "test_basis": "约束包含明确时限", "source_reference_id": "input-1",
+            "test_type": "性能测试", "priority": "P1", "related_requirement_id": "REQ-001",
         }]}, input_tokens=120, output_tokens=80, total_tokens=200)
 
 
@@ -217,12 +385,46 @@ def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path
     assert direct.status_code == 201, direct.text
     assert skill.status_code == 201, skill.text
     assert direct.json()["run"]["input_summary"] == skill.json()["run"]["input_summary"]
-    assert direct.json()["run"]["prompt_version"] == "requirement-analysis.direct.v1"
-    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v1"
+    assert direct.json()["run"]["prompt_version"] == "requirement-analysis.direct.v2"
+    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v2"
     assert skill.json()["run"]["skill_version"] == "ai-test-design-requirement-analysis.v1"
     assert "Step 00" not in service.prompts[0]
     assert "Step 00" in service.prompts[1] and "Step 08" in service.prompts[1]
     assert skill.json()["run"]["actual_usage"]["total_tokens"] == 200
+
+
+def test_real_model_is_not_called_twice_for_identical_completed_input(tmp_path: Path, monkeypatch) -> None:
+    service = CaptureModelService()
+    application = create_app(
+        tmp_path / "v020-ai-reuse.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_and_material(client)
+        headers = {"X-Session-ID": "v020-ai-reuse"}
+        config = {
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        }
+        assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
+        first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+        second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["reused"] is True
+    assert len(service.prompts) == 1
 
 
 def test_case_xlsx_respects_confirmed_template_field_mapping() -> None:

@@ -1,3 +1,4 @@
+import base64
 from typing import Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, status
@@ -98,9 +99,11 @@ def register_v020_routes(
                 "mode": state["template_mode"],
                 "mapping_id": state["template_mapping_id"],
             },
-            "analysis_rows": workspace.list_payloads("v020_analysis_rows", project_id),
-            "suggestions": workspace.list_payloads("v020_suggestions", project_id),
-            "review_suggestions": workspace.list_payloads("v020_review_suggestions", project_id),
+            "active_run_ids": workspace.active_run_ids(project_id),
+            "analysis_rows": workspace.active_payloads("v020_analysis_rows", project_id, "analysis"),
+            "analysis_history_rows": workspace.list_payloads("v020_analysis_rows", project_id),
+            "suggestions": workspace.active_payloads("v020_suggestions", project_id, "suggestions"),
+            "review_suggestions": workspace.active_payloads("v020_review_suggestions", project_id, "review"),
             "cases": workspace.list_payloads("v020_cases", project_id),
             "case_generations": workspace.case_generations(project_id),
             "runs": workspace.list_payloads("v020_runs", project_id),
@@ -142,6 +145,17 @@ def register_v020_routes(
             mapping, _ = default_template(project_id)
         workspace.save_template(project_id, data.mode, data.mapping_id if data.mode == "uploaded" else None)
         return {"mode": data.mode, "mapping": mapping.model_dump(mode="json")}
+
+    @router.get("/projects/{project_id}/case-template/download")
+    def download_default_case_template(project_id: int) -> Response:
+        if projects.get(project_id) is None:
+            raise HTTPException(status_code=404, detail="测试设计项目不存在")
+        _, content_base64 = default_template(project_id)
+        return Response(
+            content=base64.b64decode(content_base64),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="default-test-case-template.xlsx"'},
+        )
 
     @router.get("/projects/{project_id}/exports/{page}")
     def export_page(

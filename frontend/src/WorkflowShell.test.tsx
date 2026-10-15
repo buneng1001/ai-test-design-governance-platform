@@ -34,7 +34,8 @@ test("需求分析页显示三种模式、完整筛选和分页条数", async ()
   expect(screen.getByLabelText("真实模型（Skill 工作流）")).toBeInTheDocument();
   expect(screen.getByLabelText("本地模式（不调用 AI）")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "需求分析筛选" })).toHaveTextContent("功能模块");
-  expect(screen.getByRole("region", { name: "需求分析筛选" })).toHaveTextContent("功能点");
+  expect(screen.getByRole("region", { name: "需求分析筛选" })).toHaveTextContent("测试项");
+  expect(screen.getByRole("region", { name: "需求分析筛选" })).toHaveTextContent("来源");
   expect(screen.getByRole("region", { name: "需求分析筛选" })).toHaveTextContent("分析状态");
   expect(screen.getByRole("combobox", { name: /每页/ })).toHaveTextContent("2050100");
 });

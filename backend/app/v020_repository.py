@@ -5,6 +5,9 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.v020_contracts import normalize_analysis_row
+from app.v020_run_repository import active_completed_run_record
+
 
 class V020Repository:
     """v0.2 正式工作台的页面级持久化，不在浏览器保存业务状态。"""
@@ -57,6 +60,14 @@ class V020Repository:
                     values["template_mode"], values["template_mapping_id"], self.now(),
                 ),
             )
+            if (active_requirement_version_id is not None
+                    and active_requirement_version_id != current["active_requirement_version_id"]):
+                for page in ("analysis", "suggestions", "review", "cases"):
+                    connection.execute(
+                        "INSERT INTO v020_active_results(project_id, page, run_id, updated_at) VALUES (?, ?, NULL, ?) "
+                        "ON CONFLICT(project_id, page) DO UPDATE SET run_id=NULL, updated_at=excluded.updated_at",
+                        (project_id, page, self.now()),
+                    )
 
     def workspace_row(self, project_id: int) -> dict:
         with self.connect() as connection:
@@ -124,7 +135,49 @@ class V020Repository:
                 f"SELECT payload_json FROM {table} WHERE project_id = ? ORDER BY created_at", (project_id,)
             ).fetchall()
         payloads = [json.loads(row["payload_json"]) for row in rows]
-        return [item for item in payloads if run_id is None or item.get("run_id") == run_id]
+        run_key = "id" if table == "v020_runs" else "run_id"
+        result = [item for item in payloads if run_id is None or item.get(run_key) == run_id]
+        if table == "v020_analysis_rows":
+            return [normalize_analysis_row(item, index) for index, item in enumerate(result, start=1)]
+        return result
+
+    def active_payloads(self, table: str, project_id: int, page: str) -> list[dict]:
+        run_id = self._latest_run_id(project_id, page)
+        if run_id is None:
+            return []
+        active = self.list_payloads(table, project_id, run_id)
+        if table != "v020_analysis_rows":
+            return active
+        derived = [
+            item for item in self.list_payloads(table, project_id)
+            if item.get("origin") in {"suggestion", "review"}
+            and item.get("source_analysis_run_id") == run_id
+        ]
+        return [normalize_analysis_row(item, index) for index, item in enumerate([*active, *derived], start=1)]
+
+    def active_run_ids(self, project_id: int) -> dict[str, str]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT page, run_id FROM v020_active_results WHERE project_id=?", (project_id,),
+            ).fetchall()
+        return {row["page"]: row["run_id"] for row in rows if row["run_id"] is not None}
+
+    def latest_completed_run(self, project_id: int, page: str) -> dict | None:
+        run_id = self._latest_run_id(project_id, page)
+        if run_id is None:
+            return None
+        return next((item for item in self.list_payloads("v020_runs", project_id, run_id)
+                     if item.get("id") == run_id), None)
+
+    def active_case_generations(self, project_id: int) -> list[dict]:
+        generations = self.case_generations(project_id)
+        run_id = self._latest_run_id(project_id, "cases")
+        return [item for item in generations if item["run_id"] == run_id]
+
+    def _latest_run_id(self, project_id: int, page: str) -> str | None:
+        with self.connect() as connection:
+            row = active_completed_run_record(connection, project_id, page)
+        return row["id"] if row else None
 
     def case_generations(self, project_id: int) -> list[dict]:
         with self.connect() as connection:

@@ -5,6 +5,26 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.v020_contracts import normalize_analysis_row
+
+
+def active_completed_run_record(connection: sqlite3.Connection, project_id: int, page: str) -> sqlite3.Row | None:
+    marker = connection.execute(
+        "SELECT run_id FROM v020_active_results WHERE project_id=? AND page=?", (project_id, page),
+    ).fetchone()
+    if marker is not None:
+        if marker["run_id"] is None:
+            return None
+        return connection.execute(
+            "SELECT id, payload_json FROM v020_runs WHERE project_id=? AND page=? AND id=? AND status='completed'",
+            (project_id, page, marker["run_id"]),
+        ).fetchone()
+    return connection.execute(
+        "SELECT id, payload_json FROM v020_runs WHERE project_id=? AND page=? AND status='completed' "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (project_id, page),
+    ).fetchone()
+
 
 class V020RunRepository:
     def __init__(self, database_path: Path) -> None:
@@ -40,6 +60,109 @@ class V020RunRepository:
             )
         return payload
 
+    def reusable_run(self, project_id: int, page: str, mode: str, fingerprint: str) -> dict | None:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM v020_runs WHERE project_id=? AND page=? AND mode=? "
+                "AND status='completed' ORDER BY created_at DESC, rowid DESC",
+                (project_id, page, mode),
+            ).fetchall()
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            if payload.get("input_fingerprint") == fingerprint:
+                return payload
+        return None
+
+    def set_active_run(self, project_id: int, page: str, run_id: str) -> None:
+        with self.connect() as connection:
+            previous = connection.execute(
+                "SELECT run_id FROM v020_active_results WHERE project_id=? AND page=?", (project_id, page),
+            ).fetchone()
+            if page == "analysis" and (previous is None or previous["run_id"] != run_id):
+                for downstream_page in ("suggestions", "review", "cases"):
+                    connection.execute(
+                        "INSERT INTO v020_active_results(project_id, page, run_id, updated_at) VALUES (?, ?, NULL, ?) "
+                        "ON CONFLICT(project_id, page) DO UPDATE SET run_id=NULL, updated_at=excluded.updated_at",
+                        (project_id, downstream_page, self.now()),
+                    )
+            connection.execute(
+                "INSERT INTO v020_active_results(project_id, page, run_id, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(project_id, page) DO UPDATE SET run_id=excluded.run_id, updated_at=excluded.updated_at",
+                (project_id, page, run_id, self.now()),
+            )
+
+    def result_for_run(self, project_id: int, page: str, run: dict) -> dict:
+        table = {
+            "analysis": "v020_analysis_rows",
+            "suggestions": "v020_suggestions",
+            "review": "v020_review_suggestions",
+            "cases": "v020_cases",
+        }[page]
+        items = self._payloads_for_run(table, project_id, run["id"])
+        if page == "analysis":
+            return {"rows": items}
+        if page in {"suggestions", "review"}:
+            return {"suggestions": items}
+        with self.connect() as connection:
+            record = connection.execute(
+                "SELECT * FROM v020_case_generations WHERE project_id=? AND run_id=?",
+                (project_id, run["id"]),
+            ).fetchone()
+        if record is None:
+            return {"generation_id": None, "scope_ids": [], "template": {"sheets": []}, "cases": items}
+        return {
+            "generation_id": record["id"],
+            "scope_ids": json.loads(record["scope_ids_json"]),
+            "template": json.loads(record["template_json"]),
+            "cases": items,
+        }
+
+    def active_analysis_rows(self, project_id: int) -> list[dict]:
+        run = self.latest_completed_run(project_id, "analysis")
+        base = self._payloads_for_run("v020_analysis_rows", project_id, run["id"]) if run else []
+        active_run_id = run["id"] if run else None
+        with self.connect() as connection:
+            records = connection.execute(
+                "SELECT selected, payload_json FROM v020_analysis_rows WHERE project_id=? ORDER BY created_at, rowid",
+                (project_id,),
+            ).fetchall()
+        derived = []
+        for record in records:
+            payload = json.loads(record["payload_json"])
+            if (payload.get("origin") not in {"suggestion", "review"}
+                    or payload.get("source_analysis_run_id") != active_run_id):
+                continue
+            payload["selected"] = bool(record["selected"])
+            derived.append(payload)
+        return [normalize_analysis_row(row, index) for index, row in enumerate([*base, *derived], start=1)]
+
+    def latest_completed_run(self, project_id: int, page: str) -> dict | None:
+        with self.connect() as connection:
+            row = active_completed_run_record(connection, project_id, page)
+        return json.loads(row["payload_json"]) if row else None
+
+    def _payloads_for_run(self, table: str, project_id: int, run_id: str) -> list[dict]:
+        with self.connect() as connection:
+            records = connection.execute(
+                f"SELECT * FROM {table} WHERE project_id=? ORDER BY created_at, rowid", (project_id,),
+            ).fetchall()
+        items = []
+        for record in records:
+            payload = json.loads(record["payload_json"])
+            if payload.get("run_id") != run_id:
+                continue
+            if "selected" in record.keys():
+                payload["selected"] = bool(record["selected"])
+            if "disposition" in record.keys():
+                payload["disposition"] = record["disposition"]
+            if "included" in record.keys():
+                payload["included"] = bool(record["included"])
+                payload["removed"] = bool(record["removed"])
+            items.append(payload)
+        if table == "v020_analysis_rows":
+            return [normalize_analysis_row(item, index) for index, item in enumerate(items, start=1)]
+        return items
+
     def save_analysis_rows(self, project_id: int, run_id: str, rows: list[dict]) -> list[dict]:
         now = self.now()
         with self.connect() as connection:
@@ -63,7 +186,20 @@ class V020RunRepository:
             payload = json.loads(record["payload_json"])
             payload["selected"] = bool(record["selected"])
             rows.append(payload)
-        return rows
+        return [normalize_analysis_row(row, index) for index, row in enumerate(rows, start=1)]
+
+    def equivalent_analysis_row(self, project_id: int, candidate: dict) -> dict | None:
+        for row in self.analysis_rows(project_id):
+            row_source_run = (row.get("run_id") if row.get("origin") == "analysis"
+                              else row.get("source_analysis_run_id"))
+            if (
+                row_source_run == candidate.get("source_analysis_run_id")
+                and row.get("related_requirement_id") == candidate.get("related_requirement_id")
+                and row.get("test_item") == candidate.get("test_item")
+                and row.get("test_type") == candidate.get("test_type")
+            ):
+                return row
+        return None
 
     def set_selection(self, project_id: int, row_ids: list[str], selected: bool) -> int:
         with self.connect() as connection:

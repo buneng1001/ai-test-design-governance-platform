@@ -4,6 +4,7 @@ import zipfile
 
 from fastapi.testclient import TestClient
 from app.ai_service import ModelResponse, MockModelService, OpenAICompatibleModelService
+from app.template_service import _xlsx_rows
 
 
 def _setup(
@@ -334,7 +335,7 @@ def test_real_case_generation_uses_session_model(client: TestClient, monkeypatch
     assert response.json()["is_mock"] is False
 
 
-def test_default_template_is_xlsx_with_sixteen_columns(client: TestClient) -> None:
+def test_default_template_is_xlsx_with_requested_twelve_columns(client: TestClient) -> None:
     project_id, design_id, _ = _setup(client)
     response = client.post(
         f"/api/projects/{project_id}/test-designs/{design_id}/case-generations",
@@ -345,6 +346,8 @@ def test_default_template_is_xlsx_with_sixteen_columns(client: TestClient) -> No
     exported = client.get(f"/api/projects/{project_id}/template-mappings/{mapping_id}/export")
     assert exported.status_code == 200
     with zipfile.ZipFile(io.BytesIO(exported.content)) as workbook:
-        sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    assert sheet.count("<c ") == 16
-    assert "父记录" not in sheet
+        headers = _xlsx_rows(workbook, "xl/worksheets/sheet1.xml")[0]
+    assert headers == [
+        "用例编号", "测试用例标题", "优先级", "预置条件", "输入", "操作步骤", "预期结果",
+        "测试类型", "模块", "测试项", "附件", "软件版本",
+    ]

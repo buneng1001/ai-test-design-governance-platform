@@ -29,15 +29,15 @@ export const getRunPreflight = (projectId: number, page: RunPage, mode: RunMode,
       template_mapping_id: options?.templateMappingId ?? null,
       supplemental_requirements: options?.supplementalRequirements ?? "" }),
   });
-export const runAnalysis = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; rows: AnalysisRow[] }> =>
+export const runAnalysis = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; rows: AnalysisRow[]; reused: boolean }> =>
   runRequest(projectId, "analysis-runs", { mode, confirmed });
-export const runSuggestions = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; suggestions: Suggestion[] }> =>
+export const runSuggestions = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; suggestions: Suggestion[]; reused: boolean }> =>
   runRequest(projectId, "suggestion-runs", { mode, confirmed });
-export const runReview = (projectId: number, mode: RunMode, confirmed: boolean, roles: string[]): Promise<{ run: RunEvidence; suggestions: ReviewSuggestion[] }> =>
+export const runReview = (projectId: number, mode: RunMode, confirmed: boolean, roles: string[]): Promise<{ run: RunEvidence; suggestions: ReviewSuggestion[]; reused: boolean }> =>
   runRequest(projectId, "review-runs", { mode, confirmed, roles });
 export const runCases = (projectId: number, mode: RunMode, confirmed: boolean,
   templateMode: "default" | "uploaded", templateMappingId: number | null, supplementalRequirements: string): Promise<{
-    run: RunEvidence; cases: GeneratedCase[]; scope_ids: string[]; template: TemplateMappingVersion;
+    run: RunEvidence; cases: GeneratedCase[]; scope_ids: string[]; template: TemplateMappingVersion; reused: boolean;
   }> => runRequest(projectId, "case-runs", { mode, confirmed, template_mode: templateMode,
     template_mapping_id: templateMappingId, supplemental_requirements: supplementalRequirements });
 
@@ -75,6 +75,8 @@ export const selectCaseTemplate = (projectId: number, mode: "default" | "uploade
   request(`/api/v0.2/projects/${projectId}/case-template`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode, mapping_id: mappingId }),
   });
+export const downloadDefaultCaseTemplate = async (projectId: number) =>
+  downloadResponseFile(await fetch(`/api/v0.2/projects/${projectId}/case-template/download`), "默认测试用例模板.xlsx");
 export const downloadPageResult = async (projectId: number, page: "upload" | RunPage, format: "json" | "xlsx", runId?: string) =>
   downloadResponseFile(await fetch(`/api/v0.2/projects/${projectId}/exports/${page}?format=${format}${runId ? `&run_id=${encodeURIComponent(runId)}` : ""}`), `${page}-result.${format}`);
 export const downloadDeliveryPackage = async (projectId: number) =>
