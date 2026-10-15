@@ -173,6 +173,7 @@ def register_case_routes(
                 input_context=_case_generation_context(review, point_batch, project.software_version if project else ""),
                 base_url=session_config.base_url if session_config else "",
                 api_key=session_config.api_key if session_config else "",
+                network_mode=session_config.network_mode if session_config else "auto",
             )
             response = service.complete(request)
             try:

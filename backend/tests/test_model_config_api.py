@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from fastapi.testclient import TestClient
 
@@ -194,3 +194,45 @@ def test_credential_resolution_prefers_temporary_then_local_then_environment(tmp
         app.post("/api/ai-session-config/test", json=payload(api_key=""), headers={"X-Session-ID": "environment"})
 
     assert captured == ["Bearer temporary-secret", "Bearer local-secret", "Bearer environment-secret"]
+
+
+def test_auto_network_mode_retries_direct_when_configured_proxy_fails(monkeypatch, client) -> None:
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    attempts: list[str] = []
+
+    def fake_open_model_request(request, timeout, network_mode):
+        attempts.append(network_mode)
+        if len(attempts) == 1:
+            raise URLError(ConnectionRefusedError("proxy unavailable"))
+        return FakeResponse()
+
+    monkeypatch.setattr("app.model_config_api.open_model_request", fake_open_model_request)
+    result = client.post("/api/ai-session-config/test", json=payload(network_mode="auto"),
+                         headers={"X-Session-ID": "test-session"})
+
+    assert result.json()["success"] is True
+    assert attempts == ["auto", "direct"]
+
+
+def test_direct_network_mode_is_used_for_model_discovery(monkeypatch, client) -> None:
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"data":[{"id":"deepseek-chat"}]}'
+
+    captured: dict[str, str] = {}
+
+    def fake_open_model_request(request, timeout, network_mode):
+        captured["mode"] = network_mode
+        return FakeResponse()
+
+    monkeypatch.setattr("app.model_config_api.open_model_request", fake_open_model_request)
+    result = client.post("/api/ai-session-config/models/discover", json=payload(network_mode="direct"),
+                         headers={"X-Session-ID": "test-session"})
+
+    assert result.json()["success"] is True
+    assert captured == {"mode": "direct"}

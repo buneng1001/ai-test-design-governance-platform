@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -138,4 +138,51 @@ test("连接测试显示响应超时的截止时间和错误类型", async () =>
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "模型服务在连接测试时未及时返回。建议：检查模型负载后重试，或改用其他可用模型（错误类型：response_timeout；单次网络等待上限 20 秒；可重试）",
   );
+});
+
+test("发现大量模型后在页面流内展示完整可筛选列表", async () => {
+  const user = userEvent.setup();
+  const models = Array.from({ length: 98 }, (_, index) => `provider/model-${index + 1}`);
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(siliconflowProviders(["Qwen/Qwen3-8B"]))
+    .mockResolvedValueOnce(jsonResponse(null))
+    .mockResolvedValueOnce(jsonResponse({
+      success: true, provider: "siliconflow",
+      models: models.map((id) => ({ id, state: "discovered" })), error: null,
+    }));
+
+  render(<ModelConfigPanel />);
+  await screen.findByRole("button", { name: "发现模型" });
+  await user.click(screen.getByRole("button", { name: "发现模型" }));
+  await user.click(screen.getByRole("button", { name: "选择模型（98）" }));
+
+  const list = screen.getByRole("listbox", { name: "可用模型" });
+  expect(list).toHaveAttribute("data-scroll-container", "page");
+  expect(within(list).getAllByRole("option")).toHaveLength(98);
+  expect(within(list).getByRole("option", { name: /provider\/model-98/ })).toBeInTheDocument();
+  expect(screen.getByLabelText("模型")).not.toHaveAttribute("list");
+
+  await user.type(screen.getByLabelText("筛选模型"), "model-98");
+  expect(within(list).getAllByRole("option")).toHaveLength(1);
+});
+
+test("可以选择自动代理回退并随连接测试提交", async () => {
+  const user = userEvent.setup();
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(siliconflowProviders(["Qwen/Qwen3-8B"]))
+    .mockResolvedValueOnce(jsonResponse(null))
+    .mockResolvedValueOnce(jsonResponse({
+      success: true, message: "模型连接测试成功", provider: "siliconflow",
+      model: "Qwen/Qwen3-8B", error: null,
+    }))
+    .mockResolvedValueOnce(siliconflowStatus("Qwen/Qwen3-8B", "verified", "verified"));
+
+  render(<ModelConfigPanel />);
+  await screen.findByRole("button", { name: "连接测试" });
+  expect(screen.getByLabelText("网络连接方式")).toHaveValue("auto");
+  expect(screen.getByText(/关闭 VPN 后无需清除配置/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "连接测试" }));
+
+  const requestBody = JSON.parse(String(fetchMock.mock.calls[2][1]?.body));
+  expect(requestBody.network_mode).toBe("auto");
 });

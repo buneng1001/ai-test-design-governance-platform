@@ -8,6 +8,7 @@ from typing_extensions import Annotated
 Provider = Literal["deepseek", "siliconflow", "kimi", "glm", "custom"]
 CredentialSource = Literal["temporary", "remembered_local", "environment", "none"]
 ModelState = Literal["preset", "discovered", "verified", "failed", "invalidated", "manual"]
+NetworkMode = Literal["auto", "system_proxy", "direct"]
 
 
 class SessionModelConfigInput(BaseModel):
@@ -18,6 +19,7 @@ class SessionModelConfigInput(BaseModel):
     base_url: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
     api_key: Annotated[str, StringConstraints(max_length=500)] = ""
     remember_api_key: bool = False
+    network_mode: NetworkMode = "auto"
 
 
 class StoredModelConfig(BaseModel):
@@ -28,6 +30,7 @@ class StoredModelConfig(BaseModel):
     provider: Provider
     model: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
     base_url: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    network_mode: NetworkMode = "auto"
 
 
 class ModelOption(BaseModel):
@@ -44,6 +47,7 @@ class SessionModelConfigStatus(BaseModel):
     model_options: list[ModelOption]
     verification_status: Literal["unverified", "verified", "failed", "invalidated"] = "unverified"
     validated_at: datetime | None = None
+    network_mode: NetworkMode = "auto"
 
 
 class ConnectionTestResult(BaseModel):

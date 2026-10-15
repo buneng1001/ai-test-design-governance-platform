@@ -1,4 +1,5 @@
 import json
+from urllib.error import URLError
 
 from app.ai_service import (
     AIModelConfig, ModelRequest, OpenAICompatibleModelService, _extract_structured_content, _finish_reason,
@@ -88,6 +89,26 @@ def test_connection_error_is_reported_as_provider_connection_error(monkeypatch) 
         model_parameters=AIModelConfig(provider="test", model="m"), input_asset_versions=(),
         scenario="normal", input_context=(), base_url="https://example.com", api_key="key",
     ))
+    assert response.error_code == "provider_connection_error"
+    assert response.retryable is True
+
+
+def test_real_model_call_auto_mode_retries_direct_after_proxy_connection_error(monkeypatch) -> None:
+    attempts: list[str] = []
+
+    def unavailable(request, timeout, network_mode, inherited_open):
+        attempts.append(network_mode)
+        raise URLError(ConnectionRefusedError("network path unavailable"))
+
+    monkeypatch.setattr("app.ai_service.open_model_request", unavailable)
+    response = OpenAICompatibleModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="test", model="m"), input_asset_versions=(),
+        scenario="normal", input_context=(), base_url="https://example.com", api_key="key",
+        network_mode="auto",
+    ))
+
+    assert attempts == ["auto", "direct"]
     assert response.error_code == "provider_connection_error"
     assert response.retryable is True
 

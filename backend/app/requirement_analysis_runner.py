@@ -53,6 +53,7 @@ def run_requirement_analysis_batches(
     max_new_batches: int | None = None,
     base_url: str = "",
     api_key: str = "",
+    network_mode: str = "auto",
 ) -> list[CompletedAnalysisBatch]:
     batches = [input_context[index:index + batch_size] for index in range(0, len(input_context), batch_size)]
     if not batches:
@@ -89,6 +90,7 @@ def run_requirement_analysis_batches(
             input_context=batch_context,
             base_url=base_url,
             api_key=api_key,
+            network_mode=network_mode,
         )
         try:
             output, attempts, validation_errors, run_status, diagnostic, error_code = _complete_batch(

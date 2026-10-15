@@ -231,7 +231,7 @@ class V020RunService:
                 max_tokens=preflight["max_output_tokens"],
             ),
             input_asset_versions=(), scenario="normal", base_url=resolved.base_url,
-            api_key=resolved.api_key, prompt_override=prompt,
+            api_key=resolved.api_key, prompt_override=prompt, network_mode=resolved.network_mode,
         ))
         if response.error_code or not isinstance(response.raw_output, dict):
             raise V020RunError(502, f"模型调用失败：{response.error_code or '返回内容不是 JSON 对象'}")

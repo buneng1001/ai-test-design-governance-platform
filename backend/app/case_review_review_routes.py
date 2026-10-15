@@ -53,6 +53,7 @@ def register_review_routes(router: APIRouter, deps: CaseReviewRouteDependencies)
                 model_parameters=model_parameters, input_asset_versions=asset_versions, scenario=data.scenario,
                 base_url=session_config.base_url if session_config else "",
                 api_key=session_config.api_key if session_config else "",
+                network_mode=session_config.network_mode if session_config else "auto",
             )
             service = deps.real_model_service if data.mode == "real" else deps.mock_service
             response = service.complete(request)

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.model_config_schemas import (
-    CredentialSource,
+    CredentialSource, NetworkMode,
     ModelOption,
     ModelServiceError,
     Provider,
@@ -34,6 +34,7 @@ class ResolvedModelConfig:
     base_url: str
     api_key: str
     credential_source: CredentialSource
+    network_mode: NetworkMode = "auto"
 
 
 def load_local_credentials(path: Path) -> dict[str, str]:

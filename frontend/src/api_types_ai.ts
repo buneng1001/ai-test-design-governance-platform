@@ -5,12 +5,14 @@ export interface ModelOption { id: string; state: ModelState; }
 export interface ModelProviderOption { id: ModelProviderId; name: string; base_url: string; models: ModelOption[]; }
 export interface SessionModelConfig {
   provider: ModelProviderId; model: string; base_url: string; api_key: string; remember_api_key: boolean;
+  network_mode: "auto" | "system_proxy" | "direct";
 }
 export interface SessionModelConfigStatus {
   provider: ModelProviderId; model: string; base_url: string; credential_source: string;
   credential_configured: boolean; model_options: ModelOption[];
   verification_status: "unverified" | "verified" | "failed" | "invalidated";
   validated_at: string | null;
+  network_mode: "auto" | "system_proxy" | "direct";
 }
 export interface ModelServiceError {
   stage: "connection_test" | "model_discovery" | "model_call"; provider: string; model: string;

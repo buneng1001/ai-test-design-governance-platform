@@ -12,8 +12,9 @@ from urllib.request import Request, urlopen
 from fastapi import APIRouter, FastAPI, Header, HTTPException, status
 
 from app.ai_service import MODEL_REQUEST_TIMEOUT_SECONDS, _provider_request_parameters
+from app.model_http import OpenResponse, open_model_request as _open_model_request
 from app.model_config_schemas import (
-    ConnectionTestResult, ModelDiscoveryResult, ModelOption, ProviderOption,
+    ConnectionTestResult, ModelDiscoveryResult, ModelOption, NetworkMode, ProviderOption,
     SessionModelConfigInput, SessionModelConfigStatus, StoredModelConfig,
 )
 from app.model_config_service import (
@@ -75,14 +76,14 @@ def register_model_config_routes(app: FastAPI, database_path: Path, local_creden
         try:
             request = Request(f"{stored.base_url.rstrip('/')}/models",
                               headers={"Authorization": f"Bearer {resolved.api_key}"}, method="GET")
-            with urlopen(request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
+            with _open_with_auto_fallback(request, MODEL_REQUEST_TIMEOUT_SECONDS, stored.network_mode) as response:
                 models = _parse_discovered_models(json.loads(response.read().decode("utf-8")))
         except HTTPError as error:
             return _discovery_failure(session_id, stored, resolved, _http_error_type(error.code), f"HTTP {error.code}")
         except TimeoutError:
             return _discovery_failure(session_id, stored, resolved, "timeout")
-        except URLError:
-            return _discovery_failure(session_id, stored, resolved, "connection")
+        except URLError as error:
+            return _discovery_failure(session_id, stored, resolved, "connection", _network_error_detail(error, stored.network_mode))
         except (ValueError, KeyError, TypeError):
             return _discovery_failure(session_id, stored, resolved, "invalid_response")
         with _connect() as connection:
@@ -118,7 +119,7 @@ def register_model_config_routes(app: FastAPI, database_path: Path, local_creden
                 headers={"Authorization": f"Bearer {resolved.api_key}", "Content-Type": "application/json"},
                 method="POST",
             )
-            with urlopen(request, timeout=CONNECTION_TEST_NETWORK_TIMEOUT_SECONDS) as response:
+            with _open_with_auto_fallback(request, CONNECTION_TEST_NETWORK_TIMEOUT_SECONDS, stored.network_mode) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             if not payload["choices"][0]["message"]["content"]:
                 raise ValueError("empty response")
@@ -129,8 +130,10 @@ def register_model_config_routes(app: FastAPI, database_path: Path, local_creden
                 session_id, stored, resolved, "response_timeout",
                 f"单次网络等待上限 {CONNECTION_TEST_NETWORK_TIMEOUT_SECONDS} 秒",
             )
-        except URLError:
-            return _connection_failure(session_id, stored, resolved, "connection")
+        except URLError as error:
+            return _connection_failure(
+                session_id, stored, resolved, "connection", _network_error_detail(error, stored.network_mode),
+            )
         except (ValueError, KeyError, IndexError, TypeError):
             return _connection_failure(session_id, stored, resolved, "invalid_response")
         with _connect() as connection:
@@ -182,8 +185,12 @@ def _store_config(session_id: str, config: SessionModelConfigInput, allow_rememb
         previous = _read_stored_config(session_id, connection)
         connection.execute("INSERT OR REPLACE INTO ai_model_configs(client_id, config_json, updated_at) VALUES (?, ?, ?)",
                            (session_id, stored.model_dump_json(), datetime.now(UTC).isoformat()))
-        if previous is None or previous.provider != stored.provider or previous.base_url != stored.base_url or previous.model != stored.model or config.api_key:
-            invalidated_verification(connection, session_id, stored, force=bool(config.api_key))
+        network_mode_changed = previous is not None and previous.network_mode != stored.network_mode
+        if (previous is None or previous.provider != stored.provider or previous.base_url != stored.base_url
+                or previous.model != stored.model or network_mode_changed or config.api_key):
+            invalidated_verification(
+                connection, session_id, stored, force=bool(config.api_key) or network_mode_changed,
+            )
     return stored
 
 
@@ -210,6 +217,26 @@ def _parse_discovered_models(payload: object) -> list[str]:
     if not models:
         raise ValueError("empty model catalog")
     return list(dict.fromkeys(models))[:100]
+
+
+def open_model_request(request: Request, timeout: int, network_mode: NetworkMode) -> OpenResponse:
+    """保留可测试 seam，并让自动模式继续兼容现有请求客户端。"""
+    return _open_model_request(request, timeout, network_mode, urlopen)
+
+
+def _open_with_auto_fallback(request: Request, timeout: int, network_mode: NetworkMode) -> OpenResponse:
+    try:
+        return open_model_request(request, timeout, network_mode)
+    except URLError:
+        if network_mode != "auto":
+            raise
+        return open_model_request(request, timeout, "direct")
+
+
+def _network_error_detail(error: URLError, network_mode: NetworkMode) -> str:
+    reason = error.reason
+    reason_type = type(reason).__name__ if reason is not None else type(error).__name__
+    return f"网络方式={network_mode}；底层错误={reason_type}"
 
 
 def _http_error_type(code: int) -> str:

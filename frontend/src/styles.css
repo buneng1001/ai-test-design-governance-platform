@@ -58,6 +58,19 @@ h2 { margin-top: 0; }
 .empty-state { text-align: center; color: #526057; }
 .project-form { display: grid; gap: 18px; }
 .project-form label { display: grid; gap: 8px; font-weight: 650; }
+.form-field { display: grid; gap: 8px; }
+.form-field > label { font-weight: 650; }
+.model-picker { display: grid; gap: 8px; }
+.model-picker > label, .model-options-panel > label { font-weight: 650; }
+.model-picker-value { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: stretch; }
+.model-picker-value button { white-space: nowrap; }
+.model-options-panel { display: grid; gap: 10px; padding: 14px; border: 1px solid #d8dfd9; border-radius: 10px; background: #f6f8f5; }
+.model-options-panel p { margin: 0; }
+.model-option-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.model-option-list button { display: flex; width: 100%; justify-content: space-between; gap: 16px; color: #18201c; background: #fff; border: 1px solid #d8dfd9; text-align: left; }
+.model-option-list button:hover, .model-option-list button:focus-visible { border-color: #255b43; background: #edf3ee; }
+.model-option-list small { color: #657169; white-space: nowrap; }
+.model-option-list [aria-selected="true"] button { border-color: #255b43; box-shadow: inset 4px 0 #255b43; }
 input, textarea, select {
   width: 100%;
   padding: 11px 12px;
@@ -139,6 +152,7 @@ button { padding: 11px 18px; border: 0; border-radius: 9px; color: #fff; backgro
   .project-context .project-form, .workflow-layout { display: block; }
   .workflow-sidebar { position: static; max-height: none; margin-bottom: 20px; }
   .workflow-tabs { position: sticky; top: 0; z-index: 3; padding: 8px; background: #f4f6f2; }
+  .model-picker-value { grid-template-columns: 1fr; }
 }
 
 /* v0.2 正式项目管理入口。 */

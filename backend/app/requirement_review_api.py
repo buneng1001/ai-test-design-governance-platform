@@ -130,6 +130,7 @@ def register_requirement_review_routes(app: FastAPI, context: AppRouteContext) -
                 max_new_batches=1 if analysis_input.advance_only else None,
                 base_url=session_config.base_url if session_config else "",
                 api_key=session_config.api_key if session_config else "",
+                network_mode=session_config.network_mode if session_config else "auto",
             )
         except RequirementAnalysisBatchError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

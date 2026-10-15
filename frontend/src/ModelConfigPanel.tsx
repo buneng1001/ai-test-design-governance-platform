@@ -4,9 +4,11 @@ import {
   clearSessionModelConfig, discoverSessionModels, getSessionModelConfig, listModelProviders, ModelOption,
   ModelProviderId, ModelProviderOption, saveSessionModelConfig, SessionModelConfig, testSessionModelConfig,
 } from "./api";
+import { ModelPicker } from "./ModelPicker";
 
 const emptyConfig: SessionModelConfig = {
   provider: "siliconflow", model: "", base_url: "", api_key: "", remember_api_key: false,
+  network_mode: "auto",
 };
 
 export function ModelConfigPanel() {
@@ -26,7 +28,8 @@ export function ModelConfigPanel() {
         const [options, saved] = await Promise.all([listModelProviders(), getSessionModelConfig()]);
         setProviders(options);
         if (saved) {
-          setConfig({ provider: saved.provider, model: "", base_url: saved.base_url, api_key: "", remember_api_key: false });
+          setConfig({ provider: saved.provider, model: "", base_url: saved.base_url, api_key: "", remember_api_key: false,
+            network_mode: saved.network_mode ?? "auto" });
           setModels(saved.model_options);
           setConfigurationDirty(true);
           setMessage(`检测到上次保存配置：${saved.provider} / ${saved.model}；${statusMessage(saved.credential_source, saved.verification_status)}。为避免误用历史模型，本次未自动选择，请重新选择。`);
@@ -46,7 +49,7 @@ export function ModelConfigPanel() {
     markConfigChanged();
   };
   const changeProvider = (provider: ModelProviderId) => {
-    selectProvider(providers, provider, setConfig, setModels);
+    selectProvider(providers, provider, setConfig, setModels, config.network_mode);
     markConfigChanged();
   };
   const submit = async (event: FormEvent) => {
@@ -105,15 +108,21 @@ export function ModelConfigPanel() {
         onChange={(event) => changeProvider(event.target.value as ModelProviderId)}>
         {providers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>
-      <label>模型<input disabled={testing} list="configured-model-options" value={config.model}
-        onChange={(event) => invalidateCurrentResult({ ...config, model: event.target.value })} /></label>
-      <datalist id="configured-model-options">
-        {models.map((model) => <option key={model.id} value={model.id}>{stateLabel(model.state)}</option>)}
-      </datalist>
+      <ModelPicker disabled={testing} models={models} value={config.model}
+        onChange={(model) => invalidateCurrentResult({ ...config, model })} />
       {models.length > 0 && <p className="muted">当前模型状态：{configurationDirty
         ? "待重新测试" : stateLabel(models.find((item) => item.id === config.model)?.state ?? "manual")}</p>}
       <label>Endpoint<input disabled={testing} value={config.base_url}
         onChange={(event) => invalidateCurrentResult({ ...config, base_url: event.target.value })} /></label>
+      <div className="form-field"><label htmlFor="network-mode">网络连接方式</label>
+        <select id="network-mode" disabled={testing} value={config.network_mode}
+        onChange={(event) => invalidateCurrentResult({
+          ...config, network_mode: event.target.value as SessionModelConfig["network_mode"],
+        })}>
+        <option value="auto">自动（代理失败时尝试直连）</option>
+        <option value="system_proxy">仅使用系统代理</option>
+        <option value="direct">直连（忽略系统代理）</option>
+      </select><span className="field-help">关闭 VPN 后无需清除配置；自动模式会在代理连接失败时尝试直连。</span></div>
       <label>API Key<input disabled={testing} type="password" autoComplete="off" value={config.api_key}
         onChange={(event) => invalidateCurrentResult({ ...config, api_key: event.target.value })} /></label>
       <label><input disabled={testing} type="checkbox" checked={config.remember_api_key}
@@ -131,12 +140,13 @@ export function ModelConfigPanel() {
 }
 
 function selectProvider(options: ModelProviderOption[], provider: ModelProviderId,
-  setConfig: (config: SessionModelConfig) => void, setModels: (models: ModelOption[]) => void) {
+  setConfig: (config: SessionModelConfig) => void, setModels: (models: ModelOption[]) => void,
+  networkMode: SessionModelConfig["network_mode"] = "auto") {
   const option = options.find((item) => item.id === provider);
   const models = option?.models ?? [];
   setModels(models);
   setConfig({ provider, base_url: option?.base_url ?? "", model: models[0]?.id === "手动输入模型" ? "" : models[0]?.id ?? "",
-    api_key: "", remember_api_key: false });
+    api_key: "", remember_api_key: false, network_mode: networkMode });
 }
 
 function formatModelError(error: {

@@ -10,6 +10,7 @@ from typing import Protocol
 from app.ai_output_processing import local_structural_repair, validate_output, validate_requirement_analysis_output
 from app.ai_schemas import AIModelConfig, AITaskType, MockScenario
 from app.case_generation_contract import build_mock_case_generation, case_generation_prompt
+from app.model_http import NetworkMode, open_model_request
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class ModelRequest:
     base_url: str = ""
     api_key: str = ""
     prompt_override: str = ""
+    network_mode: NetworkMode = "auto"
 
 
 @dataclass(frozen=True)
@@ -148,7 +150,7 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         method="POST",
     )
     try:
-        with urlopen(http_request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
+        with _open_with_auto_fallback(http_request, MODEL_REQUEST_TIMEOUT_SECONDS, request.network_mode) as response:
             response_bytes = response.read()
             payload = json.loads(response_bytes.decode("utf-8"))
             http_status = getattr(response, "status", 200)
@@ -192,13 +194,23 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
     except URLError as error:
         if isinstance(error.reason, TimeoutError):
             return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error.reason).__name__)
-        return ModelResponse(error_code="provider_response_invalid", diagnostic=type(error).__name__)
+        return ModelResponse(error_code="provider_connection_error", retryable=True,
+                             diagnostic=type(error.reason).__name__)
     except OSError as error:
         # VPN、代理或网络连接重置可能抛出 OSError，统一转换为可诊断的供应商连接错误。
         return ModelResponse(error_code="provider_connection_error", retryable=True,
                              diagnostic=type(error).__name__)
     except (ValueError, KeyError, IndexError, TypeError) as error:
         return ModelResponse(error_code="provider_json_invalid", diagnostic=str(error)[:160])
+
+
+def _open_with_auto_fallback(http_request: Request, timeout: int, network_mode: NetworkMode):
+    try:
+        return open_model_request(http_request, timeout, network_mode, urlopen)
+    except URLError:
+        if network_mode != "auto":
+            raise
+        return open_model_request(http_request, timeout, "direct", urlopen)
 
 
 def _provider_request_parameters(provider: str, model: str) -> dict[str, object]:
