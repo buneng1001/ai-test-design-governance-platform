@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { disposeSuggestion, downloadPageResult, runSuggestions } from "./v020_api";
 import type { WorkspaceState } from "./v020_types";
+import { visibleRunForPage } from "./v020_run_state";
 import { PageHeader } from "./UploadWorkspace";
 import { RequirementPointTable } from "./RequirementPointTable";
 import { WorkflowRunControls } from "./WorkflowRunControls";
@@ -10,9 +11,7 @@ export function SuggestionsWorkspace({ projectId, workspace, onChanged }: {
   projectId: number; workspace: WorkspaceState; onChanged: () => Promise<void>;
 }) {
   const [error, setError] = useState("");
-  const latestRun = workspace.active_run_ids
-    ? workspace.runs.find((run) => run.id === workspace.active_run_ids?.suggestions)
-    : [...workspace.runs].reverse().find((run) => run.page === "suggestions");
+  const latestRun = visibleRunForPage(workspace, "suggestions");
   const dispose = async (id: string, disposition: "accepted" | "rejected") => {
     try { await disposeSuggestion(projectId, id, disposition); await onChanged(); }
     catch (reason) { setError(message(reason)); }
@@ -20,8 +19,9 @@ export function SuggestionsWorkspace({ projectId, workspace, onChanged }: {
   return <section className="workflow-page">
     <PageHeader title="新增建议" subtitle="由 AI 主动发现遗漏测试项、移除建议或风险项；接纳后回流需求分析表，默认不勾选。" />
     <WorkflowRunControls projectId={projectId} page="suggestions" actionLabel="AI 分析新增建议" latestRun={latestRun}
+      onRunSettled={onChanged}
       disabled={!workspace.analysis_rows.length} onRun={async (mode, confirmed) => {
-        const result = await runSuggestions(projectId, mode, confirmed); await onChanged(); return result;
+        return runSuggestions(projectId, mode, confirmed);
       }} />
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "suggestions", "xlsx")}>下载新增建议（Excel）</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "suggestions", "json")}>下载 JSON</button></div>

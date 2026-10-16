@@ -22,6 +22,7 @@ export interface RunEvidence {
     requirement_version_id: number; roles: string[]; material_understanding_used?: boolean;
     material_understanding_run_id?: string | null };
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
+  model_timeout_seconds?: number | null;
   supplemental_notes: string; supplemental_requirements: string; template_filename: string | null;
   estimated_cost: CostAvailability; actual_usage: UsageAvailability | null; actual_cost: CostAvailability | null;
   stage: string; stage_events: Array<{ stage: string; status: string; detail: string }>;
@@ -35,6 +36,7 @@ export interface RunPreflight {
   verification_status: string; input_summary: RunEvidence["input_summary"]; supplemental_notes: string;
   supplemental_requirements: string; template_filename: string | null;
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
+  model_timeout_seconds?: number | null;
   estimated_cost: CostAvailability; requires_confirmation: boolean;
 }
 export interface CaseGenerationRecord {

@@ -11,12 +11,15 @@ const modeLabels: Record<RunMode, string> = {
 
 export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, roles = [], disabled = false,
   supplementalRequirements = "", templateMode = "default", templateMappingId = null, beforeAction, onRun,
-  allowedModes = ["direct", "skill", "local"], defaultMode = "local" }: {
+  onRunSettled, allowedModes = ["direct", "skill", "local"], defaultMode = "local",
+  preflightActionLabel = "查看调用范围" }: {
   projectId: number; page: RunPage; actionLabel: string; latestRun?: RunEvidence; roles?: string[]; disabled?: boolean;
   supplementalRequirements?: string; templateMode?: "default" | "uploaded"; templateMappingId?: number | null;
   allowedModes?: RunMode[]; defaultMode?: RunMode;
+  preflightActionLabel?: string;
   beforeAction?: React.ReactNode;
   onRun: (mode: RunMode, confirmed: boolean) => Promise<{ reused?: boolean } | void>;
+  onRunSettled?: () => Promise<void>;
 }) {
   const [mode, setMode] = useState<RunMode>(allowedModes.includes(defaultMode) ? defaultMode : allowedModes[0]);
   const [preflight, setPreflight] = useState<RunPreflight | null>(null);
@@ -31,6 +34,16 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
     return () => window.clearInterval(timer);
   }, [runningSince]);
 
+  const executeRun = async () => {
+    let runError: unknown;
+    try { return await onRun(mode, true); }
+    catch (reason) { runError = reason; throw reason; }
+    finally {
+      try { await onRunSettled?.(); }
+      catch (refreshError) { if (runError === undefined) throw refreshError; }
+    }
+  };
+
   const prepare = async () => {
     setBusy(true); setError(""); setPreflight(null); setReuseNotice(false);
     try {
@@ -38,7 +51,7 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
         templateMode, templateMappingId, supplementalRequirements,
       });
       if (mode === "local") { setElapsedSeconds(0); setRunningSince(Date.now());
-        const result = await onRun(mode, true); setReuseNotice(Boolean(result?.reused)); }
+        const result = await executeRun(); setReuseNotice(Boolean(result?.reused)); }
       else setPreflight(result);
     } catch (reason) { setError(message(reason)); }
     finally { setBusy(false); if (mode === "local") setRunningSince(null); }
@@ -46,10 +59,12 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
   const confirm = async () => {
     setBusy(true); setError(""); setReuseNotice(false);
     try { setElapsedSeconds(0); setRunningSince(Date.now());
-      const result = await onRun(mode, true); setReuseNotice(Boolean(result?.reused)); setPreflight(null); }
+      const result = await executeRun(); setReuseNotice(Boolean(result?.reused)); }
     catch (reason) { setError(message(reason)); }
-    finally { setBusy(false); setRunningSince(null); }
+    finally { setBusy(false); setRunningSince(null); setPreflight(null); }
   };
+
+  const prepareLabel = mode === "local" ? actionLabel : preflightActionLabel;
 
   return <section className="run-controls" aria-label={`${actionLabel}运行设置`}>
     {allowedModes.length === 1
@@ -62,10 +77,11 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
       </fieldset>}
     {beforeAction}
     <div className="action-row"><button type="button" disabled={busy || disabled} onClick={() => void prepare()}>
-      {busy ? "正在准备…" : actionLabel}
+      {busy ? "正在准备…" : prepareLabel}
     </button></div>
     {preflight && <section className="run-confirmation" aria-label="真实模型调用确认">
-      <h4>确认真实模型调用</h4>
+      <h4>调用前确认（尚未发送）</h4>
+      <p>请确认模型、输入范围和 Token 预算；点击下方确认按钮后才会发送给模型。</p>
       <dl><dt>模型</dt><dd>{preflight.provider} · {preflight.model}（{preflight.verification_status}）</dd>
         <dt>输入范围</dt><dd>{inputSummary(preflight)}</dd>
         <dt>人工补充</dt><dd>{preflight.supplemental_notes || "无"}</dd>
@@ -73,16 +89,18 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
         {page === "cases" && <><dt>补充生成要求</dt><dd>{preflight.supplemental_requirements || "无"}</dd></>}
         <dt>Prompt / Skill</dt><dd>{preflight.prompt_version}{preflight.skill_version ? ` · ${preflight.skill_version}` : ""}</dd>
         <dt>预计 Token</dt><dd>输入约 {preflight.estimated_input_tokens.toLocaleString()}；最大输出 {preflight.max_output_tokens.toLocaleString()}</dd>
+        {preflight.model_timeout_seconds && <><dt>模型响应超时</dt><dd>{preflight.model_timeout_seconds} 秒</dd></>}
         <dt>费用</dt><dd>{costText(preflight.estimated_cost)}</dd></dl>
       <div className="action-row"><button type="button" disabled={busy} onClick={() => void confirm()}>
-        确认{actionLabel}</button><button type="button" className="secondary" onClick={() => setPreflight(null)}>取消</button></div>
+        {actionLabel.startsWith("开始") ? `确认并${actionLabel}` : `确认并执行：${actionLabel}`}</button>
+        <button type="button" className="secondary" onClick={() => setPreflight(null)}>取消</button></div>
     </section>}
     {runningSince !== null ? <section className="run-evidence running" aria-label="运行状态"><header><strong>运行状态：正在执行</strong><span>{modeLabels[mode]}</span></header>
       <p>当前阶段：准备输入 / 调用模型 · 已用时间：{elapsedSeconds} 秒</p><p>正在等待本次运行返回；预计剩余时间不可获得，不显示虚构倒计时。</p></section>
       : latestRun ? <RunEvidenceCard run={latestRun} /> : <section className="run-evidence pending" aria-label="运行状态"><header><strong>运行状态：尚未执行</strong></header>
-        <p>选择运行方式后点击“{actionLabel}”。</p></section>}
+        <p>{mode === "local" ? `选择运行方式后点击“${actionLabel}”。` : "先查看调用范围，确认后才会调用模型。"}</p></section>}
     {reuseNotice && <p className="notice"><strong>已复用已有结果：</strong>输入与配置未变化，未再次调用模型，也未新增结果。</p>}
-    {error && <p role="alert" className="error">{error}</p>}
+    {error && latestRun?.status !== "failed" && <p role="alert" className="error">{error}</p>}
   </section>;
 }
 

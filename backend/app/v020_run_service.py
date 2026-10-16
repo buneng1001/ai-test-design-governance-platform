@@ -5,7 +5,7 @@ from time import perf_counter
 from uuid import uuid4
 
 from app.ai_schemas import AIModelConfig
-from app.ai_service import ModelRequest, ModelService
+from app.ai_service import MODEL_REQUEST_TIMEOUT_SECONDS, ModelRequest, ModelService
 from app.case_lifecycle_service import default_template
 from app.model_config_api import get_session_model_config, get_session_model_status
 from app.project_repository import ProjectRepository
@@ -13,18 +13,13 @@ from app.requirement_repository import RequirementRepository
 from app.template_repository import TemplateMappingRepository
 from app.v020_context import input_fingerprint, prepare_analysis_fragments, prepare_understood_fragments
 from app.v020_local_generation import local_analysis, local_cases, local_review, local_suggestions
+from app.v020_model_errors import V020RunError, model_failure
 from app.v020_prompts import PROMPT_VERSIONS, SKILL_VERSIONS, build_prompt
 from app.v020_repository import V020Repository
 from app.v020_run_repository import V020RunRepository
 from app.v020_run_schemas import (
     AnalysisModelOutput, CaseModelOutput, MaterialUnderstandingOutput, ReviewModelOutput, SuggestionModelOutput,
 )
-
-
-class V020RunError(Exception):
-    def __init__(self, status_code: int, message: str) -> None:
-        self.status_code = status_code
-        super().__init__(message)
 
 
 def estimate_input_tokens(value: str) -> int:
@@ -97,6 +92,7 @@ class V020RunService:
             "skill_version": SKILL_VERSIONS[page] if mode == "skill" else None,
             "estimated_input_tokens": estimated_tokens,
             "max_output_tokens": max_output_tokens,
+            "model_timeout_seconds": MODEL_REQUEST_TIMEOUT_SECONDS if mode != "local" else None,
             "estimated_cost": {
                 "status": "unavailable", "reason": "当前模型未登记可审计的输入/输出单价，无法估算费用。",
             },
@@ -236,8 +232,13 @@ class V020RunService:
             input_asset_versions=(), scenario="normal", base_url=resolved.base_url,
             api_key=resolved.api_key, prompt_override=prompt, network_mode=resolved.network_mode,
         ))
-        if response.error_code or not isinstance(response.raw_output, dict):
-            raise V020RunError(502, f"模型调用失败：{response.error_code or '返回内容不是 JSON 对象'}")
+        if response.error_code:
+            status_code, detail = model_failure(
+                response, preflight["provider"], preflight["model"], page,
+            )
+            raise V020RunError(status_code, detail)
+        if not isinstance(response.raw_output, dict):
+            raise V020RunError(502, "模型调用失败：返回内容不是 JSON 对象")
         if response.total_tokens is None and response.input_tokens is None and response.output_tokens is None:
             usage = {"status": "unavailable", "reason": "服务商未返回 Token 用量。"}
         else:

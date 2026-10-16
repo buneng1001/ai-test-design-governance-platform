@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { disposeReviewSuggestion, downloadPageResult, runReview, skipReview } from "./v020_api";
 import type { WorkspaceState } from "./v020_types";
+import { visibleRunForPage } from "./v020_run_state";
 import { PageHeader } from "./UploadWorkspace";
 import { RequirementPointTable } from "./RequirementPointTable";
 import { WorkflowRunControls } from "./WorkflowRunControls";
@@ -13,9 +14,7 @@ export function ReviewWorkspace({ projectId, workspace, onChanged, onSkip }: {
 }) {
   const [roles, setRoles] = useState<string[]>(["test_manager"]);
   const [error, setError] = useState("");
-  const latestRun = workspace.active_run_ids
-    ? workspace.runs.find((run) => run.id === workspace.active_run_ids?.review)
-    : [...workspace.runs].reverse().find((run) => run.page === "review");
+  const latestRun = visibleRunForPage(workspace, "review");
   const toggleRole = (role: string, checked: boolean) => setRoles(checked ? [...new Set([...roles, role])] : roles.filter((item) => item !== role));
   const dispose = async (id: string, disposition: "accepted" | "rejected") => {
     try { await disposeReviewSuggestion(projectId, id, disposition); await onChanged(); }
@@ -27,9 +26,10 @@ export function ReviewWorkspace({ projectId, workspace, onChanged, onSkip }: {
     <fieldset className="role-picker"><legend>选择审核身份</legend>{Object.entries(roleLabels).map(([role, label]) => <label key={role}>
       <input type="checkbox" checked={roles.includes(role)} onChange={(event) => toggleRole(role, event.target.checked)} /> {label}</label>)}</fieldset>
     <WorkflowRunControls projectId={projectId} page="review" roles={roles} actionLabel="开始审核" latestRun={latestRun}
+      onRunSettled={onChanged}
       disabled={!workspace.analysis_rows.length || !roles.length}
       onRun={async (mode, confirmed) => {
-        const result = await runReview(projectId, mode, confirmed, roles); await onChanged(); return result;
+        return runReview(projectId, mode, confirmed, roles);
       }} />
     <div className="action-row"><button type="button" className="secondary" onClick={() => void skip()}>跳过审核，进入测试用例</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "review", "json")}>下载审核报告</button></div>

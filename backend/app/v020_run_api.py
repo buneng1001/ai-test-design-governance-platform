@@ -5,7 +5,8 @@ from app.v020_run_schemas import (
     CaseEditInput, CaseRunInput, DispositionInput, InclusionInput, RemovalInput, ReviewRunInput,
     RunInput, RunPreflightInput, SelectionInput,
 )
-from app.v020_run_service import V020RunError, V020RunService
+from app.v020_model_errors import V020RunError
+from app.v020_run_service import V020RunService
 
 
 def register_v020_run_routes(
@@ -113,4 +114,4 @@ def _call(function, *args, **kwargs):
     try:
         return function(*args, **kwargs)
     except V020RunError as error:
-        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error

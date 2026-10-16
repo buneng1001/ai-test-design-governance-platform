@@ -1,13 +1,12 @@
 import { runMaterialUnderstanding } from "./v020_api";
 import type { WorkspaceState } from "./v020_types";
+import { visibleRunForPage } from "./v020_run_state";
 import { WorkflowRunControls } from "./WorkflowRunControls";
 
 export function MaterialUnderstandingPanel({ projectId, workspace, onChanged }: {
   projectId: number; workspace: WorkspaceState; onChanged: () => Promise<void>;
 }) {
-  const latestRun = workspace.active_run_ids
-    ? workspace.runs.find((run) => run.id === workspace.active_run_ids?.understanding)
-    : [...workspace.runs].reverse().find((run) => run.page === "understanding");
+  const latestRun = visibleRunForPage(workspace, "understanding");
   const understanding = workspace.material_understanding;
 
   return <section className="comparison-card material-understanding" aria-label="AI 资料理解">
@@ -15,8 +14,10 @@ export function MaterialUnderstandingPanel({ projectId, workspace, onChanged }: 
     <p>模型会先通读当前资料，按来源整理摘要、关键事实、约束和待确认项。后续需求分析优先使用这份结果；资料与模型配置未变化时会直接复用，不重复调用模型。</p>
     <WorkflowRunControls projectId={projectId} page="understanding" actionLabel="AI 阅读并整理资料"
       latestRun={latestRun} disabled={!workspace.requirement_version} allowedModes={["direct"]} defaultMode="direct"
+      preflightActionLabel="AI 阅读并整理资料（先确认范围）"
+      onRunSettled={onChanged}
       onRun={async (_mode, confirmed) => {
-        const result = await runMaterialUnderstanding(projectId, confirmed); await onChanged(); return result;
+        return runMaterialUnderstanding(projectId, confirmed);
       }} />
     {understanding && <section className="run-evidence completed" aria-label="AI 资料理解结果">
       <header><strong>资料理解结果</strong><span>{understanding.organized_fragments.length} 个上下文块</span></header>

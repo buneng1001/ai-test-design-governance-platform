@@ -16,17 +16,18 @@ test("真实模型先展示输入与成本确认，取消时不会调用模型",
       requirement_version_id: 3, roles: [] }, supplemental_notes: "关注异常流程",
     supplemental_requirements: "", template_filename: null,
     prompt_version: "requirement-analysis.direct.v1", skill_version: null,
-    estimated_input_tokens: 1280, max_output_tokens: 10000,
+    estimated_input_tokens: 1280, max_output_tokens: 10000, model_timeout_seconds: 120,
     estimated_cost: { status: "unavailable", reason: "未登记单价" }, requires_confirmation: true,
   }), { status: 200, headers: { "Content-Type": "application/json" } }));
 
   render(<WorkflowRunControls projectId={1} page="analysis" actionLabel="开始需求分析" onRun={onRun} />);
   expect(screen.getByText("运行状态：尚未执行")).toBeInTheDocument();
   await user.click(screen.getByLabelText("真实模型（直接调用）"));
-  await user.click(screen.getByRole("button", { name: "开始需求分析" }));
+  await user.click(screen.getByRole("button", { name: "查看调用范围" }));
 
   expect(await screen.findByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("2 份资料、8 个来源片段");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("输入约 1,280");
+  expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("模型响应超时120 秒");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("不可获得：未登记单价");
   expect(onRun).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "取消" }));

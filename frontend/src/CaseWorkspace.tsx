@@ -6,6 +6,7 @@ import { Pagination } from "./AnalysisWorkspace";
 import { downloadDefaultCaseTemplate, downloadPageResult, editV020Case, getCaseTemplate, runCases, selectCaseTemplate,
   setV020CaseInclusion, setV020CaseRemoved } from "./v020_api";
 import type { CaseTemplateState, GeneratedCase, WorkspaceState } from "./v020_types";
+import { visibleRunForPage } from "./v020_run_state";
 import { PageHeader } from "./UploadWorkspace";
 import { WorkflowRunControls } from "./WorkflowRunControls";
 
@@ -39,9 +40,7 @@ export function CaseWorkspace({ projectId, workspace, onChanged }: {
   }), [workspace.cases, filters, generation, selectedGeneration]);
   const pageCount = Math.max(1, Math.ceil(cases.length / pageSize)); const currentPage = Math.min(page, pageCount);
   const visible = cases.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const latestRun = workspace.active_run_ids
-    ? workspace.runs.find((run) => run.id === workspace.active_run_ids?.cases)
-    : [...workspace.runs].reverse().find((run) => run.page === "cases");
+  const latestRun = visibleRunForPage(workspace, "cases");
   const chooseTemplate = async (mode: "default" | "uploaded", mappingId: number | null = null) => {
     try { setTemplate(await selectCaseTemplate(projectId, mode, mappingId)); await onChanged(); }
     catch (reason) { setError(message(reason)); }
@@ -68,13 +67,14 @@ export function CaseWorkspace({ projectId, workspace, onChanged }: {
       <span>已选 {selectedRows.length} 个测试点{selectedRows.length ? `：${selectedRows.slice(0, 3).map((row) => row.test_point).join("、")}${selectedRows.length > 3 ? "…" : ""}` : "；请先到需求分析页勾选"}</span></section>
     <section className="numbered-section"><strong>3. 生成模式</strong>
       <WorkflowRunControls projectId={projectId} page="cases" actionLabel="生成测试用例" latestRun={latestRun}
+        onRunSettled={onChanged}
         disabled={!selectedRows.length || !template?.mapping}
         templateMode={template?.mode ?? "default"} templateMappingId={template?.mode === "uploaded" ? template.mapping?.id ?? null : null}
         supplementalRequirements={requirements}
         beforeAction={<label className="field-stack"><strong>4. 补充生成要求（可选）</strong><textarea value={requirements}
           placeholder="例如：优先输出 P0/P1；每个边界场景独立成用例。" onChange={(event) => setRequirements(event.target.value)} /></label>}
-        onRun={async (mode, confirmed) => { const result = await runCases(projectId, mode, confirmed, template?.mode ?? "default",
-          template?.mode === "uploaded" ? template.mapping?.id ?? null : null, requirements); await onChanged(); return result; }} /></section>
+        onRun={async (mode, confirmed) => runCases(projectId, mode, confirmed, template?.mode ?? "default",
+          template?.mode === "uploaded" ? template.mapping?.id ?? null : null, requirements)} /></section>
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "cases", "xlsx")}>导出 Excel</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "cases", "json")}>导出 JSON</button></div>
     <section className="case-results"><header><div><h3>候选测试用例</h3><p>支持本次生成与历史记录、筛选分页、编辑、移除恢复和纳入选择。</p></div>

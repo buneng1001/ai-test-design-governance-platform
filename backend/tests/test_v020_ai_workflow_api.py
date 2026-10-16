@@ -377,6 +377,11 @@ class MaterialUnderstandingModelService:
         }, input_tokens=90, output_tokens=60, total_tokens=150)
 
 
+class TimeoutModelService:
+    def complete(self, _request) -> ModelResponse:
+        return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic="TimeoutError")
+
+
 def test_material_understanding_is_persisted_and_reused_for_unchanged_input(tmp_path: Path, monkeypatch) -> None:
     service = MaterialUnderstandingModelService()
     application = create_app(
@@ -464,6 +469,44 @@ def test_analysis_uses_persisted_material_understanding_as_model_context(tmp_pat
     assert len(service.prompts) == 2
     assert '"material_understanding_used":true' in service.prompts[1]
     assert "状态切换时限为 2 秒" in service.prompts[1]
+
+
+def test_model_timeout_returns_actionable_error_and_persists_failed_run(tmp_path: Path, monkeypatch) -> None:
+    application = create_app(
+        tmp_path / "v020-timeout.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=TimeoutModelService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_and_material(client)
+        headers = {"X-Session-ID": "v020-timeout"}
+        config = {
+            "provider": "siliconflow", "model": "Qwen3.5-27B",
+            "base_url": "https://api.siliconflow.cn/v1", "api_key": "test-only-secret",
+            "remember_api_key": False,
+        }
+        assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+        workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+
+    assert response.status_code == 504
+    detail = response.json()["detail"]
+    assert detail["stage"] == "model_call"
+    assert detail["error_type"] == "timeout"
+    assert detail["retryable"] is True
+    assert "120 秒" in detail["user_message"]
+    failed = workspace["runs"][-1]
+    assert failed["status"] == "failed"
+    assert failed["duration_ms"] is not None
+    assert "120 秒" in failed["error"]
 
 
 def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path: Path, monkeypatch) -> None:
