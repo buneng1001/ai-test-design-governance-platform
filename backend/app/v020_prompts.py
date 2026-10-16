@@ -4,6 +4,7 @@ from app.v020_contracts import TEST_TYPES
 
 
 PROMPT_VERSIONS = {
+    "understanding": {"direct": "material-understanding.direct.v1"},
     "analysis": {"direct": "requirement-analysis.direct.v2", "skill": "requirement-analysis.skill.v2"},
     "suggestions": {"direct": "coverage-suggestions.direct.v2", "skill": "coverage-suggestions.skill.v2"},
     "review": {"direct": "role-review.direct.v2", "skill": "role-review.skill.v2"},
@@ -18,6 +19,15 @@ SKILL_VERSIONS = {
 
 
 def build_prompt(page: str, mode: str, context: dict) -> str:
+    if page == "understanding":
+        return (
+            f"提示版本：{PROMPT_VERSIONS[page][mode]}。先完整阅读输入资料，再按来源块整理理解结果。"
+            "返回 JSON：overview 为资料整体理解；organized_fragments 必须与输入 fragments 一一对应，"
+            "每项只包含 source_reference_id、title、summary、key_points、constraints、ambiguities。"
+            "不得遗漏明确事实、阈值、状态、异常、依赖和待确认信息；不得补造输入中不存在的内容。"
+            "source_reference_id 必须原样复用输入 ID。只输出 JSON，不得输出 API Key。\n"
+            + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        )
     test_types = "、".join(TEST_TYPES)
     contract = {
         "analysis": (
@@ -51,6 +61,7 @@ def build_prompt(page: str, mode: str, context: dict) -> str:
 
 def _direct_method(page: str) -> str:
     return {
+        "understanding": "按来源块阅读并整理资料，不进行测试点扩展。",
         "analysis": "直接按宽泛模块识别测试项，结合正常、异常、边界和适用专项测试方向，记录依据与来源。",
         "suggestions": "直接检查当前分析与已选范围，发现遗漏覆盖。",
         "review": "按输入中指定的审核身份直接提出风险、遗漏、冲突或修改建议。",

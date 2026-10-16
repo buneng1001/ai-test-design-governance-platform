@@ -51,6 +51,26 @@ def input_fingerprint(page: str, mode: str, preflight: dict, context: dict) -> s
     return sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def prepare_understood_fragments(understanding: dict) -> list[dict]:
+    """把已审阅的资料理解结果还原成分析模型可追溯的上下文块。"""
+    fragments = []
+    for item in understanding.get("organized_fragments", []):
+        sections = [
+            f"【{item['title']}】",
+            f"摘要：{item['summary']}",
+            f"关键事实：{'；'.join(item['key_points']) or '无'}",
+            f"约束：{'；'.join(item['constraints']) or '无'}",
+            f"待确认项：{'；'.join(item['ambiguities']) or '无'}",
+        ]
+        fragments.append({
+            "kind": "organized_section",
+            "source_reference_id": item["source_reference_id"],
+            "text": "\n".join(sections),
+            "source_reference": item["source_reference"],
+        })
+    return fragments
+
+
 def _merge_chunk(items: list[dict], heading: str) -> dict:
     first = items[0]["source_reference"]
     last = items[-1]["source_reference"]

@@ -1,7 +1,7 @@
 import type { RequirementPackage, RequirementVersion, TemplateMappingVersion } from "./api_types";
 
 export type RunMode = "direct" | "skill" | "local";
-export type RunPage = "analysis" | "suggestions" | "review" | "cases";
+export type RunPage = "understanding" | "analysis" | "suggestions" | "review" | "cases";
 
 export interface ProjectSummary {
   id: number; name: string; test_object: string; software_version: string; updated_at: string;
@@ -19,7 +19,8 @@ export interface RunEvidence {
   source_label: string; provider: string; model: string; model_endpoint?: string; credential_source: string;
   input_summary: { file_count: number; fragment_count: number; analysis_row_count: number;
     source_fragment_count?: number; context_chunk_count?: number; selected_row_count: number;
-    requirement_version_id: number; roles: string[] };
+    requirement_version_id: number; roles: string[]; material_understanding_used?: boolean;
+    material_understanding_run_id?: string | null };
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
   supplemental_notes: string; supplemental_requirements: string; template_filename: string | null;
   estimated_cost: CostAvailability; actual_usage: UsageAvailability | null; actual_cost: CostAvailability | null;
@@ -48,6 +49,15 @@ export interface AnalysisRow {
   total_index: number; test_basis: string; test_source: string; test_type: string;
   priority: "P0" | "P1" | "P2" | "P3"; related_requirement_id: string;
 }
+export interface MaterialUnderstandingFragment {
+  source_reference_id: string; title: string; summary: string; key_points: string[];
+  constraints: string[]; ambiguities: string[];
+  source_reference: { filename?: string; locator?: string; [key: string]: unknown };
+}
+export interface MaterialUnderstanding {
+  run_id: string; requirement_version_id: number; overview: string;
+  organized_fragments: MaterialUnderstandingFragment[];
+}
 export interface Suggestion {
   id: string; project_id: number; run_id: string; suggestion_action: "add" | "remove" | "risk";
   module: string; test_item: string; test_basis: string; test_source: string; test_type: string; priority: string;
@@ -72,6 +82,7 @@ export interface ExportRecord { id: number; page: string; format: string; filena
 export interface WorkspaceState {
   project_id: number; supplemental_notes: string; requirement_version: RequirementVersion | null;
   parse_result?: RequirementPackage | null;
+  material_understanding?: MaterialUnderstanding | null;
   template: { mode: "default" | "uploaded"; mapping_id: number | null };
   active_run_ids?: Partial<Record<RunPage, string>>;
   analysis_rows: AnalysisRow[]; suggestions: Suggestion[]; review_suggestions: ReviewSuggestion[];

@@ -78,8 +78,10 @@ class V020RunRepository:
             previous = connection.execute(
                 "SELECT run_id FROM v020_active_results WHERE project_id=? AND page=?", (project_id, page),
             ).fetchone()
-            if page == "analysis" and (previous is None or previous["run_id"] != run_id):
-                for downstream_page in ("suggestions", "review", "cases"):
+            if page in {"understanding", "analysis"} and (previous is None or previous["run_id"] != run_id):
+                downstream_pages = (("analysis", "suggestions", "review", "cases")
+                                    if page == "understanding" else ("suggestions", "review", "cases"))
+                for downstream_page in downstream_pages:
                     connection.execute(
                         "INSERT INTO v020_active_results(project_id, page, run_id, updated_at) VALUES (?, ?, NULL, ?) "
                         "ON CONFLICT(project_id, page) DO UPDATE SET run_id=NULL, updated_at=excluded.updated_at",
@@ -92,6 +94,8 @@ class V020RunRepository:
             )
 
     def result_for_run(self, project_id: int, page: str, run: dict) -> dict:
+        if page == "understanding":
+            return {"understanding": run.get("material_understanding")}
         table = {
             "analysis": "v020_analysis_rows",
             "suggestions": "v020_suggestions",

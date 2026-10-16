@@ -354,6 +354,118 @@ class CaptureModelService:
         }]}, input_tokens=120, output_tokens=80, total_tokens=200)
 
 
+class MaterialUnderstandingModelService:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, request) -> ModelResponse:
+        self.prompts.append(request.prompt_override)
+        if "requirement-analysis.direct.v2" in request.prompt_override:
+            return ModelResponse(raw_output={"rows": [{
+                "module": "状态管理", "test_item": "验证状态切换耗时",
+                "test_basis": "AI 整理结果包含明确时限", "source_reference_id": "input-1",
+                "test_type": "性能测试", "priority": "P1", "related_requirement_id": "REQ-001",
+            }]}, input_tokens=70, output_tokens=40, total_tokens=110)
+        return ModelResponse(raw_output={
+            "overview": "资料描述智能终端的状态切换时限与异常提示要求。",
+            "organized_fragments": [{
+                "source_reference_id": "input-1", "title": "状态管理",
+                "summary": "设备状态切换必须在 2 秒内完成，异常时显示错误提示。",
+                "key_points": ["状态切换时限为 2 秒", "异常状态必须显示错误提示"],
+                "constraints": ["完成时间不超过 2 秒"], "ambiguities": [],
+            }],
+        }, input_tokens=90, output_tokens=60, total_tokens=150)
+
+
+def test_material_understanding_is_persisted_and_reused_for_unchanged_input(tmp_path: Path, monkeypatch) -> None:
+    service = MaterialUnderstandingModelService()
+    application = create_app(
+        tmp_path / "v020-understanding.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_and_material(client)
+        headers = {"X-Session-ID": "v020-understanding-client"}
+        config = {
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        }
+        assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
+        first = client.post(f"/api/v0.2/projects/{project_id}/material-understanding-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+        second = client.post(f"/api/v0.2/projects/{project_id}/material-understanding-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+        workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+        replacement = client.post(f"/api/v0.2/projects/{project_id}/materials", json={
+            "supplemental_notes": "改为关注升级流程。",
+            "files": [{
+                "filename": "upgrade.md", "media_type": "text/markdown",
+                "content_base64": base64.b64encode("# 升级\n系统必须校验升级包签名。".encode()).decode(),
+            }],
+        })
+        invalidated = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+
+    assert first.status_code == 201, first.text
+    assert first.json()["understanding"]["overview"].startswith("资料描述")
+    assert first.json()["understanding"]["organized_fragments"][0]["source_reference_id"] == "input-1"
+    assert second.status_code == 200
+    assert second.json()["reused"] is True
+    assert second.json()["run"]["id"] == first.json()["run"]["id"]
+    assert workspace["material_understanding"]["run_id"] == first.json()["run"]["id"]
+    assert replacement.status_code == 201
+    assert invalidated["material_understanding"] is None
+    assert "understanding" not in invalidated["active_run_ids"]
+    assert len(service.prompts) == 1
+    assert '"source_reference_id":"input-1"' in service.prompts[0]
+
+
+def test_analysis_uses_persisted_material_understanding_as_model_context(tmp_path: Path, monkeypatch) -> None:
+    service = MaterialUnderstandingModelService()
+    application = create_app(
+        tmp_path / "v020-understanding-analysis.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_and_material(client)
+        headers = {"X-Session-ID": "v020-understanding-analysis"}
+        config = {
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        }
+        assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
+        understood = client.post(
+            f"/api/v0.2/projects/{project_id}/material-understanding-runs", headers=headers,
+            json={"mode": "direct", "confirmed": True},
+        )
+        analysis = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+
+    assert understood.status_code == 201
+    assert analysis.status_code == 201, analysis.text
+    assert analysis.json()["run"]["input_summary"]["material_understanding_used"] is True
+    assert analysis.json()["rows"][0]["test_basis"] == "AI 整理结果包含明确时限"
+    assert len(service.prompts) == 2
+    assert '"material_understanding_used":true' in service.prompts[1]
+    assert "状态切换时限为 2 秒" in service.prompts[1]
+
+
 def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path: Path, monkeypatch) -> None:
     service = CaptureModelService()
     application = create_app(

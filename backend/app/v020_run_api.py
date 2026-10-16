@@ -32,6 +32,15 @@ def register_v020_run_routes(
             response.status_code = status.HTTP_200_OK
         return result
 
+    @router.post("/material-understanding-runs", status_code=status.HTTP_201_CREATED)
+    def material_understanding_run(
+        project_id: int, data: RunInput, response: Response, x_session_id: str | None = Header(default=None),
+    ) -> dict:
+        result = _call(service.run, project_id, "understanding", data.mode, data.confirmed, x_session_id)
+        if result.get("reused"):
+            response.status_code = status.HTTP_200_OK
+        return result
+
     @router.patch("/analysis-selection")
     def update_selection(project_id: int, data: SelectionInput) -> dict:
         try:

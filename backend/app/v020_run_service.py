@@ -11,13 +11,13 @@ from app.model_config_api import get_session_model_config, get_session_model_sta
 from app.project_repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
 from app.template_repository import TemplateMappingRepository
-from app.v020_context import input_fingerprint, prepare_analysis_fragments
+from app.v020_context import input_fingerprint, prepare_analysis_fragments, prepare_understood_fragments
 from app.v020_local_generation import local_analysis, local_cases, local_review, local_suggestions
 from app.v020_prompts import PROMPT_VERSIONS, SKILL_VERSIONS, build_prompt
 from app.v020_repository import V020Repository
 from app.v020_run_repository import V020RunRepository
 from app.v020_run_schemas import (
-    AnalysisModelOutput, CaseModelOutput, ReviewModelOutput, SuggestionModelOutput,
+    AnalysisModelOutput, CaseModelOutput, MaterialUnderstandingOutput, ReviewModelOutput, SuggestionModelOutput,
 )
 
 
@@ -56,6 +56,8 @@ class V020RunService:
         *, template_mode: str = "default", template_mapping_id: int | None = None,
         supplemental_requirements: str = "",
     ) -> dict:
+        if page == "understanding" and mode != "direct":
+            raise V020RunError(422, "资料理解只支持已验证真实模型直接调用。")
         context = self._input_context(project_id, page, roles or [])
         if page == "cases":
             if not context["selected_rows"]:
@@ -222,6 +224,7 @@ class V020RunService:
         prompt = build_prompt(page, mode, context)
         response = self.real_model_service.complete(ModelRequest(
             task_type={
+                "understanding": "requirement_review",
                 "analysis": "requirement_review", "suggestions": "scope_analysis",
                 "review": "risk_analysis", "cases": "case_generation",
             }[page],
@@ -245,6 +248,21 @@ class V020RunService:
         return response.raw_output, usage
 
     def _normalize(self, page: str, raw: dict, context: dict, run: dict) -> list[dict]:
+        if page == "understanding":
+            try:
+                parsed_understanding = MaterialUnderstandingOutput.model_validate(raw)
+            except ValueError as error:
+                raise V020RunError(422, f"模型输出结构校验失败：{str(error)[:400]}") from error
+            source_by_id = {
+                fragment.get("source_reference_id", f"input-{index}"): fragment["source_reference"]
+                for index, fragment in enumerate(context["fragments"], start=1)
+            }
+            received = [item.source_reference_id for item in parsed_understanding.organized_fragments]
+            if len(received) != len(set(received)) or set(received) != set(source_by_id):
+                raise V020RunError(422, "资料理解结果必须逐一覆盖输入来源块，且不能重复或引用范围外来源。")
+            run["understanding_overview"] = parsed_understanding.overview
+            return [{**item.model_dump(mode="json"), "source_reference": source_by_id[item.source_reference_id]}
+                    for item in parsed_understanding.organized_fragments]
         model = {
             "analysis": AnalysisModelOutput,
             "suggestions": SuggestionModelOutput,
@@ -261,7 +279,7 @@ class V020RunService:
             run["role_reports"] = [item.model_dump(mode="json") for item in parsed.reports]
         if page == "analysis":
             source_by_id = {
-                f"input-{index}": fragment["source_reference"]
+                fragment.get("source_reference_id", f"input-{index}"): fragment["source_reference"]
                 for index, fragment in enumerate(context["fragments"], start=1)
             }
             normalized = []
@@ -322,6 +340,13 @@ class V020RunService:
         self, project_id: int, page: str, run: dict, items: list[dict], template_mode: str,
         template_mapping_id: int | None, supplemental_requirements: str,
     ) -> dict:
+        if page == "understanding":
+            understanding = {
+                "run_id": run["id"], "requirement_version_id": run["input_summary"]["requirement_version_id"],
+                "overview": run.pop("understanding_overview"), "organized_fragments": items,
+            }
+            run["material_understanding"] = understanding
+            return {"understanding": understanding}
         if page == "analysis":
             return {"rows": self.runs.save_analysis_rows(project_id, run["id"], items)}
         if page == "suggestions":
@@ -355,10 +380,25 @@ class V020RunService:
             "test_object": project.test_object, "software_version": project.software_version,
             "requirement_version_id": version.id, "supplemental_notes": state["supplemental_notes"],
         }
-        if page == "analysis":
+        if page in {"understanding", "analysis"}:
             base["fragments"], base["source_fragment_count"] = prepare_analysis_fragments(version.materials)
             if not base["fragments"]:
                 raise V020RunError(409, "当前资料没有可用于需求分析的文本片段。")
+            base["fragments"] = [
+                {**fragment, "source_reference_id": f"input-{index}"}
+                for index, fragment in enumerate(base["fragments"], start=1)
+            ]
+            if page == "analysis":
+                understanding_run = self.runs.latest_completed_run(project_id, "understanding")
+                understanding = understanding_run.get("material_understanding") if understanding_run else None
+                if understanding and understanding.get("requirement_version_id") == version.id:
+                    understood_fragments = prepare_understood_fragments(understanding)
+                    if understood_fragments:
+                        base["fragments"] = understood_fragments
+                        base["material_understanding_used"] = True
+                        base["material_understanding_run_id"] = understanding_run["id"]
+                        base["material_overview"] = understanding.get("overview", "")
+                base.setdefault("material_understanding_used", False)
         else:
             rows = self.runs.active_analysis_rows(project_id)
             if not rows:
@@ -383,6 +423,8 @@ class V020RunService:
             "analysis_row_count": len(rows), "selected_row_count": len(context.get("selected_rows", [])),
             "requirement_version_id": context["requirement_version_id"],
             "roles": context.get("roles", []),
+            "material_understanding_used": context.get("material_understanding_used", False),
+            "material_understanding_run_id": context.get("material_understanding_run_id"),
         }
 
     @staticmethod
@@ -425,12 +467,14 @@ class V020RunService:
     @staticmethod
     def _result_summary(page: str, items: list[dict]) -> dict:
         return {"count": len(items), "label": {
+            "understanding": "资料理解块",
             "analysis": "需求分析项", "suggestions": "新增建议", "review": "审核建议", "cases": "候选用例",
         }[page]}
 
     @staticmethod
     def _next_step(page: str) -> str:
         return {
+            "understanding": "检查资料理解结果，然后开始需求分析。",
             "analysis": "筛选并勾选将用于生成测试用例的范围。",
             "suggestions": "逐条接纳或拒绝建议；接纳项会回流需求分析表且默认不勾选。",
             "review": "逐条决定是否接纳，或直接进入测试用例。",

@@ -90,11 +90,13 @@ def register_v020_routes(
         state = workspace.workspace_row(project_id)
         version = requirements.get_version(project_id, state["active_requirement_version_id"])
         parse_result = requirements.latest_package(project_id)
+        understanding_run = workspace.latest_completed_run(project_id, "understanding")
         return {
             "project_id": project_id,
             "supplemental_notes": state["supplemental_notes"],
             "requirement_version": version.model_dump(mode="json") if version else None,
             "parse_result": parse_result.model_dump(mode="json") if parse_result else None,
+            "material_understanding": understanding_run.get("material_understanding") if understanding_run else None,
             "template": {
                 "mode": state["template_mode"],
                 "mapping_id": state["template_mapping_id"],

@@ -10,13 +10,15 @@ const modeLabels: Record<RunMode, string> = {
 };
 
 export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, roles = [], disabled = false,
-  supplementalRequirements = "", templateMode = "default", templateMappingId = null, beforeAction, onRun }: {
+  supplementalRequirements = "", templateMode = "default", templateMappingId = null, beforeAction, onRun,
+  allowedModes = ["direct", "skill", "local"], defaultMode = "local" }: {
   projectId: number; page: RunPage; actionLabel: string; latestRun?: RunEvidence; roles?: string[]; disabled?: boolean;
   supplementalRequirements?: string; templateMode?: "default" | "uploaded"; templateMappingId?: number | null;
+  allowedModes?: RunMode[]; defaultMode?: RunMode;
   beforeAction?: React.ReactNode;
   onRun: (mode: RunMode, confirmed: boolean) => Promise<{ reused?: boolean } | void>;
 }) {
-  const [mode, setMode] = useState<RunMode>("local");
+  const [mode, setMode] = useState<RunMode>(allowedModes.includes(defaultMode) ? defaultMode : allowedModes[0]);
   const [preflight, setPreflight] = useState<RunPreflight | null>(null);
   const [busy, setBusy] = useState(false);
   const [runningSince, setRunningSince] = useState<number | null>(null);
@@ -50,12 +52,14 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
   };
 
   return <section className="run-controls" aria-label={`${actionLabel}运行设置`}>
-    <fieldset className="mode-picker"><legend>运行方式</legend>
-      {(Object.keys(modeLabels) as RunMode[]).map((value) => <label key={value}>
-        <input type="radio" name={`mode-${page}`} value={value} checked={mode === value}
-          onChange={() => { setMode(value); setPreflight(null); }} /> {modeLabels[value]}
-      </label>)}
-    </fieldset>
+    {allowedModes.length === 1
+      ? <p><strong>运行方式：</strong>{modeLabels[mode]}</p>
+      : <fieldset className="mode-picker"><legend>运行方式</legend>
+        {allowedModes.map((value) => <label key={value}>
+          <input type="radio" name={`mode-${page}`} value={value} checked={mode === value}
+            onChange={() => { setMode(value); setPreflight(null); }} /> {modeLabels[value]}
+        </label>)}
+      </fieldset>}
     {beforeAction}
     <div className="action-row"><button type="button" disabled={busy || disabled} onClick={() => void prepare()}>
       {busy ? "正在准备…" : actionLabel}
@@ -99,7 +103,10 @@ export function RunEvidenceCard({ run }: { run: RunEvidence }) {
 
 function inputSummary(value: Pick<RunPreflight, "input_summary">): string {
   const summary = value.input_summary;
-  if (summary.context_chunk_count || summary.fragment_count) return `${summary.file_count} 份资料、${summary.source_fragment_count ?? summary.fragment_count} 个来源片段，整理为 ${summary.context_chunk_count ?? summary.fragment_count} 个模型上下文块`;
+  if (summary.context_chunk_count || summary.fragment_count) {
+    const source = `${summary.file_count} 份资料、${summary.source_fragment_count ?? summary.fragment_count} 个来源片段，整理为 ${summary.context_chunk_count ?? summary.fragment_count} 个模型上下文块`;
+    return summary.material_understanding_used ? `${source}；已使用 AI 阅读整理结果` : source;
+  }
   return `${summary.analysis_row_count} 条分析结果、其中已选 ${summary.selected_row_count} 条${summary.roles.length ? `、角色 ${summary.roles.length} 个` : ""}`;
 }
 function costText(cost: { status: string; reason?: string; amount?: number; currency?: string }): string {

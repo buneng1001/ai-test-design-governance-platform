@@ -6,7 +6,7 @@ from app.v020_contracts import TEST_TYPES
 
 
 RunMode = Literal["direct", "skill", "local"]
-RunPage = Literal["analysis", "suggestions", "review", "cases"]
+RunPage = Literal["understanding", "analysis", "suggestions", "review", "cases"]
 ReviewRole = Literal["product_manager", "project_manager", "test_manager"]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 
@@ -100,6 +100,22 @@ class AnalysisOutputRow(BaseModel):
 class AnalysisModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rows: list[AnalysisOutputRow] = Field(min_length=1, max_length=500)
+
+
+class MaterialUnderstandingFragment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_reference_id: NonEmptyText
+    title: NonEmptyText
+    summary: NonEmptyText
+    key_points: list[NonEmptyText] = Field(min_length=1, max_length=30)
+    constraints: list[NonEmptyText] = Field(default_factory=list, max_length=30)
+    ambiguities: list[NonEmptyText] = Field(default_factory=list, max_length=30)
+
+
+class MaterialUnderstandingOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    overview: NonEmptyText
+    organized_fragments: list[MaterialUnderstandingFragment] = Field(min_length=1, max_length=200)
 
 
 class SuggestionOutputItem(BaseModel):

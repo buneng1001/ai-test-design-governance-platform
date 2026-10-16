@@ -62,7 +62,7 @@ class V020Repository:
             )
             if (active_requirement_version_id is not None
                     and active_requirement_version_id != current["active_requirement_version_id"]):
-                for page in ("analysis", "suggestions", "review", "cases"):
+                for page in ("understanding", "analysis", "suggestions", "review", "cases"):
                     connection.execute(
                         "INSERT INTO v020_active_results(project_id, page, run_id, updated_at) VALUES (?, ?, NULL, ?) "
                         "ON CONFLICT(project_id, page) DO UPDATE SET run_id=NULL, updated_at=excluded.updated_at",

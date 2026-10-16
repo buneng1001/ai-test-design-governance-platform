@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { downloadPageResult, runAnalysis, updateAnalysisSelection } from "./v020_api";
 import type { AnalysisRow, WorkspaceState } from "./v020_types";
+import { MaterialUnderstandingPanel } from "./MaterialUnderstandingPanel";
 import { PageHeader } from "./UploadWorkspace";
 import { RequirementPointTable } from "./RequirementPointTable";
 import { WorkflowRunControls } from "./WorkflowRunControls";
@@ -42,6 +43,7 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
   };
   return <section className="workflow-page">
     <PageHeader title="需求分析" subtitle="按宽泛模块整理可验证测试项，并记录依据、来源、测试类型和关联需求；你的勾选就是正式测试用例范围。" />
+    <MaterialUnderstandingPanel projectId={projectId} workspace={workspace} onChanged={onChanged} />
     <WorkflowRunControls projectId={projectId} page="analysis" actionLabel="开始需求分析" latestRun={latestRun}
       disabled={!workspace.requirement_version} onRun={async (mode, confirmed) => {
         const result = await runAnalysis(projectId, mode, confirmed); await onChanged(); return result;

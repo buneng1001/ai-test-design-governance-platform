@@ -3,7 +3,7 @@ import type { TemplateMappingVersion } from "./api_types";
 import type { RequirementVersion } from "./api_types";
 import type {
   AnalysisRow, CaseTemplateState, GeneratedCase, ProjectSummary, ReviewSuggestion, RunEvidence,
-  RunMode, RunPage, RunPreflight, Suggestion, WorkspaceState,
+  MaterialUnderstanding, RunMode, RunPage, RunPreflight, Suggestion, WorkspaceState,
 } from "./v020_types";
 
 export const listProjectSummaries = (archived = false): Promise<ProjectSummary[]> =>
@@ -31,6 +31,9 @@ export const getRunPreflight = (projectId: number, page: RunPage, mode: RunMode,
   });
 export const runAnalysis = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; rows: AnalysisRow[]; reused: boolean }> =>
   runRequest(projectId, "analysis-runs", { mode, confirmed });
+export const runMaterialUnderstanding = (projectId: number, confirmed: boolean): Promise<{
+  run: RunEvidence; understanding: MaterialUnderstanding; reused: boolean;
+}> => runRequest(projectId, "material-understanding-runs", { mode: "direct", confirmed });
 export const runSuggestions = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; suggestions: Suggestion[]; reused: boolean }> =>
   runRequest(projectId, "suggestion-runs", { mode, confirmed });
 export const runReview = (projectId: number, mode: RunMode, confirmed: boolean, roles: string[]): Promise<{ run: RunEvidence; suggestions: ReviewSuggestion[]; reused: boolean }> =>
