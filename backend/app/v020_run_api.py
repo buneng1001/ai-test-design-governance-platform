@@ -28,7 +28,8 @@ def register_v020_run_routes(
     def analysis_run(
         project_id: int, data: RunInput, response: Response, x_session_id: str | None = Header(default=None),
     ) -> dict:
-        result = _call(service.run, project_id, "analysis", data.mode, data.confirmed, x_session_id)
+        result = _call(service.run, project_id, "analysis", data.mode, data.confirmed, x_session_id,
+                       requested_run_id=data.run_id)
         if result.get("reused"):
             response.status_code = status.HTTP_200_OK
         return result
@@ -37,7 +38,8 @@ def register_v020_run_routes(
     def material_understanding_run(
         project_id: int, data: RunInput, response: Response, x_session_id: str | None = Header(default=None),
     ) -> dict:
-        result = _call(service.run, project_id, "understanding", data.mode, data.confirmed, x_session_id)
+        result = _call(service.run, project_id, "understanding", data.mode, data.confirmed, x_session_id,
+                       requested_run_id=data.run_id)
         if result.get("reused"):
             response.status_code = status.HTTP_200_OK
         return result
@@ -54,7 +56,8 @@ def register_v020_run_routes(
     def suggestion_run(
         project_id: int, data: RunInput, response: Response, x_session_id: str | None = Header(default=None),
     ) -> dict:
-        result = _call(service.run, project_id, "suggestions", data.mode, data.confirmed, x_session_id)
+        result = _call(service.run, project_id, "suggestions", data.mode, data.confirmed, x_session_id,
+                       requested_run_id=data.run_id)
         if result.get("reused"):
             response.status_code = status.HTTP_200_OK
         return result
@@ -69,6 +72,7 @@ def register_v020_run_routes(
     ) -> dict:
         result = _call(
             service.run, project_id, "review", data.mode, data.confirmed, x_session_id, roles=data.roles,
+            requested_run_id=data.run_id,
         )
         if result.get("reused"):
             response.status_code = status.HTTP_200_OK
@@ -90,6 +94,7 @@ def register_v020_run_routes(
             service.run, project_id, "cases", data.mode, data.confirmed, x_session_id,
             template_mode=data.template_mode, template_mapping_id=data.template_mapping_id,
             supplemental_requirements=data.supplemental_requirements,
+            requested_run_id=data.run_id,
         )
         if result.get("reused"):
             response.status_code = status.HTTP_200_OK
@@ -98,6 +103,20 @@ def register_v020_run_routes(
     @router.patch("/cases/{case_id}")
     def edit_case(project_id: int, case_id: str, data: CaseEditInput) -> dict:
         return _call(service.edit_case, project_id, case_id, data.model_dump(exclude_none=True))
+
+    @router.get("/runs/{run_id}")
+    def get_run(project_id: int, run_id: str) -> dict:
+        run = repository.get_run(project_id, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="运行记录不存在")
+        return run
+
+    @router.post("/runs/{run_id}/cancel")
+    def cancel_run(project_id: int, run_id: str) -> dict:
+        run = repository.request_cancel(project_id, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="运行记录不存在")
+        return run
 
     @router.patch("/cases/{case_id}/inclusion")
     def set_case_inclusion(project_id: int, case_id: str, data: InclusionInput) -> dict:

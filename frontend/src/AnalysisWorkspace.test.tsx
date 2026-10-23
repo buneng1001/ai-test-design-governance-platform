@@ -74,7 +74,11 @@ test("可先让 AI 阅读整理资料并在确认后发起独立运行", async (
   await user.click(screen.getByRole("button", { name: "确认并执行：AI 阅读并整理资料" }));
 
   expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v0.2/projects/1/material-understanding-runs",
-    expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "direct", confirmed: true }) }));
+    expect.objectContaining({ method: "POST", body: expect.any(String) }));
+  const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+  expect(request).toEqual(expect.objectContaining({
+    mode: "direct", confirmed: true, run_id: expect.stringMatching(/^run-/),
+  }));
 });
 
 test("模型调用超时后刷新并显示已保存的失败运行而不是尚未执行", async () => {

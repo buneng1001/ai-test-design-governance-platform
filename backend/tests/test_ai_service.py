@@ -40,8 +40,78 @@ def test_real_service_sends_configured_provider_parameters_and_keeps_safe_metada
     ))
 
     assert captured["body"]["thinking"] == {"type": "disabled"}
+    assert captured["body"]["stream"] is True
     assert response.http_status == 200 and response.finish_reason == "stop"
     assert response.response_length is not None and response.provider_response is not None
+
+
+def test_real_service_assembles_streamed_chat_completion(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeStreamingResponse:
+        status = 200
+
+        def __iter__(self):
+            events = [
+                {"choices": [{"delta": {"content": '{"rows":['}, "finish_reason": None}]},
+                {"choices": [{"delta": {"content": "]}"}, "finish_reason": "stop"}],
+                 "usage": {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16}},
+            ]
+            return iter([*(f"data: {json.dumps(event)}\n\n".encode() for event in events), b"data: [DONE]\n\n"])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    def fake_urlopen(request, **_kwargs):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeStreamingResponse()
+
+    monkeypatch.setattr("app.ai_service.urlopen", fake_urlopen)
+    response = OpenAICompatibleModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="siliconflow", model="Qwen/Qwen3-8B", max_tokens=256),
+        input_asset_versions=(), scenario="normal", input_context=(),
+        base_url="https://example.com", api_key="key",
+    ))
+
+    assert captured["body"]["stream"] is True
+    assert response.raw_output == {"rows": []}
+    assert response.finish_reason == "stop"
+    assert response.input_tokens == 12
+    assert response.output_tokens == 4
+    assert response.total_tokens == 16
+    assert response.first_event_ms is not None
+    assert response.duration_ms is not None
+
+
+def test_real_service_stops_stream_when_cancel_is_requested(monkeypatch) -> None:
+    class FakeStreamingResponse:
+        status = 200
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"{"}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{"content":"}"}}]}\n\n'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    monkeypatch.setattr("app.ai_service.urlopen", lambda *_args, **_kwargs: FakeStreamingResponse())
+    checks = iter([False, True])
+    response = OpenAICompatibleModelService().complete(ModelRequest(
+        task_type="requirement_review", prompt_version="test",
+        model_parameters=AIModelConfig(provider="siliconflow", model="Qwen/Qwen3-8B"),
+        input_asset_versions=(), scenario="normal", input_context=(),
+        base_url="https://example.com", api_key="key", cancel_requested=lambda: next(checks, True),
+    ))
+
+    assert response.error_code == "provider_cancelled"
+    assert response.retryable is False
 
 
 def test_extract_structured_content_accepts_common_provider_response_formats() -> None:

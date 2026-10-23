@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { WorkflowRunControls } from "./WorkflowRunControls";
+import { decodeEntities, RunEvidenceCard, WorkflowRunControls } from "./WorkflowRunControls";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -26,7 +26,7 @@ test("真实模型先展示输入与成本确认，取消时不会调用模型",
   await user.click(screen.getByRole("button", { name: "查看调用范围" }));
 
   expect(await screen.findByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("2 份资料、8 个来源片段");
-  expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("输入约 1,280");
+  expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("所有请求输入合计约 1,280");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("模型响应超时120 秒");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("不可获得：未登记单价");
   expect(onRun).not.toHaveBeenCalled();
@@ -55,4 +55,54 @@ test("相同输入命中已有结果时明确提示未再次调用模型", async
   expect((await screen.findByText(/输入与配置未变化/)).closest("p"))
     .toHaveTextContent("未再次调用模型，也未新增结果");
   expect(onRun).toHaveBeenCalledWith("local", true);
+});
+
+test("真实模型运行中展示保存进度并允许停止", async () => {
+  const user = userEvent.setup();
+  const onRun = vi.fn(() => new Promise<void>(() => undefined));
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/cancel")) return new Response(JSON.stringify({
+      id: url.split("/").at(-2), project_id: 1, page: "analysis", mode: "direct", status: "running",
+      cancel_requested: true, source_label: "真实模型（直接调用）", provider: "custom", model: "m",
+      credential_source: "session", input_summary: { file_count: 1, fragment_count: 4, analysis_row_count: 0,
+        selected_row_count: 0, requirement_version_id: 1, roles: [] }, prompt_version: "v3", skill_version: null,
+      estimated_input_tokens: 100, max_output_tokens: 3000, supplemental_notes: "", supplemental_requirements: "",
+      template_filename: null, estimated_cost: { status: "unavailable" }, actual_usage: null, actual_cost: null,
+      stage: "已处理 1/2 个来源范围", stage_events: [], duration_ms: null, started_at: "", completed_at: null,
+      error: null, next_step: "正在停止", result_summary: null,
+      progress: { completed_units: 1, total_units: 2, stage: "调用模型" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({
+      page: "analysis", mode: "direct", provider: "custom", model: "m", credential_source: "session",
+      verification_status: "verified", input_summary: { file_count: 1, fragment_count: 4, analysis_row_count: 0,
+        selected_row_count: 0, requirement_version_id: 1, roles: [] }, supplemental_notes: "",
+      supplemental_requirements: "", template_filename: null, prompt_version: "v3", skill_version: null,
+      estimated_input_tokens: 100, max_output_tokens: 3000, request_count: 2,
+      estimated_cost: { status: "unavailable" }, requires_confirmation: true,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<WorkflowRunControls projectId={1} page="analysis" actionLabel="开始需求分析" onRun={onRun} />);
+  await user.click(screen.getByLabelText("真实模型（直接调用）"));
+  await user.click(screen.getByRole("button", { name: "查看调用范围" }));
+  await user.click(await screen.findByRole("button", { name: "确认并开始需求分析" }));
+  expect(await screen.findByRole("button", { name: "停止本次运行" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "停止本次运行" }));
+  expect(await screen.findByText("已处理来源范围 1/2；每个已完成范围均已保存检查点。")).toBeInTheDocument();
+});
+
+test("运行建议中的历史 HTML 实体会还原为正常中文", () => {
+  expect(decodeEntities("&#x6839;据失败原因重试&amp;检查网络")).toBe("根据失败原因重试&检查网络");
+  render(<RunEvidenceCard run={{
+    id: "run-1", project_id: 1, page: "analysis", mode: "direct", status: "failed",
+    source_label: "真实模型", provider: "custom", model: "m", credential_source: "session",
+    input_summary: { file_count: 1, fragment_count: 1, analysis_row_count: 0, selected_row_count: 0,
+      requirement_version_id: 1, roles: [] }, prompt_version: "v3", skill_version: null,
+    estimated_input_tokens: 10, max_output_tokens: 10, supplemental_notes: "", supplemental_requirements: "",
+    template_filename: null, estimated_cost: { status: "unavailable" }, actual_usage: null, actual_cost: null,
+    stage: "失败", stage_events: [], duration_ms: 10, started_at: "", completed_at: "", error: "超时",
+    next_step: "&#x6839;据失败原因重试", result_summary: null,
+  }} />);
+  expect(screen.getByText(/根据失败原因重试/)).toBeInTheDocument();
 });

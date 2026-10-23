@@ -54,6 +54,13 @@ class V020RunRepository:
 
     def update_run(self, payload: dict) -> dict:
         with self.connect() as connection:
+            current = connection.execute(
+                "SELECT payload_json FROM v020_runs WHERE id=? AND project_id=?",
+                (payload["id"], payload["project_id"]),
+            ).fetchone()
+            if current and json.loads(current["payload_json"]).get("cancel_requested"):
+                # 停止请求可能与模型线程同时写运行进度；一旦置位就不能被旧快照覆盖。
+                payload["cancel_requested"] = True
             connection.execute(
                 "UPDATE v020_runs SET status=?, payload_json=?, updated_at=? WHERE id=? AND project_id=?",
                 (payload["status"], self._json(payload), self.now(), payload["id"], payload["project_id"]),
@@ -72,6 +79,36 @@ class V020RunRepository:
             if payload.get("input_fingerprint") == fingerprint:
                 return payload
         return None
+
+    def resumable_run(self, project_id: int, page: str, mode: str, fingerprint: str) -> dict | None:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM v020_runs WHERE project_id=? AND page=? AND mode=? "
+                "AND status IN ('failed', 'stopped') ORDER BY created_at DESC, rowid DESC",
+                (project_id, page, mode),
+            ).fetchall()
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            if payload.get("input_fingerprint") == fingerprint and payload.get("checkpoints"):
+                return payload
+        return None
+
+    def get_run(self, project_id: int, run_id: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM v020_runs WHERE project_id=? AND id=?", (project_id, run_id),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def request_cancel(self, project_id: int, run_id: str) -> dict | None:
+        run = self.get_run(project_id, run_id)
+        if run is None:
+            return None
+        if run.get("status") == "running":
+            run["cancel_requested"] = True
+            run["next_step"] = "正在停止；已完成的来源范围会保留为检查点。"
+            self.update_run(run)
+        return run
 
     def set_active_run(self, project_id: int, page: str, run_id: str) -> None:
         with self.connect() as connection:

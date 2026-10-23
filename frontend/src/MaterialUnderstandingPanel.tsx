@@ -16,8 +16,8 @@ export function MaterialUnderstandingPanel({ projectId, workspace, onChanged }: 
       latestRun={latestRun} disabled={!workspace.requirement_version} allowedModes={["direct"]} defaultMode="direct"
       preflightActionLabel="AI 阅读并整理资料（先确认范围）"
       onRunSettled={onChanged}
-      onRun={async (_mode, confirmed) => {
-        return runMaterialUnderstanding(projectId, confirmed);
+      onRun={async (_mode, confirmed, runId) => {
+        return runMaterialUnderstanding(projectId, confirmed, runId);
       }} />
     {understanding && <section className="run-evidence completed" aria-label="AI 资料理解结果">
       <header><strong>资料理解结果</strong><span>{understanding.organized_fragments.length} 个上下文块</span></header>

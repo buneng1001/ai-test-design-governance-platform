@@ -4,8 +4,8 @@ from app.v020_contracts import TEST_TYPES
 
 
 PROMPT_VERSIONS = {
-    "understanding": {"direct": "material-understanding.direct.v1"},
-    "analysis": {"direct": "requirement-analysis.direct.v2", "skill": "requirement-analysis.skill.v2"},
+    "understanding": {"direct": "material-understanding.direct.v2"},
+    "analysis": {"direct": "requirement-analysis.direct.v4", "skill": "requirement-analysis.skill.v4"},
     "suggestions": {"direct": "coverage-suggestions.direct.v2", "skill": "coverage-suggestions.skill.v2"},
     "review": {"direct": "role-review.direct.v2", "skill": "role-review.skill.v2"},
     "cases": {"direct": "case-generation.direct.v2", "skill": "case-generation.skill.v2"},
@@ -21,7 +21,7 @@ SKILL_VERSIONS = {
 def build_prompt(page: str, mode: str, context: dict) -> str:
     if page == "understanding":
         return (
-            f"提示版本：{PROMPT_VERSIONS[page][mode]}。先完整阅读输入资料，再按来源块整理理解结果。"
+            f"提示版本：{PROMPT_VERSIONS[page][mode]}。阅读本次 request_scope 中的输入资料，再按来源块整理理解结果。"
             "返回 JSON：overview 为资料整体理解；organized_fragments 必须与输入 fragments 一一对应，"
             "每项只包含 source_reference_id、title、summary、key_points、constraints、ambiguities。"
             "不得遗漏明确事实、阈值、状态、异常、依赖和待确认信息；不得补造输入中不存在的内容。"
@@ -53,8 +53,10 @@ def build_prompt(page: str, mode: str, context: dict) -> str:
     }[page]
     method = _skill_method(page) if mode == "skill" else _direct_method(page)
     return (
-        f"提示版本：{PROMPT_VERSIONS[page][mode]}。{method}\n{contract}"
+        f"提示版本：{PROMPT_VERSIONS[page][mode]}。当前输入可能是完整任务的一个独立来源范围；"
+        f"只分析本次 request_scope，平台会确定性合并各范围结果。{method}\n{contract}"
         f"test_type 只能从以下常见分类中选择：{test_types}。优先级只使用 P0、P1、P2、P3。"
+        "只输出有明确输入依据且适用于当前测试项的测试类型；不得为了覆盖上述分类而机械凑数或重复改写同一测试项。"
         "只使用输入范围中的事实与 ID，只输出 JSON，不得补造来源或输出 API Key。\n"
         + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
     )

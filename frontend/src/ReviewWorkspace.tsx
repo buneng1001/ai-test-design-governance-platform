@@ -28,8 +28,8 @@ export function ReviewWorkspace({ projectId, workspace, onChanged, onSkip }: {
     <WorkflowRunControls projectId={projectId} page="review" roles={roles} actionLabel="开始审核" latestRun={latestRun}
       onRunSettled={onChanged}
       disabled={!workspace.analysis_rows.length || !roles.length}
-      onRun={async (mode, confirmed) => {
-        return runReview(projectId, mode, confirmed, roles);
+      onRun={async (mode, confirmed, runId) => {
+        return runReview(projectId, mode, confirmed, roles, runId);
       }} />
     <div className="action-row"><button type="button" className="secondary" onClick={() => void skip()}>跳过审核，进入测试用例</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "review", "json")}>下载审核报告</button></div>

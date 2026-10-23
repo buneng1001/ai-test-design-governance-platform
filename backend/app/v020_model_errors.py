@@ -1,4 +1,6 @@
-from app.ai_service import MODEL_REQUEST_TIMEOUT_SECONDS, ModelResponse
+from app.ai_service import (
+    MODEL_REQUEST_TIMEOUT_SECONDS, MODEL_RESPONSE_START_TIMEOUT_SECONDS, MODEL_STREAM_IDLE_TIMEOUT_SECONDS, ModelResponse,
+)
 from app.model_config_service import provider_error_type, service_error
 
 
@@ -28,8 +30,13 @@ def model_failure(response: ModelResponse, provider: str, model: str, page: str)
             "review": "审核",
             "cases": "测试用例生成",
         }[page]
+        wait_description = {
+            "response_start_timeout": f"等待首个响应超过 {MODEL_RESPONSE_START_TIMEOUT_SECONDS} 秒",
+            "stream_timeout": f"流式响应停顿超过 {MODEL_STREAM_IDLE_TIMEOUT_SECONDS} 秒",
+            "total_timeout": f"单个来源范围总耗时超过 {MODEL_REQUEST_TIMEOUT_SECONDS} 秒",
+        }.get(response.diagnostic, f"等待 {MODEL_REQUEST_TIMEOUT_SECONDS} 秒后仍未返回")
         error = error.model_copy(update={
-            "user_message": f"模型服务在{page_label}阶段等待 {MODEL_REQUEST_TIMEOUT_SECONDS} 秒后仍未返回",
+            "user_message": f"模型服务在{page_label}阶段{wait_description}",
             "suggested_action": "检查网络、VPN/代理或模型负载后重试；持续超时时可缩小输入范围或更换响应更快的模型",
         })
     return (504 if error_type == "timeout" else 502), error.model_dump(mode="json")

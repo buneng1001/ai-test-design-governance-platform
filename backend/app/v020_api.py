@@ -41,10 +41,28 @@ def register_v020_routes(
         return project.model_dump(mode="json")
 
     @router.post("/projects/{project_id}/materials", status_code=status.HTTP_201_CREATED)
-    def upload_materials(project_id: int, data: MaterialUploadInput) -> dict:
+    def upload_materials(project_id: int, data: MaterialUploadInput, response: Response) -> dict:
         project = projects.get(project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="测试设计项目不存在")
+        state = workspace.workspace_row(project_id)
+        active_version = requirements.get_version(project_id, state["active_requirement_version_id"])
+        incoming_signature = [
+            (item.filename, item.media_type, assets.hash_content(item.content_base64)) for item in data.files
+        ]
+        active_signature = [
+            (item.filename, item.media_type, item.sha256) for item in active_version.materials
+        ] if active_version else []
+        if active_version and incoming_signature == active_signature:
+            workspace.save_workspace(project_id, supplemental_notes=data.supplemental_notes)
+            response.status_code = status.HTTP_200_OK
+            package = requirements.get_package(project_id, active_version.package_id)
+            return {
+                "ai_called": False, "requirement_version_reused": True,
+                "supplemental_notes": data.supplemental_notes,
+                "requirement_package": package.model_dump(mode="json") if package else None,
+                "requirement_version": active_version.model_dump(mode="json"),
+            }
         registered = []
         for item in data.files:
             registered.append(assets.create(project_id, AssetProvenanceInput(
@@ -78,6 +96,7 @@ def register_v020_routes(
         )
         return {
             "ai_called": False,
+            "requirement_version_reused": False,
             "supplemental_notes": data.supplemental_notes,
             "requirement_package": package.model_dump(mode="json"),
             "requirement_version": version.model_dump(mode="json") if version else None,

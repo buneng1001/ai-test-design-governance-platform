@@ -1,6 +1,10 @@
 import base64
 import io
+import re
+import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,6 +13,7 @@ from app.ai_service import ModelResponse
 from app.main import create_app
 from app.template_service import inspect_template
 from app.v020_contracts import normalize_analysis_row
+from app.v020_batching import aggregate_usage
 from app.v020_export import _case_xlsx
 from app.v020_run_service import estimate_input_tokens
 
@@ -88,6 +93,39 @@ def test_same_input_reuses_completed_analysis_without_adding_rows(client: TestCl
     assert len(workspace["analysis_rows"]) == len(first.json()["rows"])
 
 
+def test_uploading_identical_material_keeps_requirement_version_and_existing_result(client: TestClient) -> None:
+    project = client.post("/api/projects", json={
+        "name": "相同资料项目", "test_object": "终端", "software_version": "v1",
+        "description": "", "settings": {"requirement_language": "zh-CN"},
+    }).json()
+    payload = {
+        "supplemental_notes": "关注异常", "files": [{
+            "filename": "same.md", "media_type": "text/markdown",
+            "content_base64": base64.b64encode("# 登录\n系统必须支持登录。".encode()).decode(),
+        }],
+    }
+    first_upload = client.post(f"/api/v0.2/projects/{project['id']}/materials", json=payload)
+    analysis = client.post(f"/api/v0.2/projects/{project['id']}/analysis-runs", json={
+        "mode": "local", "confirmed": True,
+    })
+    second_upload = client.post(f"/api/v0.2/projects/{project['id']}/materials", json=payload)
+    workspace = client.get(f"/api/v0.2/projects/{project['id']}/workspace").json()
+
+    assert first_upload.status_code == 201 and second_upload.status_code == 200
+    assert second_upload.json()["requirement_version_reused"] is True
+    assert second_upload.json()["requirement_version"]["id"] == first_upload.json()["requirement_version"]["id"]
+    assert workspace["active_run_ids"]["analysis"] == analysis.json()["run"]["id"]
+
+    changed_notes = client.post(f"/api/v0.2/projects/{project['id']}/materials", json={
+        **payload, "supplemental_notes": "改为重点关注权限边界",
+    })
+    invalidated = client.get(f"/api/v0.2/projects/{project['id']}/workspace").json()
+    assert changed_notes.status_code == 200
+    assert changed_notes.json()["requirement_version_reused"] is True
+    assert "analysis" not in invalidated["active_run_ids"]
+    assert invalidated["analysis_rows"] == []
+
+
 def test_suggestions_and_role_review_flow_back_unselected(client: TestClient) -> None:
     project_id = _project_and_material(client)
     analysis = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", json={
@@ -148,6 +186,15 @@ def test_legacy_analysis_row_is_normalized_for_unified_table_and_case_generation
 def test_token_estimate_is_conservative_for_chinese_materials() -> None:
     assert estimate_input_tokens("中" * 1000) >= 1000
     assert estimate_input_tokens("a" * 1000) == 250
+
+
+def test_partial_provider_usage_is_not_reported_as_complete_total() -> None:
+    usage = aggregate_usage([
+        {"status": "available", "input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        {"status": "unavailable", "reason": "供应商未返回"},
+    ])
+    assert usage["status"] == "unavailable"
+    assert "不能可靠汇总" in usage["reason"]
 
 
 def test_later_stages_reuse_same_input_instead_of_stacking(client: TestClient) -> None:
@@ -360,7 +407,7 @@ class MaterialUnderstandingModelService:
 
     def complete(self, request) -> ModelResponse:
         self.prompts.append(request.prompt_override)
-        if "requirement-analysis.direct.v2" in request.prompt_override:
+        if "requirement-analysis.direct.v4" in request.prompt_override:
             return ModelResponse(raw_output={"rows": [{
                 "module": "状态管理", "test_item": "验证状态切换耗时",
                 "test_basis": "AI 整理结果包含明确时限", "source_reference_id": "input-1",
@@ -380,6 +427,277 @@ class MaterialUnderstandingModelService:
 class TimeoutModelService:
     def complete(self, _request) -> ModelResponse:
         return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic="TimeoutError")
+
+
+class BatchedAnalysisModelService:
+    def __init__(self, fail_first: bool = False) -> None:
+        self.prompts: list[str] = []
+        self.fail_first = fail_first
+
+    def complete(self, request) -> ModelResponse:
+        self.prompts.append(request.prompt_override)
+        if self.fail_first:
+            self.fail_first = False
+            return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic="TimeoutError")
+        source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', request.prompt_override)))
+        return ModelResponse(raw_output={"rows": [{
+            "module": "状态管理", "test_item": f"验证 {source_id} 对应功能",
+            "test_basis": "来源中存在明确要求", "source_reference_id": source_id,
+            "test_type": "功能测试", "priority": "P1", "related_requirement_id": source_id,
+        } for source_id in source_ids]}, input_tokens=100, output_tokens=50, total_tokens=150)
+
+
+class CancellableModelService:
+    def __init__(self) -> None:
+        self.started = Event()
+
+    def complete(self, request) -> ModelResponse:
+        self.started.set()
+        for _ in range(500):
+            if request.cancel_requested and request.cancel_requested():
+                return ModelResponse(error_code="provider_cancelled", retryable=False)
+            time.sleep(0.01)
+        return ModelResponse(error_code="provider_timeout", retryable=True)
+
+
+class ResumeModelService(BatchedAnalysisModelService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.call_count = 0
+
+    def complete(self, request) -> ModelResponse:
+        self.call_count += 1
+        if self.call_count in {2, 3}:
+            self.prompts.append(request.prompt_override)
+            return ModelResponse(error_code="provider_timeout", retryable=True)
+        return super().complete(request)
+
+
+class InvalidSourceModelService:
+    def complete(self, _request) -> ModelResponse:
+        return ModelResponse(raw_output={"rows": [{
+            "module": "越界", "test_item": "越界来源", "test_basis": "无效来源",
+            "source_reference_id": "input-999", "test_type": "功能测试", "priority": "P1",
+            "related_requirement_id": "REQ-X",
+        }]})
+
+
+def _project_with_many_sections(client: TestClient, count: int = 9) -> int:
+    project = client.post("/api/projects", json={
+        "name": "分批项目", "test_object": "智能终端", "software_version": "v0.2.0",
+        "description": "", "settings": {"requirement_language": "zh-CN"},
+    }).json()
+    document = "\n".join(
+        f"# 模块 {index}\n系统必须支持第 {index} 项功能，并处理对应异常。" for index in range(1, count + 1)
+    )
+    response = client.post(f"/api/v0.2/projects/{project['id']}/materials", json={
+        "supplemental_notes": "", "files": [{
+            "filename": "many.md", "media_type": "text/markdown",
+            "content_base64": base64.b64encode(document.encode()).decode(),
+        }],
+    })
+    assert response.status_code == 201
+    return project["id"]
+
+
+def test_preflight_applies_context_limit_to_each_bounded_request_not_full_document(tmp_path: Path, monkeypatch) -> None:
+    application = create_app(
+        tmp_path / "v020-large-preflight.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=BatchedAnalysisModelService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project = client.post("/api/projects", json={
+            "name": "长资料", "test_object": "终端", "software_version": "v1",
+            "description": "", "settings": {"requirement_language": "zh-CN"},
+        }).json()
+        document = "\n".join(f"# 模块 {index}\n{'需求内容' * 250}" for index in range(40))
+        client.post(f"/api/v0.2/projects/{project['id']}/materials", json={
+            "supplemental_notes": "", "files": [{"filename": "large.md", "media_type": "text/markdown",
+                "content_base64": base64.b64encode(document.encode()).decode()}],
+        })
+        headers = {"X-Session-ID": "large-preflight"}
+        config = {"provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+                  "api_key": "test-only-secret", "remember_api_key": False}
+        client.post("/api/ai-session-config/test", headers=headers, json=config)
+        response = client.post(f"/api/v0.2/projects/{project['id']}/run-preflight", headers=headers, json={
+            "page": "analysis", "mode": "direct",
+        })
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["estimated_input_tokens"] > 32_000
+    assert result["max_request_input_tokens"] + result["max_output_tokens"] < 32_000
+    assert result["request_count"] == 20
+
+
+def test_real_analysis_runs_in_bounded_batches_and_records_progress(tmp_path: Path, monkeypatch) -> None:
+    service = BatchedAnalysisModelService()
+    application = create_app(
+        tmp_path / "v020-batches.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client)
+        headers = {"X-Session-ID": "v020-batches"}
+        config = {"provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+                  "api_key": "test-only-secret", "remember_api_key": False}
+        assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
+        preflight = client.post(f"/api/v0.2/projects/{project_id}/run-preflight", headers=headers, json={
+            "page": "analysis", "mode": "direct",
+        }).json()
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+
+    assert response.status_code == 201, response.text
+    assert preflight["request_count"] == 5
+    assert len(service.prompts) == 5
+    assert all("requirement-analysis.direct.v4" in prompt for prompt in service.prompts)
+    run = response.json()["run"]
+    assert run["progress"] == {"completed_units": 5, "total_units": 5, "stage": "保存结果"}
+    assert len(run["checkpoints"]) == 5
+    assert run["actual_usage"]["total_tokens"] == 750
+    assert len(response.json()["rows"]) == 9
+
+
+def test_retryable_batch_failure_is_retried_once(tmp_path: Path, monkeypatch) -> None:
+    service = BatchedAnalysisModelService(fail_first=True)
+    application = create_app(
+        tmp_path / "v020-batch-retry.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=1)
+        headers = {"X-Session-ID": "v020-batch-retry"}
+        config = {"provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+                  "api_key": "test-only-secret", "remember_api_key": False}
+        client.post("/api/ai-session-config/test", headers=headers, json=config)
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+
+    assert response.status_code == 201, response.text
+    assert len(service.prompts) == 2
+    assert len(response.json()["run"]["attempts"]) == 2
+
+
+def test_running_request_can_be_cancelled_with_known_run_id(tmp_path: Path, monkeypatch) -> None:
+    service = CancellableModelService()
+    application = create_app(
+        tmp_path / "v020-cancel.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=1)
+        headers = {"X-Session-ID": "v020-cancel"}
+        config = {"provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+                  "api_key": "test-only-secret", "remember_api_key": False}
+        client.post("/api/ai-session-config/test", headers=headers, json=config)
+        run_id = "run-cancel-known-12345678"
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(client.post, f"/api/v0.2/projects/{project_id}/analysis-runs",
+                                      headers=headers, json={"mode": "direct", "confirmed": True, "run_id": run_id})
+            assert service.started.wait(timeout=2)
+            progress = client.get(f"/api/v0.2/projects/{project_id}/runs/{run_id}")
+            stopped = client.post(f"/api/v0.2/projects/{project_id}/runs/{run_id}/cancel")
+            response = pending.result(timeout=3)
+        final_run = client.get(f"/api/v0.2/projects/{project_id}/runs/{run_id}").json()
+
+    assert progress.status_code == 200 and progress.json()["status"] == "running"
+    assert stopped.status_code == 200 and stopped.json()["cancel_requested"] is True
+    assert response.status_code == 409
+    assert final_run["status"] == "stopped"
+    assert final_run["progress"]["completed_units"] == 0
+
+
+def test_failed_batched_run_resumes_from_last_valid_checkpoint(tmp_path: Path, monkeypatch) -> None:
+    service = ResumeModelService()
+    application = create_app(
+        tmp_path / "v020-resume.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client)
+        headers = {"X-Session-ID": "v020-resume"}
+        config = {"provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+                  "api_key": "test-only-secret", "remember_api_key": False}
+        client.post("/api/ai-session-config/test", headers=headers, json=config)
+        first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+        second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+
+    assert first.status_code == 504
+    assert second.status_code == 201, second.text
+    assert second.json()["run"]["resumed_from_run_id"]
+    assert second.json()["run"]["progress"]["completed_units"] == 5
+    assert service.call_count == 7
+
+
+def test_invalid_batch_is_rejected_before_checkpoint_is_saved(tmp_path: Path, monkeypatch) -> None:
+    application = create_app(
+        tmp_path / "v020-invalid-checkpoint.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=InvalidSourceModelService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=1)
+        headers = {"X-Session-ID": "v020-invalid-checkpoint"}
+        config = {"provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+                  "api_key": "test-only-secret", "remember_api_key": False}
+        client.post("/api/ai-session-config/test", headers=headers, json=config)
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "direct", "confirmed": True,
+        })
+        workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
+
+    assert response.status_code == 422
+    failed = workspace["runs"][-1]
+    assert failed["status"] == "failed"
+    assert failed["checkpoints"] == []
 
 
 def test_material_understanding_is_persisted_and_reused_for_unchanged_input(tmp_path: Path, monkeypatch) -> None:
@@ -502,11 +820,11 @@ def test_model_timeout_returns_actionable_error_and_persists_failed_run(tmp_path
     assert detail["stage"] == "model_call"
     assert detail["error_type"] == "timeout"
     assert detail["retryable"] is True
-    assert "120 秒" in detail["user_message"]
+    assert "180 秒" in detail["user_message"]
     failed = workspace["runs"][-1]
     assert failed["status"] == "failed"
     assert failed["duration_ms"] is not None
-    assert "120 秒" in failed["error"]
+    assert "180 秒" in failed["error"]
 
 
 def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path: Path, monkeypatch) -> None:
@@ -540,8 +858,8 @@ def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path
     assert direct.status_code == 201, direct.text
     assert skill.status_code == 201, skill.text
     assert direct.json()["run"]["input_summary"] == skill.json()["run"]["input_summary"]
-    assert direct.json()["run"]["prompt_version"] == "requirement-analysis.direct.v2"
-    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v2"
+    assert direct.json()["run"]["prompt_version"] == "requirement-analysis.direct.v4"
+    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v4"
     assert skill.json()["run"]["skill_version"] == "ai-test-design-requirement-analysis.v1"
     assert "Step 00" not in service.prompts[0]
     assert "Step 00" in service.prompts[1] and "Step 08" in service.prompts[1]

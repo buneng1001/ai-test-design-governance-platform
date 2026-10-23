@@ -29,20 +29,26 @@ export const getRunPreflight = (projectId: number, page: RunPage, mode: RunMode,
       template_mapping_id: options?.templateMappingId ?? null,
       supplemental_requirements: options?.supplementalRequirements ?? "" }),
   });
-export const runAnalysis = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; rows: AnalysisRow[]; reused: boolean }> =>
-  runRequest(projectId, "analysis-runs", { mode, confirmed });
-export const runMaterialUnderstanding = (projectId: number, confirmed: boolean): Promise<{
+export const runAnalysis = (projectId: number, mode: RunMode, confirmed: boolean, runId?: string): Promise<{ run: RunEvidence; rows: AnalysisRow[]; reused: boolean }> =>
+  runRequest(projectId, "analysis-runs", { mode, confirmed, run_id: runId });
+export const runMaterialUnderstanding = (projectId: number, confirmed: boolean, runId?: string): Promise<{
   run: RunEvidence; understanding: MaterialUnderstanding; reused: boolean;
-}> => runRequest(projectId, "material-understanding-runs", { mode: "direct", confirmed });
-export const runSuggestions = (projectId: number, mode: RunMode, confirmed: boolean): Promise<{ run: RunEvidence; suggestions: Suggestion[]; reused: boolean }> =>
-  runRequest(projectId, "suggestion-runs", { mode, confirmed });
-export const runReview = (projectId: number, mode: RunMode, confirmed: boolean, roles: string[]): Promise<{ run: RunEvidence; suggestions: ReviewSuggestion[]; reused: boolean }> =>
-  runRequest(projectId, "review-runs", { mode, confirmed, roles });
+}> => runRequest(projectId, "material-understanding-runs", { mode: "direct", confirmed, run_id: runId });
+export const runSuggestions = (projectId: number, mode: RunMode, confirmed: boolean, runId?: string): Promise<{ run: RunEvidence; suggestions: Suggestion[]; reused: boolean }> =>
+  runRequest(projectId, "suggestion-runs", { mode, confirmed, run_id: runId });
+export const runReview = (projectId: number, mode: RunMode, confirmed: boolean, roles: string[], runId?: string): Promise<{ run: RunEvidence; suggestions: ReviewSuggestion[]; reused: boolean }> =>
+  runRequest(projectId, "review-runs", { mode, confirmed, roles, run_id: runId });
 export const runCases = (projectId: number, mode: RunMode, confirmed: boolean,
-  templateMode: "default" | "uploaded", templateMappingId: number | null, supplementalRequirements: string): Promise<{
+  templateMode: "default" | "uploaded", templateMappingId: number | null, supplementalRequirements: string,
+  runId?: string): Promise<{
     run: RunEvidence; cases: GeneratedCase[]; scope_ids: string[]; template: TemplateMappingVersion; reused: boolean;
   }> => runRequest(projectId, "case-runs", { mode, confirmed, template_mode: templateMode,
-    template_mapping_id: templateMappingId, supplemental_requirements: supplementalRequirements });
+    template_mapping_id: templateMappingId, supplemental_requirements: supplementalRequirements, run_id: runId });
+
+export const getRunEvidence = (projectId: number, runId: string): Promise<RunEvidence> =>
+  request(`/api/v0.2/projects/${projectId}/runs/${encodeURIComponent(runId)}`);
+export const cancelRun = (projectId: number, runId: string): Promise<RunEvidence> =>
+  request(`/api/v0.2/projects/${projectId}/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
 
 const runRequest = <T,>(projectId: number, path: string, body: object): Promise<T> =>
   request(`/api/v0.2/projects/${projectId}/${path}`, {

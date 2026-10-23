@@ -38,6 +38,7 @@ class RunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: RunMode
     confirmed: bool = False
+    run_id: Annotated[str, StringConstraints(pattern=r"^run-[a-zA-Z0-9-]{8,80}$")] | None = None
 
 
 class ReviewRunInput(RunInput):

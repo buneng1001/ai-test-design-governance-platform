@@ -4,19 +4,23 @@ from datetime import UTC, datetime
 from time import perf_counter
 from uuid import uuid4
 
-from app.ai_schemas import AIModelConfig
-from app.ai_service import MODEL_REQUEST_TIMEOUT_SECONDS, ModelRequest, ModelService
+from app.ai_service import (
+    MODEL_REQUEST_TIMEOUT_SECONDS, MODEL_RESPONSE_START_TIMEOUT_SECONDS, MODEL_STREAM_IDLE_TIMEOUT_SECONDS,
+    ModelService,
+)
 from app.case_lifecycle_service import default_template
 from app.model_config_api import get_session_model_config, get_session_model_status
 from app.project_repository import ProjectRepository
 from app.requirement_repository import RequirementRepository
 from app.template_repository import TemplateMappingRepository
 from app.v020_context import input_fingerprint, prepare_analysis_fragments, prepare_understood_fragments
+from app.v020_batching import PER_REQUEST_OUTPUT_TOKENS, batch_contexts, execute_model_batches
 from app.v020_local_generation import local_analysis, local_cases, local_review, local_suggestions
-from app.v020_model_errors import V020RunError, model_failure
+from app.v020_model_errors import V020RunError
 from app.v020_prompts import PROMPT_VERSIONS, SKILL_VERSIONS, build_prompt
 from app.v020_repository import V020Repository
 from app.v020_run_repository import V020RunRepository
+from app.v020_run_evidence import completed_events, failed_events, next_step, result_summary
 from app.v020_run_schemas import (
     AnalysisModelOutput, CaseModelOutput, MaterialUnderstandingOutput, ReviewModelOutput, SuggestionModelOutput,
 )
@@ -61,12 +65,17 @@ class V020RunService:
             context["supplemental_requirements"] = supplemental_requirements
         input_summary = self._input_summary(context)
         serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        max_output_tokens = 10_000 if page == "analysis" else 4_000
-        estimated_source = serialized if mode == "local" else build_prompt(page, mode, context)
-        estimated_tokens = estimate_input_tokens(estimated_source)
-        if estimated_tokens + max_output_tokens > 32_000:
+        contexts = batch_contexts(page, context) if mode != "local" else [context]
+        max_output_tokens = PER_REQUEST_OUTPUT_TOKENS if page in {"understanding", "analysis"} else 4_000
+        request_input_tokens = (
+            [estimate_input_tokens(build_prompt(page, mode, item)) for item in contexts]
+            if mode != "local" else [estimate_input_tokens(serialized)]
+        )
+        estimated_tokens = sum(request_input_tokens)
+        max_request_input_tokens = max(request_input_tokens)
+        if max_request_input_tokens + max_output_tokens > 32_000:
             raise V020RunError(
-                422, "当前输入与预留输出合计超过 32k 保守上下文上限，请按资料文件或章节缩小范围后再运行。",
+                422, "单个来源范围与预留输出合计超过 32k 保守上下文上限，请按资料文件或章节缩小范围后再运行。",
             )
         provider = model = credential_source = model_endpoint = "不适用"
         verification_status = "本地模式无需验证"
@@ -91,8 +100,16 @@ class V020RunService:
             "prompt_version": prompt_version,
             "skill_version": SKILL_VERSIONS[page] if mode == "skill" else None,
             "estimated_input_tokens": estimated_tokens,
+            "max_request_input_tokens": max_request_input_tokens,
             "max_output_tokens": max_output_tokens,
+            "max_total_output_tokens": max_output_tokens * len(contexts),
+            "request_count": len(contexts),
             "model_timeout_seconds": MODEL_REQUEST_TIMEOUT_SECONDS if mode != "local" else None,
+            "timeout_policy": ({
+                "response_start_seconds": MODEL_RESPONSE_START_TIMEOUT_SECONDS,
+                "stream_idle_seconds": MODEL_STREAM_IDLE_TIMEOUT_SECONDS,
+                "request_total_seconds": MODEL_REQUEST_TIMEOUT_SECONDS,
+            } if mode != "local" else None),
             "estimated_cost": {
                 "status": "unavailable", "reason": "当前模型未登记可审计的输入/输出单价，无法估算费用。",
             },
@@ -111,6 +128,7 @@ class V020RunService:
         template_mode: str = "default",
         template_mapping_id: int | None = None,
         supplemental_requirements: str = "",
+        requested_run_id: str | None = None,
     ) -> dict:
         if mode != "local" and not confirmed:
             raise V020RunError(409, "真实模型调用前必须确认输入范围和 Token/费用信息。")
@@ -133,13 +151,22 @@ class V020RunService:
             }
         started = datetime.now(UTC)
         started_clock = perf_counter()
-        run = self._running_record(project_id, page, mode, preflight, started)
+        run = self._running_record(project_id, page, mode, preflight, started, requested_run_id)
         run["input_fingerprint"] = fingerprint
+        resumable = self.runs.resumable_run(project_id, page, mode, fingerprint)
+        if resumable:
+            run["checkpoints"] = list(resumable.get("checkpoints", []))
+            run["resumed_from_run_id"] = resumable["id"]
+            run["progress"]["completed_units"] = len(run["checkpoints"])
         self.runs.create_run(run)
         try:
-            raw, usage = self._produce(page, mode, context, preflight, session_id)
+            raw, usage = self._produce(page, mode, context, preflight, session_id, run)
             normalized = self._normalize(page, raw, context, run)
-            stage_events = self._completed_events(mode)
+            run["progress"] = {
+                "completed_units": run["progress"]["total_units"],
+                "total_units": run["progress"]["total_units"], "stage": "保存结果",
+            }
+            stage_events = completed_events(mode)
             result = self._save_result(
                 project_id, page, run, normalized, template_mode, template_mapping_id,
                 supplemental_requirements,
@@ -152,16 +179,17 @@ class V020RunService:
                     "status": "unavailable", "reason": "当前模型未登记调用时单价，无法计算实际费用。",
                 },
                 "error": None,
-                "next_step": self._next_step(page),
-                "result_summary": self._result_summary(page, normalized),
+                "next_step": next_step(page),
+                "result_summary": result_summary(page, normalized),
             })
             self.runs.update_run(run)
             self.runs.set_active_run(project_id, page, run["id"])
             return {"run": run, "reused": False, **result}
         except V020RunError as error:
+            stopped = "已停止" in str(error)
             run.update({
-                "status": "failed", "stage": "失败",
-                "stage_events": self._failed_events(mode, str(error)),
+                "status": "stopped" if stopped else "failed", "stage": "已停止" if stopped else "失败",
+                "stage_events": failed_events(mode, str(error)),
                 "duration_ms": max(0, int((perf_counter() - started_clock) * 1000)),
                 "completed_at": datetime.now(UTC).isoformat(),
                 "actual_usage": {"status": "unavailable", "reason": "运行失败，服务商用量不可获得。"},
@@ -174,7 +202,7 @@ class V020RunService:
             message = f"运行发生未预期错误：{type(error).__name__}"
             run.update({
                 "status": "failed", "stage": "失败",
-                "stage_events": self._failed_events(mode, message),
+                "stage_events": failed_events(mode, message),
                 "duration_ms": max(0, int((perf_counter() - started_clock) * 1000)),
                 "completed_at": datetime.now(UTC).isoformat(),
                 "actual_usage": {"status": "unavailable", "reason": "运行失败，服务商用量不可获得。"},
@@ -209,7 +237,9 @@ class V020RunService:
             raise V020RunError(404, "候选测试用例不存在")
         return case
 
-    def _produce(self, page: str, mode: str, context: dict, preflight: dict, session_id: str | None) -> tuple[dict, dict]:
+    def _produce(
+        self, page: str, mode: str, context: dict, preflight: dict, session_id: str | None, run: dict,
+    ) -> tuple[dict, dict]:
         if mode == "local":
             output = {
                 "analysis": local_analysis, "suggestions": local_suggestions,
@@ -217,36 +247,9 @@ class V020RunService:
             }[page](context)
             return output, {"status": "unavailable", "reason": "本地模式未调用外部模型。"}
         resolved, _ = self._verified_model(session_id)
-        prompt = build_prompt(page, mode, context)
-        response = self.real_model_service.complete(ModelRequest(
-            task_type={
-                "understanding": "requirement_review",
-                "analysis": "requirement_review", "suggestions": "scope_analysis",
-                "review": "risk_analysis", "cases": "case_generation",
-            }[page],
-            prompt_version=preflight["prompt_version"],
-            model_parameters=AIModelConfig(
-                provider=resolved.provider, model=resolved.model, temperature=0,
-                max_tokens=preflight["max_output_tokens"],
-            ),
-            input_asset_versions=(), scenario="normal", base_url=resolved.base_url,
-            api_key=resolved.api_key, prompt_override=prompt, network_mode=resolved.network_mode,
-        ))
-        if response.error_code:
-            status_code, detail = model_failure(
-                response, preflight["provider"], preflight["model"], page,
-            )
-            raise V020RunError(status_code, detail)
-        if not isinstance(response.raw_output, dict):
-            raise V020RunError(502, "模型调用失败：返回内容不是 JSON 对象")
-        if response.total_tokens is None and response.input_tokens is None and response.output_tokens is None:
-            usage = {"status": "unavailable", "reason": "服务商未返回 Token 用量。"}
-        else:
-            usage = {
-                "status": "available", "input_tokens": response.input_tokens,
-                "output_tokens": response.output_tokens, "total_tokens": response.total_tokens,
-            }
-        return response.raw_output, usage
+        return execute_model_batches(
+            self.real_model_service, self.runs, resolved, page, mode, context, preflight, run,
+        )
 
     def _normalize(self, page: str, raw: dict, context: dict, run: dict) -> list[dict]:
         if page == "understanding":
@@ -429,9 +432,11 @@ class V020RunService:
         }
 
     @staticmethod
-    def _running_record(project_id: int, page: str, mode: str, preflight: dict, started: datetime) -> dict:
+    def _running_record(
+        project_id: int, page: str, mode: str, preflight: dict, started: datetime, requested_run_id: str | None = None,
+    ) -> dict:
         return {
-            "id": f"run-{uuid4().hex}", "project_id": project_id, "page": page, "mode": mode,
+            "id": requested_run_id or f"run-{uuid4().hex}", "project_id": project_id, "page": page, "mode": mode,
             "status": "running", "source_label": {
                 "direct": "真实模型（直接调用）", "skill": "真实模型（Skill 工作流）",
                 "local": "本地模拟（未调用 AI）",
@@ -446,41 +451,13 @@ class V020RunService:
             "template_filename": preflight["template_filename"],
             "estimated_input_tokens": preflight["estimated_input_tokens"],
             "max_output_tokens": preflight["max_output_tokens"], "estimated_cost": preflight["estimated_cost"],
+            "request_count": preflight.get("request_count", 1),
             "stage": "准备输入", "stage_events": [], "duration_ms": None,
             "started_at": started.isoformat(), "completed_at": None, "actual_usage": None,
             "actual_cost": None, "error": None, "next_step": "等待运行完成。", "result_summary": None,
+            "progress": {"completed_units": 0, "total_units": preflight.get("request_count", 1), "stage": "准备输入"},
+            "checkpoints": [], "attempts": [], "cancel_requested": False,
         }
-
-    @staticmethod
-    def _completed_events(mode: str) -> list[dict]:
-        detail = "本地模式跳过外部模型调用，生成确定性结果。" if mode == "local" else "模型调用完成。"
-        return [{"stage": stage, "status": "completed", "detail": detail if stage == "调用模型" else "已完成"}
-                for stage in ("准备输入", "调用模型", "校验输出", "保存结果", "完成")]
-
-    @staticmethod
-    def _failed_events(mode: str, message: str) -> list[dict]:
-        return [
-            {"stage": "准备输入", "status": "completed", "detail": "已完成"},
-            {"stage": "调用模型", "status": "failed", "detail": message if mode != "local" else "本地生成失败"},
-            {"stage": "失败", "status": "failed", "detail": message},
-        ]
-
-    @staticmethod
-    def _result_summary(page: str, items: list[dict]) -> dict:
-        return {"count": len(items), "label": {
-            "understanding": "资料理解块",
-            "analysis": "需求分析项", "suggestions": "新增建议", "review": "审核建议", "cases": "候选用例",
-        }[page]}
-
-    @staticmethod
-    def _next_step(page: str) -> str:
-        return {
-            "understanding": "检查资料理解结果，然后开始需求分析。",
-            "analysis": "筛选并勾选将用于生成测试用例的范围。",
-            "suggestions": "逐条接纳或拒绝建议；接纳项会回流需求分析表且默认不勾选。",
-            "review": "逐条决定是否接纳，或直接进入测试用例。",
-            "cases": "预览、编辑并选择纳入的候选用例，然后导出。",
-        }[page]
 
     def _verified_model(self, session_id: str | None):
         resolved = get_session_model_config(session_id)

@@ -73,8 +73,8 @@ export function CaseWorkspace({ projectId, workspace, onChanged }: {
         supplementalRequirements={requirements}
         beforeAction={<label className="field-stack"><strong>4. 补充生成要求（可选）</strong><textarea value={requirements}
           placeholder="例如：优先输出 P0/P1；每个边界场景独立成用例。" onChange={(event) => setRequirements(event.target.value)} /></label>}
-        onRun={async (mode, confirmed) => runCases(projectId, mode, confirmed, template?.mode ?? "default",
-          template?.mode === "uploaded" ? template.mapping?.id ?? null : null, requirements)} /></section>
+        onRun={async (mode, confirmed, runId) => runCases(projectId, mode, confirmed, template?.mode ?? "default",
+          template?.mode === "uploaded" ? template.mapping?.id ?? null : null, requirements, runId)} /></section>
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "cases", "xlsx")}>导出 Excel</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "cases", "json")}>导出 JSON</button></div>
     <section className="case-results"><header><div><h3>候选测试用例</h3><p>支持本次生成与历史记录、筛选分页、编辑、移除恢复和纳入选择。</p></div>

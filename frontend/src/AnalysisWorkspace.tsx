@@ -45,8 +45,8 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
     <MaterialUnderstandingPanel projectId={projectId} workspace={workspace} onChanged={onChanged} />
     <WorkflowRunControls projectId={projectId} page="analysis" actionLabel="开始需求分析" latestRun={latestRun}
       onRunSettled={onChanged}
-      disabled={!workspace.requirement_version} onRun={async (mode, confirmed) => {
-        return runAnalysis(projectId, mode, confirmed);
+      disabled={!workspace.requirement_version} onRun={async (mode, confirmed, runId) => {
+        return runAnalysis(projectId, mode, confirmed, runId);
       }} />
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "analysis", "xlsx")}>下载需求分析表（Excel）</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "analysis", "json")}>下载 JSON</button>

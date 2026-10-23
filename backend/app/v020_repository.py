@@ -60,8 +60,13 @@ class V020Repository:
                     values["template_mode"], values["template_mapping_id"], self.now(),
                 ),
             )
-            if (active_requirement_version_id is not None
-                    and active_requirement_version_id != current["active_requirement_version_id"]):
+            input_changed = (
+                active_requirement_version_id is not None
+                and active_requirement_version_id != current["active_requirement_version_id"]
+            ) or (
+                supplemental_notes is not None and supplemental_notes != current["supplemental_notes"]
+            )
+            if input_changed:
                 for page in ("understanding", "analysis", "suggestions", "review", "cases"):
                     connection.execute(
                         "INSERT INTO v020_active_results(project_id, page, run_id, updated_at) VALUES (?, ?, NULL, ?) "

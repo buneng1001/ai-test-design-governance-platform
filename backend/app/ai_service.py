@@ -5,12 +5,13 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 from app.ai_output_processing import local_structural_repair, validate_output, validate_requirement_analysis_output
 from app.ai_schemas import AIModelConfig, AITaskType, MockScenario
 from app.case_generation_contract import build_mock_case_generation, case_generation_prompt
 from app.model_http import NetworkMode, open_model_request
+from app.provider_streaming import ProviderStreamCancelled, consume_chat_response
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class ModelRequest:
     api_key: str = ""
     prompt_override: str = ""
     network_mode: NetworkMode = "auto"
+    cancel_requested: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -41,10 +43,14 @@ class ModelResponse:
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
+    first_event_ms: int | None = None
+    duration_ms: int | None = None
 
 
 MAX_MOCK_REQUIREMENTS = 100
-MODEL_REQUEST_TIMEOUT_SECONDS = 120
+MODEL_RESPONSE_START_TIMEOUT_SECONDS = 30
+MODEL_STREAM_IDLE_TIMEOUT_SECONDS = 45
+MODEL_REQUEST_TIMEOUT_SECONDS = 180
 # 需求分析需要较大的结构化输出空间，但仍受供应商常见单次输出上限约束。
 REAL_ANALYSIS_MAX_TOKENS = 10000
 
@@ -138,6 +144,7 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         "temperature": request.model_parameters.temperature,
         "max_tokens": request.model_parameters.max_tokens,
         "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
     }
     body_data.update(_provider_request_parameters(request.model_parameters.provider, request.model_parameters.model))
     if include_response_format:
@@ -150,9 +157,12 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         method="POST",
     )
     try:
-        with _open_with_auto_fallback(http_request, MODEL_REQUEST_TIMEOUT_SECONDS, request.network_mode) as response:
-            response_bytes = response.read()
-            payload = json.loads(response_bytes.decode("utf-8"))
+        phase = "response_start"
+        with _open_with_auto_fallback(http_request, MODEL_RESPONSE_START_TIMEOUT_SECONDS, request.network_mode) as response:
+            phase = "stream"
+            _set_stream_idle_timeout(response, MODEL_STREAM_IDLE_TIMEOUT_SECONDS)
+            streamed = consume_chat_response(response, request.cancel_requested, MODEL_REQUEST_TIMEOUT_SECONDS)
+            payload = streamed.payload
             http_status = getattr(response, "status", 200)
         finish_reason = _finish_reason(payload)
         if finish_reason == "length":
@@ -162,23 +172,28 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
                 provider_response=payload,
                 http_status=http_status,
                 finish_reason=finish_reason,
-                response_length=len(response_bytes),
+                response_length=streamed.response_length, first_event_ms=streamed.first_event_ms,
+                duration_ms=streamed.duration_ms,
             )
         try:
             raw_output = _extract_structured_content(payload)
         except (ValueError, KeyError, IndexError, TypeError) as error:
             return ModelResponse(
                 error_code="provider_json_invalid", diagnostic=str(error)[:160], provider_response=payload,
-                http_status=http_status, finish_reason=finish_reason, response_length=len(response_bytes),
+                http_status=http_status, finish_reason=finish_reason, response_length=streamed.response_length,
+                first_event_ms=streamed.first_event_ms, duration_ms=streamed.duration_ms,
             )
         usage = payload.get("usage", {}) if isinstance(payload, dict) else {}
         return ModelResponse(
             raw_output=raw_output, provider_response=payload, http_status=http_status,
-            finish_reason=finish_reason, response_length=len(response_bytes),
+            finish_reason=finish_reason, response_length=streamed.response_length,
             input_tokens=_usage_value(usage, "prompt_tokens", "input_tokens"),
             output_tokens=_usage_value(usage, "completion_tokens", "output_tokens"),
             total_tokens=_usage_value(usage, "total_tokens"),
+            first_event_ms=streamed.first_event_ms, duration_ms=streamed.duration_ms,
         )
+    except ProviderStreamCancelled:
+        return ModelResponse(error_code="provider_cancelled", retryable=False, diagnostic="cancel_requested")
     except HTTPError as error:
         retryable = error.code == 429 or error.code >= 500
         response_length = None
@@ -190,7 +205,8 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
                              diagnostic=f"http_status={error.code}", http_status=error.code,
                              response_length=response_length)
     except TimeoutError as error:
-        return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error).__name__)
+        timeout_phase = "total" if str(error) == "total_timeout" else phase
+        return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=f"{timeout_phase}_timeout")
     except URLError as error:
         if isinstance(error.reason, TimeoutError):
             return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic=type(error.reason).__name__)
@@ -211,6 +227,18 @@ def _open_with_auto_fallback(http_request: Request, timeout: int, network_mode: 
         if network_mode != "auto":
             raise
         return open_model_request(http_request, timeout, "direct", urlopen)
+
+
+def _set_stream_idle_timeout(response, timeout: int) -> None:
+    """urllib 未暴露统一 socket 接口；按 CPython HTTPResponse 路径设置，失败时沿用首包超时。"""
+    candidates = [
+        getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None),
+        getattr(getattr(response, "fp", None), "_sock", None),
+    ]
+    for candidate in candidates:
+        if candidate is not None and hasattr(candidate, "settimeout"):
+            candidate.settimeout(timeout)
+            return
 
 
 def _provider_request_parameters(provider: str, model: str) -> dict[str, object]:

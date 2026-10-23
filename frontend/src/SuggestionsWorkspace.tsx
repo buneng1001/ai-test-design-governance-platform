@@ -20,8 +20,8 @@ export function SuggestionsWorkspace({ projectId, workspace, onChanged }: {
     <PageHeader title="新增建议" subtitle="由 AI 主动发现遗漏测试项、移除建议或风险项；接纳后回流需求分析表，默认不勾选。" />
     <WorkflowRunControls projectId={projectId} page="suggestions" actionLabel="AI 分析新增建议" latestRun={latestRun}
       onRunSettled={onChanged}
-      disabled={!workspace.analysis_rows.length} onRun={async (mode, confirmed) => {
-        return runSuggestions(projectId, mode, confirmed);
+      disabled={!workspace.analysis_rows.length} onRun={async (mode, confirmed, runId) => {
+        return runSuggestions(projectId, mode, confirmed, runId);
       }} />
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "suggestions", "xlsx")}>下载新增建议（Excel）</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "suggestions", "json")}>下载 JSON</button></div>

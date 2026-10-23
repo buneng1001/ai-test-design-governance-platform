@@ -15,20 +15,25 @@ export interface UsageAvailability {
   output_tokens?: number | null; total_tokens?: number | null;
 }
 export interface RunEvidence {
-  id: string; project_id: number; page: RunPage; mode: RunMode; status: "running" | "completed" | "failed";
+  id: string; project_id: number; page: RunPage; mode: RunMode; status: "running" | "completed" | "failed" | "stopped";
   source_label: string; provider: string; model: string; model_endpoint?: string; credential_source: string;
   input_summary: { file_count: number; fragment_count: number; analysis_row_count: number;
     source_fragment_count?: number; context_chunk_count?: number; selected_row_count: number;
     requirement_version_id: number; roles: string[]; material_understanding_used?: boolean;
     material_understanding_run_id?: string | null };
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
+  request_count?: number;
+  max_request_input_tokens?: number;
+  max_total_output_tokens?: number;
   model_timeout_seconds?: number | null;
+  timeout_policy?: { response_start_seconds: number; stream_idle_seconds: number; request_total_seconds: number } | null;
   supplemental_notes: string; supplemental_requirements: string; template_filename: string | null;
   estimated_cost: CostAvailability; actual_usage: UsageAvailability | null; actual_cost: CostAvailability | null;
   stage: string; stage_events: Array<{ stage: string; status: string; detail: string }>;
   duration_ms: number | null; started_at: string; completed_at: string | null; error: string | null;
   next_step: string; result_summary: { count: number; label: string } | null;
-  reused?: boolean;
+  reused?: boolean; cancel_requested?: boolean;
+  progress?: { completed_units: number; total_units: number; stage: string };
   role_reports?: Array<{ role: string; summary: string; strengths: string[]; concerns: string[] }>;
 }
 export interface RunPreflight {
@@ -36,7 +41,11 @@ export interface RunPreflight {
   verification_status: string; input_summary: RunEvidence["input_summary"]; supplemental_notes: string;
   supplemental_requirements: string; template_filename: string | null;
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
+  request_count?: number;
+  max_request_input_tokens?: number;
+  max_total_output_tokens?: number;
   model_timeout_seconds?: number | null;
+  timeout_policy?: { response_start_seconds: number; stream_idle_seconds: number; request_total_seconds: number } | null;
   estimated_cost: CostAvailability; requires_confirmation: boolean;
 }
 export interface CaseGenerationRecord {
