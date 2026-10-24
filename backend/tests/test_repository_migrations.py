@@ -12,6 +12,43 @@ from app.repository import MIGRATIONS
 from test_case_generation_api import _setup as setup_case_generation
 
 
+def test_migrate_allows_v020_downstream_active_result_to_be_cleared(tmp_path) -> None:
+    database_path = tmp_path / "legacy-v020-active-results.sqlite3"
+    legacy_latest_version = 31
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(MIGRATIONS[0])
+        for version, migration in enumerate(MIGRATIONS[1:legacy_latest_version + 1], start=1):
+            connection.executescript(migration)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (version, "2026-01-01T00:00:00+00:00"),
+            )
+        connection.executescript("""
+            ALTER TABLE v020_active_results RENAME TO v020_active_results_nullable;
+            CREATE TABLE v020_active_results (
+                project_id INTEGER NOT NULL REFERENCES projects(id),
+                page TEXT NOT NULL,
+                run_id TEXT NOT NULL REFERENCES v020_runs(id),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (project_id, page)
+            );
+            INSERT INTO v020_active_results SELECT * FROM v020_active_results_nullable;
+            DROP TABLE v020_active_results_nullable;
+        """)
+
+    ProjectRepository(database_path).migrate()
+
+    with sqlite3.connect(database_path) as connection:
+        run_id_column = next(
+            row for row in connection.execute("PRAGMA table_info(v020_active_results)") if row[1] == "run_id"
+        )
+        connection.execute(
+            "INSERT INTO v020_active_results(project_id, page, run_id, updated_at) VALUES (?, ?, NULL, ?)",
+            (999, "analysis", "2026-01-01T00:00:00+00:00"),
+        )
+    assert run_id_column[3] == 0
+
+
 def test_migrate_applies_new_diagnostic_column_to_previous_schema(tmp_path) -> None:
     database_path = tmp_path / "legacy.sqlite3"
     with sqlite3.connect(database_path) as connection:

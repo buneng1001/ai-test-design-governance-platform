@@ -1,6 +1,7 @@
 import base64
 import io
 import re
+import sqlite3
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,7 @@ from app.template_service import inspect_template
 from app.v020_contracts import normalize_analysis_row
 from app.v020_batching import aggregate_usage
 from app.v020_export import _case_xlsx
+from app.v020_run_repository import V020RunRepository
 from app.v020_run_service import estimate_input_tokens
 
 
@@ -413,14 +415,15 @@ class MaterialUnderstandingModelService:
                 "test_basis": "AI 整理结果包含明确时限", "source_reference_id": "input-1",
                 "test_type": "性能测试", "priority": "P1", "related_requirement_id": "REQ-001",
             }]}, input_tokens=70, output_tokens=40, total_tokens=110)
+        source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', request.prompt_override)))
         return ModelResponse(raw_output={
             "overview": "资料描述智能终端的状态切换时限与异常提示要求。",
             "organized_fragments": [{
-                "source_reference_id": "input-1", "title": "状态管理",
+                "source_reference_id": source_id, "title": f"状态管理 {source_id}",
                 "summary": "设备状态切换必须在 2 秒内完成，异常时显示错误提示。",
                 "key_points": ["状态切换时限为 2 秒", "异常状态必须显示错误提示"],
                 "constraints": ["完成时间不超过 2 秒"], "ambiguities": [],
-            }],
+            } for source_id in source_ids],
         }, input_tokens=90, output_tokens=60, total_tokens=150)
 
 
@@ -429,7 +432,7 @@ class TimeoutModelService:
         return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic="TimeoutError")
 
 
-class BatchedAnalysisModelService:
+class AnalysisModelService:
     def __init__(self, fail_first: bool = False) -> None:
         self.prompts: list[str] = []
         self.fail_first = fail_first
@@ -460,19 +463,6 @@ class CancellableModelService:
         return ModelResponse(error_code="provider_timeout", retryable=True)
 
 
-class ResumeModelService(BatchedAnalysisModelService):
-    def __init__(self) -> None:
-        super().__init__()
-        self.call_count = 0
-
-    def complete(self, request) -> ModelResponse:
-        self.call_count += 1
-        if self.call_count in {2, 3}:
-            self.prompts.append(request.prompt_override)
-            return ModelResponse(error_code="provider_timeout", retryable=True)
-        return super().complete(request)
-
-
 class InvalidSourceModelService:
     def complete(self, _request) -> ModelResponse:
         return ModelResponse(raw_output={"rows": [{
@@ -500,10 +490,12 @@ def _project_with_many_sections(client: TestClient, count: int = 9) -> int:
     return project["id"]
 
 
-def test_preflight_applies_context_limit_to_each_bounded_request_not_full_document(tmp_path: Path, monkeypatch) -> None:
+def test_preflight_rejects_a_complete_document_over_the_conservative_context_limit(
+    tmp_path: Path, monkeypatch,
+) -> None:
     application = create_app(
         tmp_path / "v020-large-preflight.db", local_credentials_path=tmp_path / ".env.local",
-        real_model_service=BatchedAnalysisModelService(),
+        real_model_service=AnalysisModelService(),
     )
 
     class FakeResponse:
@@ -530,15 +522,13 @@ def test_preflight_applies_context_limit_to_each_bounded_request_not_full_docume
             "page": "analysis", "mode": "direct",
         })
 
-    assert response.status_code == 200, response.text
-    result = response.json()
-    assert result["estimated_input_tokens"] > 32_000
-    assert result["max_request_input_tokens"] + result["max_output_tokens"] < 32_000
-    assert result["request_count"] == 20
+    assert response.status_code == 422
+    assert "当前完整资料" in response.json()["detail"]
+    assert "32k" in response.json()["detail"]
 
 
-def test_real_analysis_runs_in_bounded_batches_and_records_progress(tmp_path: Path, monkeypatch) -> None:
-    service = BatchedAnalysisModelService()
+def test_real_analysis_sends_the_complete_parsed_document_in_one_request(tmp_path: Path, monkeypatch) -> None:
+    service = AnalysisModelService()
     application = create_app(
         tmp_path / "v020-batches.db", local_credentials_path=tmp_path / ".env.local",
         real_model_service=service,
@@ -564,18 +554,63 @@ def test_real_analysis_runs_in_bounded_batches_and_records_progress(tmp_path: Pa
         })
 
     assert response.status_code == 201, response.text
-    assert preflight["request_count"] == 5
-    assert len(service.prompts) == 5
+    assert preflight["request_count"] == 1
+    assert preflight["max_output_tokens"] == 8_000
+    assert preflight["max_total_output_tokens"] == 8_000
+    assert preflight["timeout_policy"]["request_total_seconds"] == 600
+    assert len(service.prompts) == 1
     assert all("requirement-analysis.direct.v4" in prompt for prompt in service.prompts)
+    assert '"source_reference_id":"input-1"' in service.prompts[0]
+    assert '"source_reference_id":"input-9"' in service.prompts[0]
     run = response.json()["run"]
-    assert run["progress"] == {"completed_units": 5, "total_units": 5, "stage": "保存结果"}
-    assert len(run["checkpoints"]) == 5
-    assert run["actual_usage"]["total_tokens"] == 750
+    assert run["progress"] == {"completed_units": 1, "total_units": 1, "stage": "保存结果"}
+    assert len(run["checkpoints"]) == 1
+    assert run["actual_usage"]["total_tokens"] == 150
     assert len(response.json()["rows"]) == 9
 
 
-def test_retryable_batch_failure_is_retried_once(tmp_path: Path, monkeypatch) -> None:
-    service = BatchedAnalysisModelService(fail_first=True)
+def test_material_understanding_sends_the_complete_parsed_document_in_one_request(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    service = MaterialUnderstandingModelService()
+    application = create_app(
+        tmp_path / "v020-understanding-single-request.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client)
+        headers = {"X-Session-ID": "v020-understanding-single-request"}
+        config = {
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        }
+        assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
+        preflight = client.post(f"/api/v0.2/projects/{project_id}/run-preflight", headers=headers, json={
+            "page": "understanding", "mode": "direct",
+        })
+        response = client.post(
+            f"/api/v0.2/projects/{project_id}/material-understanding-runs", headers=headers,
+            json={"mode": "direct", "confirmed": True},
+        )
+
+    assert preflight.status_code == 200, preflight.text
+    assert preflight.json()["request_count"] == 1
+    assert response.status_code == 201, response.text
+    assert len(service.prompts) == 1
+    assert '"source_reference_id":"input-1"' in service.prompts[0]
+    assert '"source_reference_id":"input-9"' in service.prompts[0]
+    assert len(response.json()["understanding"]["organized_fragments"]) == 9
+
+
+def test_retryable_model_failure_is_retried_once(tmp_path: Path, monkeypatch) -> None:
+    service = AnalysisModelService(fail_first=True)
     application = create_app(
         tmp_path / "v020-batch-retry.db", local_credentials_path=tmp_path / ".env.local",
         real_model_service=service,
@@ -638,8 +673,8 @@ def test_running_request_can_be_cancelled_with_known_run_id(tmp_path: Path, monk
     assert final_run["progress"]["completed_units"] == 0
 
 
-def test_failed_batched_run_resumes_from_last_valid_checkpoint(tmp_path: Path, monkeypatch) -> None:
-    service = ResumeModelService()
+def test_failed_final_save_reuses_the_completed_model_request_checkpoint(tmp_path: Path, monkeypatch) -> None:
+    service = AnalysisModelService()
     application = create_app(
         tmp_path / "v020-resume.db", local_credentials_path=tmp_path / ".env.local",
         real_model_service=service,
@@ -651,6 +686,17 @@ def test_failed_batched_run_resumes_from_last_valid_checkpoint(tmp_path: Path, m
         def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
 
     monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    original_set_active_run = V020RunRepository.set_active_run
+    failed_once = False
+
+    def fail_first_analysis_activation(self, project_id, page, run_id):
+        nonlocal failed_once
+        if page == "analysis" and not failed_once:
+            failed_once = True
+            raise sqlite3.IntegrityError("simulated legacy active-result constraint")
+        return original_set_active_run(self, project_id, page, run_id)
+
+    monkeypatch.setattr(V020RunRepository, "set_active_run", fail_first_analysis_activation)
     with TestClient(application) as client:
         project_id = _project_with_many_sections(client)
         headers = {"X-Session-ID": "v020-resume"}
@@ -664,11 +710,11 @@ def test_failed_batched_run_resumes_from_last_valid_checkpoint(tmp_path: Path, m
             "mode": "direct", "confirmed": True,
         })
 
-    assert first.status_code == 504
+    assert first.status_code == 500
     assert second.status_code == 201, second.text
     assert second.json()["run"]["resumed_from_run_id"]
-    assert second.json()["run"]["progress"]["completed_units"] == 5
-    assert service.call_count == 7
+    assert second.json()["run"]["progress"]["completed_units"] == 1
+    assert len(service.prompts) == 1
 
 
 def test_invalid_batch_is_rejected_before_checkpoint_is_saved(tmp_path: Path, monkeypatch) -> None:
@@ -820,11 +866,11 @@ def test_model_timeout_returns_actionable_error_and_persists_failed_run(tmp_path
     assert detail["stage"] == "model_call"
     assert detail["error_type"] == "timeout"
     assert detail["retryable"] is True
-    assert "180 秒" in detail["user_message"]
+    assert "600 秒" in detail["user_message"]
     failed = workspace["runs"][-1]
     assert failed["status"] == "failed"
     assert failed["duration_ms"] is not None
-    assert "180 秒" in failed["error"]
+    assert "600 秒" in failed["error"]
 
 
 def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path: Path, monkeypatch) -> None:

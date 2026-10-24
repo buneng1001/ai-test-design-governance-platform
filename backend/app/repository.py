@@ -483,6 +483,19 @@ MIGRATIONS = (
         PRIMARY KEY (project_id, page)
     );
     """,
+    """
+    CREATE TABLE v020_active_results_v2 (
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        page TEXT NOT NULL,
+        run_id TEXT REFERENCES v020_runs(id),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, page)
+    );
+    INSERT INTO v020_active_results_v2(project_id, page, run_id, updated_at)
+        SELECT project_id, page, run_id, updated_at FROM v020_active_results;
+    DROP TABLE v020_active_results;
+    ALTER TABLE v020_active_results_v2 RENAME TO v020_active_results;
+    """,
 )
 
 

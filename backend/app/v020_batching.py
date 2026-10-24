@@ -9,24 +9,12 @@ from app.v020_run_schemas import (
 )
 
 
-MAX_FRAGMENTS_PER_REQUEST = 2
-PER_REQUEST_OUTPUT_TOKENS = 3_000
+PER_REQUEST_OUTPUT_TOKENS = 8_000
 
 
-def batch_contexts(page: str, context: dict) -> list[dict]:
-    """资料理解和需求分析按来源块拆分；其余阶段保持一次调用。"""
-    if page not in {"understanding", "analysis"}:
-        return [context]
-    fragments = context.get("fragments", [])
-    batches = []
-    for start in range(0, len(fragments), MAX_FRAGMENTS_PER_REQUEST):
-        batch = {**context, "fragments": fragments[start:start + MAX_FRAGMENTS_PER_REQUEST]}
-        batch["request_scope"] = {
-            "completed_before": start,
-            "source_ids": [item["source_reference_id"] for item in batch["fragments"]],
-        }
-        batches.append(batch)
-    return batches
+def batch_contexts(_page: str, context: dict) -> list[dict]:
+    """每个工作阶段保持一次完整模型请求，超限输入由调用前检查明确拒绝。"""
+    return [context]
 
 
 def merge_batch_outputs(page: str, outputs: list[dict]) -> dict:
@@ -62,7 +50,7 @@ def merge_batch_outputs(page: str, outputs: list[dict]) -> dict:
 def aggregate_usage(usages: list[dict]) -> dict:
     available = [usage for usage in usages if usage.get("status") == "available"]
     if len(available) != len(usages):
-        return {"status": "unavailable", "reason": "部分或全部来源范围未返回 Token 用量，不能可靠汇总。"}
+        return {"status": "unavailable", "reason": "部分或全部模型请求未返回 Token 用量，不能可靠汇总。"}
     return {
         "status": "available",
         "input_tokens": _sum_optional(available, "input_tokens"),
@@ -79,11 +67,11 @@ def execute_model_batches(
     usages = [checkpoint["usage"] for checkpoint in run.get("checkpoints", [])]
     for index, batch_context in enumerate(contexts[len(outputs):], start=len(outputs) + 1):
         if _cancel_requested(run_repository, run):
-            raise V020RunError(409, "本次运行已停止；已完成的来源范围已保留，可稍后继续。")
+            raise V020RunError(409, "本次运行已停止；已完成的模型请求已保留，可稍后继续。")
         response = None
         for attempt in range(1, 3):
             if _cancel_requested(run_repository, run):
-                raise V020RunError(409, "本次运行已停止；已完成的来源范围已保留，可稍后继续。")
+                raise V020RunError(409, "本次运行已停止；已完成的模型请求已保留，可稍后继续。")
             response = model_service.complete(ModelRequest(
                 task_type={
                     "understanding": "requirement_review", "analysis": "requirement_review",
@@ -105,12 +93,12 @@ def execute_model_batches(
             })
             run_repository.update_run(run)
             if run.get("cancel_requested") and response.error_code != "provider_cancelled":
-                raise V020RunError(409, "本次运行已停止；已完成的来源范围已保留，可稍后继续。")
+                raise V020RunError(409, "本次运行已停止；已完成的模型请求已保留，可稍后继续。")
             if not response.error_code or not response.retryable or attempt == 2:
                 break
         assert response is not None
         if response.error_code == "provider_cancelled":
-            raise V020RunError(409, "本次运行已停止；已完成的来源范围已保留，可稍后继续。")
+            raise V020RunError(409, "本次运行已停止；已完成的模型请求已保留，可稍后继续。")
         if response.error_code:
             status_code, detail = model_failure(response, preflight["provider"], preflight["model"], page)
             raise V020RunError(status_code, detail)
@@ -122,7 +110,7 @@ def execute_model_batches(
         usages.append(usage)
         run["checkpoints"].append({"unit": index, "output": response.raw_output, "usage": usage})
         run["progress"] = {"completed_units": index, "total_units": len(contexts), "stage": "调用模型"}
-        run["stage"] = f"已处理 {index}/{len(contexts)} 个来源范围"
+        run["stage"] = f"模型请求已完成 {index}/{len(contexts)}"
         run_repository.update_run(run)
     run["progress"]["stage"] = "保存结果"
     return merge_batch_outputs(page, outputs), aggregate_usage(usages)

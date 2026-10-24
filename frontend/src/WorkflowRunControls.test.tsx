@@ -69,7 +69,7 @@ test("真实模型运行中展示保存进度并允许停止", async () => {
         selected_row_count: 0, requirement_version_id: 1, roles: [] }, prompt_version: "v3", skill_version: null,
       estimated_input_tokens: 100, max_output_tokens: 3000, supplemental_notes: "", supplemental_requirements: "",
       template_filename: null, estimated_cost: { status: "unavailable" }, actual_usage: null, actual_cost: null,
-      stage: "已处理 1/2 个来源范围", stage_events: [], duration_ms: null, started_at: "", completed_at: null,
+      stage: "模型请求已完成 1/2", stage_events: [], duration_ms: null, started_at: "", completed_at: null,
       error: null, next_step: "正在停止", result_summary: null,
       progress: { completed_units: 1, total_units: 2, stage: "调用模型" },
     }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -89,7 +89,7 @@ test("真实模型运行中展示保存进度并允许停止", async () => {
   await user.click(await screen.findByRole("button", { name: "确认并开始需求分析" }));
   expect(await screen.findByRole("button", { name: "停止本次运行" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "停止本次运行" }));
-  expect(await screen.findByText("已处理来源范围 1/2；每个已完成范围均已保存检查点。")).toBeInTheDocument();
+  expect(await screen.findByText("模型请求进度 1/2；已完成请求均已保存检查点。")).toBeInTheDocument();
 });
 
 test("运行建议中的历史 HTML 实体会还原为正常中文", () => {

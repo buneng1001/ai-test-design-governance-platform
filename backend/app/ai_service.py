@@ -51,6 +51,7 @@ MAX_MOCK_REQUIREMENTS = 100
 MODEL_RESPONSE_START_TIMEOUT_SECONDS = 30
 MODEL_STREAM_IDLE_TIMEOUT_SECONDS = 45
 MODEL_REQUEST_TIMEOUT_SECONDS = 180
+MODEL_RUN_TOTAL_TIMEOUT_SECONDS = 600
 # 需求分析需要较大的结构化输出空间，但仍受供应商常见单次输出上限约束。
 REAL_ANALYSIS_MAX_TOKENS = 10000
 
@@ -161,7 +162,7 @@ def _request_json(request: ModelRequest, prompt: str, include_response_format: b
         with _open_with_auto_fallback(http_request, MODEL_RESPONSE_START_TIMEOUT_SECONDS, request.network_mode) as response:
             phase = "stream"
             _set_stream_idle_timeout(response, MODEL_STREAM_IDLE_TIMEOUT_SECONDS)
-            streamed = consume_chat_response(response, request.cancel_requested, MODEL_REQUEST_TIMEOUT_SECONDS)
+            streamed = consume_chat_response(response, request.cancel_requested, MODEL_RUN_TOTAL_TIMEOUT_SECONDS)
             payload = streamed.payload
             http_status = getattr(response, "status", 200)
         finish_reason = _finish_reason(payload)

@@ -5,7 +5,7 @@ from time import perf_counter
 from uuid import uuid4
 
 from app.ai_service import (
-    MODEL_REQUEST_TIMEOUT_SECONDS, MODEL_RESPONSE_START_TIMEOUT_SECONDS, MODEL_STREAM_IDLE_TIMEOUT_SECONDS,
+    MODEL_RESPONSE_START_TIMEOUT_SECONDS, MODEL_RUN_TOTAL_TIMEOUT_SECONDS, MODEL_STREAM_IDLE_TIMEOUT_SECONDS,
     ModelService,
 )
 from app.case_lifecycle_service import default_template
@@ -75,7 +75,7 @@ class V020RunService:
         max_request_input_tokens = max(request_input_tokens)
         if max_request_input_tokens + max_output_tokens > 32_000:
             raise V020RunError(
-                422, "单个来源范围与预留输出合计超过 32k 保守上下文上限，请按资料文件或章节缩小范围后再运行。",
+                422, "当前完整资料与预留输出合计超过 32k 保守上下文上限，请按资料文件或章节缩小范围后再运行。",
             )
         provider = model = credential_source = model_endpoint = "不适用"
         verification_status = "本地模式无需验证"
@@ -104,11 +104,11 @@ class V020RunService:
             "max_output_tokens": max_output_tokens,
             "max_total_output_tokens": max_output_tokens * len(contexts),
             "request_count": len(contexts),
-            "model_timeout_seconds": MODEL_REQUEST_TIMEOUT_SECONDS if mode != "local" else None,
+            "model_timeout_seconds": MODEL_RUN_TOTAL_TIMEOUT_SECONDS if mode != "local" else None,
             "timeout_policy": ({
                 "response_start_seconds": MODEL_RESPONSE_START_TIMEOUT_SECONDS,
                 "stream_idle_seconds": MODEL_STREAM_IDLE_TIMEOUT_SECONDS,
-                "request_total_seconds": MODEL_REQUEST_TIMEOUT_SECONDS,
+                "request_total_seconds": MODEL_RUN_TOTAL_TIMEOUT_SECONDS,
             } if mode != "local" else None),
             "estimated_cost": {
                 "status": "unavailable", "reason": "当前模型未登记可审计的输入/输出单价，无法估算费用。",
