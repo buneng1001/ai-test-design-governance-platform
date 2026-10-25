@@ -10,19 +10,18 @@ test("真实模型先展示输入与成本确认，取消时不会调用模型",
   const user = userEvent.setup();
   const onRun = vi.fn(async () => undefined);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-    page: "analysis", mode: "direct", provider: "custom", model: "verified-model",
+    page: "analysis", mode: "skill", provider: "custom", model: "verified-model",
     credential_source: "session", verification_status: "verified",
     input_summary: { file_count: 2, fragment_count: 8, analysis_row_count: 0, selected_row_count: 0,
       requirement_version_id: 3, roles: [] }, supplemental_notes: "关注异常流程",
     supplemental_requirements: "", template_filename: null,
-    prompt_version: "requirement-analysis.direct.v1", skill_version: null,
+    prompt_version: "requirement-analysis.skill.v5", skill_version: "ai-test-design-requirement-analysis.v1",
     estimated_input_tokens: 1280, max_output_tokens: 10000, model_timeout_seconds: 120,
     estimated_cost: { status: "unavailable", reason: "未登记单价" }, requires_confirmation: true,
   }), { status: 200, headers: { "Content-Type": "application/json" } }));
 
   render(<WorkflowRunControls projectId={1} page="analysis" actionLabel="开始需求分析" onRun={onRun} />);
   expect(screen.getByText("运行状态：尚未执行")).toBeInTheDocument();
-  await user.click(screen.getByLabelText("真实模型（直接调用）"));
   await user.click(screen.getByRole("button", { name: "查看调用范围" }));
 
   expect(await screen.findByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("2 份资料、8 个来源片段");
@@ -50,6 +49,7 @@ test("相同输入命中已有结果时明确提示未再次调用模型", async
   }), { status: 200, headers: { "Content-Type": "application/json" } }));
 
   render(<WorkflowRunControls projectId={1} page="analysis" actionLabel="开始需求分析" onRun={onRun} />);
+  await user.click(screen.getByLabelText("本地模式（不调用 AI）"));
   await user.click(screen.getByRole("button", { name: "开始需求分析" }));
 
   expect((await screen.findByText(/输入与配置未变化/)).closest("p"))
@@ -63,7 +63,7 @@ test("真实模型运行中展示保存进度并允许停止", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url.endsWith("/cancel")) return new Response(JSON.stringify({
-      id: url.split("/").at(-2), project_id: 1, page: "analysis", mode: "direct", status: "running",
+      id: url.split("/").at(-2), project_id: 1, page: "analysis", mode: "skill", status: "running",
       cancel_requested: true, source_label: "真实模型（直接调用）", provider: "custom", model: "m",
       credential_source: "session", input_summary: { file_count: 1, fragment_count: 4, analysis_row_count: 0,
         selected_row_count: 0, requirement_version_id: 1, roles: [] }, prompt_version: "v3", skill_version: null,
@@ -74,7 +74,7 @@ test("真实模型运行中展示保存进度并允许停止", async () => {
       progress: { completed_units: 1, total_units: 2, stage: "调用模型" },
     }), { status: 200, headers: { "Content-Type": "application/json" } });
     return new Response(JSON.stringify({
-      page: "analysis", mode: "direct", provider: "custom", model: "m", credential_source: "session",
+      page: "analysis", mode: "skill", provider: "custom", model: "m", credential_source: "session",
       verification_status: "verified", input_summary: { file_count: 1, fragment_count: 4, analysis_row_count: 0,
         selected_row_count: 0, requirement_version_id: 1, roles: [] }, supplemental_notes: "",
       supplemental_requirements: "", template_filename: null, prompt_version: "v3", skill_version: null,
@@ -84,12 +84,14 @@ test("真实模型运行中展示保存进度并允许停止", async () => {
   });
 
   render(<WorkflowRunControls projectId={1} page="analysis" actionLabel="开始需求分析" onRun={onRun} />);
-  await user.click(screen.getByLabelText("真实模型（直接调用）"));
   await user.click(screen.getByRole("button", { name: "查看调用范围" }));
   await user.click(await screen.findByRole("button", { name: "确认并开始需求分析" }));
+  expect(await screen.findByText("本次调用信息（已确认并发送）")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "确认并开始需求分析" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
   expect(await screen.findByRole("button", { name: "停止本次运行" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "停止本次运行" }));
-  expect(await screen.findByText("模型请求进度 1/2；已完成请求均已保存检查点。")).toBeInTheDocument();
+  expect(await screen.findByText("Skill 阶段进度 1/2；已完成阶段均已保存检查点。")).toBeInTheDocument();
 });
 
 test("运行建议中的历史 HTML 实体会还原为正常中文", () => {
@@ -103,6 +105,9 @@ test("运行建议中的历史 HTML 实体会还原为正常中文", () => {
     template_filename: null, estimated_cost: { status: "unavailable" }, actual_usage: null, actual_cost: null,
     stage: "失败", stage_events: [], duration_ms: 10, started_at: "", completed_at: "", error: "超时",
     next_step: "&#x6839;据失败原因重试", result_summary: null,
+    attempts: [{ unit: 1, stage_id: "S00", attempt: 1, error_code: "provider_response_truncated",
+      finish_reason: "length", response_length: 8192, diagnostic: "finish_reason=length" }],
   }} />);
   expect(screen.getByText(/根据失败原因重试/)).toBeInTheDocument();
+  expect(screen.getByText(/S00.*finish_reason=length.*响应长度=8192/)).toBeInTheDocument();
 });

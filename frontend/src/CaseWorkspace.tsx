@@ -67,6 +67,7 @@ export function CaseWorkspace({ projectId, workspace, onChanged }: {
       <span>已选 {selectedRows.length} 个测试点{selectedRows.length ? `：${selectedRows.slice(0, 3).map((row) => row.test_point).join("、")}${selectedRows.length > 3 ? "…" : ""}` : "；请先到需求分析页勾选"}</span></section>
     <section className="numbered-section"><strong>3. 生成模式</strong>
       <WorkflowRunControls projectId={projectId} page="cases" actionLabel="生成测试用例" latestRun={latestRun}
+        allowedModes={["skill", "local"]} defaultMode="skill"
         onRunSettled={onChanged}
         disabled={!selectedRows.length || !template?.mapping}
         templateMode={template?.mode ?? "default"} templateMappingId={template?.mode === "uploaded" ? template.mapping?.id ?? null : null}

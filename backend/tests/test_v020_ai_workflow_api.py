@@ -396,11 +396,7 @@ class CaptureModelService:
 
     def complete(self, request) -> ModelResponse:
         self.prompts.append(request.prompt_override)
-        return ModelResponse(raw_output={"rows": [{
-            "module": "状态管理", "test_item": "验证状态切换耗时",
-            "test_basis": "约束包含明确时限", "source_reference_id": "input-1",
-            "test_type": "性能测试", "priority": "P1", "related_requirement_id": "REQ-001",
-        }]}, input_tokens=120, output_tokens=80, total_tokens=200)
+        return _analysis_stage_response(request.prompt_override)
 
 
 class MaterialUnderstandingModelService:
@@ -409,12 +405,8 @@ class MaterialUnderstandingModelService:
 
     def complete(self, request) -> ModelResponse:
         self.prompts.append(request.prompt_override)
-        if "requirement-analysis.direct.v4" in request.prompt_override:
-            return ModelResponse(raw_output={"rows": [{
-                "module": "状态管理", "test_item": "验证状态切换耗时",
-                "test_basis": "AI 整理结果包含明确时限", "source_reference_id": "input-1",
-                "test_type": "性能测试", "priority": "P1", "related_requirement_id": "REQ-001",
-            }]}, input_tokens=70, output_tokens=40, total_tokens=110)
+        if "requirement-analysis.skill.v5" in request.prompt_override:
+            return _analysis_stage_response(request.prompt_override, basis="AI 整理结果包含明确时限")
         source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', request.prompt_override)))
         return ModelResponse(raw_output={
             "overview": "资料描述智能终端的状态切换时限与异常提示要求。",
@@ -432,6 +424,14 @@ class TimeoutModelService:
         return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic="TimeoutError")
 
 
+class TruncatedModelService:
+    def complete(self, _request) -> ModelResponse:
+        return ModelResponse(
+            error_code="provider_response_truncated", retryable=False, diagnostic="finish_reason=length",
+            finish_reason="length", response_length=8192, duration_ms=2345, first_event_ms=120,
+        )
+
+
 class AnalysisModelService:
     def __init__(self, fail_first: bool = False) -> None:
         self.prompts: list[str] = []
@@ -442,12 +442,20 @@ class AnalysisModelService:
         if self.fail_first:
             self.fail_first = False
             return ModelResponse(error_code="provider_timeout", retryable=True, diagnostic="TimeoutError")
-        source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', request.prompt_override)))
-        return ModelResponse(raw_output={"rows": [{
-            "module": "状态管理", "test_item": f"验证 {source_id} 对应功能",
-            "test_basis": "来源中存在明确要求", "source_reference_id": source_id,
-            "test_type": "功能测试", "priority": "P1", "related_requirement_id": source_id,
-        } for source_id in source_ids]}, input_tokens=100, output_tokens=50, total_tokens=150)
+        return _analysis_stage_response(request.prompt_override)
+
+
+class StageFailureModelService:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+        self.failed = False
+
+    def complete(self, request) -> ModelResponse:
+        self.prompts.append(request.prompt_override)
+        if "当前阶段：S03" in request.prompt_override and not self.failed:
+            self.failed = True
+            return ModelResponse(error_code="provider_http_400", retryable=False, diagnostic="simulated")
+        return _analysis_stage_response(request.prompt_override)
 
 
 class CancellableModelService:
@@ -464,12 +472,41 @@ class CancellableModelService:
 
 
 class InvalidSourceModelService:
-    def complete(self, _request) -> ModelResponse:
-        return ModelResponse(raw_output={"rows": [{
-            "module": "越界", "test_item": "越界来源", "test_basis": "无效来源",
-            "source_reference_id": "input-999", "test_type": "功能测试", "priority": "P1",
-            "related_requirement_id": "REQ-X",
-        }]})
+    def complete(self, request) -> ModelResponse:
+        return _analysis_stage_response(request.prompt_override, invalid_source=True)
+
+
+def _analysis_stage_response(prompt: str, *, basis: str = "来源中存在明确要求",
+                             invalid_source: bool = False) -> ModelResponse:
+    stage = re.search(r"当前阶段：(S\d{2})", prompt).group(1)
+    source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', prompt))) or ["input-1"]
+    if invalid_source:
+        source_ids = ["input-999"]
+    requirement_ids = [f"REQ-{index:03d}" for index in range(1, len(source_ids) + 1)]
+    if stage == "S00":
+        raw = {"atomic_requirements": [{
+            "requirement_id": requirement_id, "statement": f"{source_id} 的明确需求",
+            "source_reference_id": source_id,
+        } for source_id, requirement_id in zip(source_ids, requirement_ids)], "questions": []}
+    elif stage == "S01":
+        raw = {"functions": [{
+            "function_id": f"FUN-{index:03d}", "module": "状态管理", "name": f"功能 {index}",
+            "description": "执行资料中描述的功能", "requirement_ids": [requirement_id],
+        } for index, requirement_id in enumerate(requirement_ids, start=1)]}
+    elif stage == "S02":
+        raw = {"rules": [{"rule_id": f"RULE-{index:03d}", "description": "遵守资料约束",
+                           "requirement_ids": [requirement_id]}
+                          for index, requirement_id in enumerate(requirement_ids, start=1)]}
+    else:
+        stage_type = {"S03": "功能测试", "S04": "异常测试", "S05": "边界测试", "S06": "安全性测试"}[stage]
+        pairs = list(zip(source_ids, requirement_ids)) if stage == "S03" else [(source_ids[0], requirement_ids[0])]
+        raw = {"rows": [{
+            "module": "状态管理", "test_item": f"{stage} 验证 {source_id} 对应功能",
+            "test_basis": basis, "source_reference_id": source_id, "test_type": stage_type,
+            "priority": "P1", "related_requirement_id": requirement_id,
+        } for source_id, requirement_id in pairs]}
+    return ModelResponse(raw_output=raw, input_tokens=100, output_tokens=50, total_tokens=150,
+                         finish_reason="stop", response_length=512)
 
 
 def _project_with_many_sections(client: TestClient, count: int = 9) -> int:
@@ -519,7 +556,7 @@ def test_preflight_rejects_a_complete_document_over_the_conservative_context_lim
                   "api_key": "test-only-secret", "remember_api_key": False}
         client.post("/api/ai-session-config/test", headers=headers, json=config)
         response = client.post(f"/api/v0.2/projects/{project['id']}/run-preflight", headers=headers, json={
-            "page": "analysis", "mode": "direct",
+            "page": "analysis", "mode": "skill",
         })
 
     assert response.status_code == 422
@@ -527,7 +564,7 @@ def test_preflight_rejects_a_complete_document_over_the_conservative_context_lim
     assert "32k" in response.json()["detail"]
 
 
-def test_real_analysis_sends_the_complete_parsed_document_in_one_request(tmp_path: Path, monkeypatch) -> None:
+def test_skill_analysis_runs_stages_against_the_complete_parsed_document(tmp_path: Path, monkeypatch) -> None:
     service = AnalysisModelService()
     application = create_app(
         tmp_path / "v020-batches.db", local_credentials_path=tmp_path / ".env.local",
@@ -547,26 +584,33 @@ def test_real_analysis_sends_the_complete_parsed_document_in_one_request(tmp_pat
                   "api_key": "test-only-secret", "remember_api_key": False}
         assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
         preflight = client.post(f"/api/v0.2/projects/{project_id}/run-preflight", headers=headers, json={
-            "page": "analysis", "mode": "direct",
+            "page": "analysis", "mode": "skill",
         }).json()
         response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
 
     assert response.status_code == 201, response.text
-    assert preflight["request_count"] == 1
-    assert preflight["max_output_tokens"] == 8_000
-    assert preflight["max_total_output_tokens"] == 8_000
+    assert preflight["request_count"] == 7
+    assert preflight["workflow_stage_count"] == 9
+    assert preflight["max_output_tokens"] == 4_000
+    assert preflight["max_total_output_tokens"] == 28_000
     assert preflight["timeout_policy"]["request_total_seconds"] == 600
-    assert len(service.prompts) == 1
-    assert all("requirement-analysis.direct.v4" in prompt for prompt in service.prompts)
-    assert '"source_reference_id":"input-1"' in service.prompts[0]
-    assert '"source_reference_id":"input-9"' in service.prompts[0]
+    assert len(service.prompts) == 7
+    assert [re.search(r"当前阶段：(S\d{2})", prompt).group(1) for prompt in service.prompts] == [
+        "S00", "S01", "S02", "S03", "S04", "S05", "S06",
+    ]
+    assert all("requirement-analysis.skill.v5" in prompt for prompt in service.prompts)
+    assert all('"source_reference_id":"input-1"' in prompt for prompt in service.prompts)
+    assert all('"source_reference_id":"input-9"' in prompt for prompt in service.prompts)
+    assert all("独立来源范围" not in prompt and "平台会确定性合并" not in prompt for prompt in service.prompts)
     run = response.json()["run"]
-    assert run["progress"] == {"completed_units": 1, "total_units": 1, "stage": "保存结果"}
-    assert len(run["checkpoints"]) == 1
-    assert run["actual_usage"]["total_tokens"] == 150
-    assert len(response.json()["rows"]) == 9
+    assert run["progress"] == {"completed_units": 9, "total_units": 9, "stage": "保存结果"}
+    assert [item["stage_id"] for item in run["checkpoints"]] == [
+        "S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
+    ]
+    assert run["actual_usage"]["total_tokens"] == 1_050
+    assert len(response.json()["rows"]) >= 9
 
 
 def test_material_understanding_sends_the_complete_parsed_document_in_one_request(
@@ -629,12 +673,12 @@ def test_retryable_model_failure_is_retried_once(tmp_path: Path, monkeypatch) ->
                   "api_key": "test-only-secret", "remember_api_key": False}
         client.post("/api/ai-session-config/test", headers=headers, json=config)
         response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
 
     assert response.status_code == 201, response.text
-    assert len(service.prompts) == 2
-    assert len(response.json()["run"]["attempts"]) == 2
+    assert len(service.prompts) == 8
+    assert len(response.json()["run"]["attempts"]) == 8
 
 
 def test_running_request_can_be_cancelled_with_known_run_id(tmp_path: Path, monkeypatch) -> None:
@@ -659,7 +703,7 @@ def test_running_request_can_be_cancelled_with_known_run_id(tmp_path: Path, monk
         run_id = "run-cancel-known-12345678"
         with ThreadPoolExecutor(max_workers=1) as executor:
             pending = executor.submit(client.post, f"/api/v0.2/projects/{project_id}/analysis-runs",
-                                      headers=headers, json={"mode": "direct", "confirmed": True, "run_id": run_id})
+                                      headers=headers, json={"mode": "skill", "confirmed": True, "run_id": run_id})
             assert service.started.wait(timeout=2)
             progress = client.get(f"/api/v0.2/projects/{project_id}/runs/{run_id}")
             stopped = client.post(f"/api/v0.2/projects/{project_id}/runs/{run_id}/cancel")
@@ -704,17 +748,54 @@ def test_failed_final_save_reuses_the_completed_model_request_checkpoint(tmp_pat
                   "api_key": "test-only-secret", "remember_api_key": False}
         client.post("/api/ai-session-config/test", headers=headers, json=config)
         first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
         second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
 
     assert first.status_code == 500
     assert second.status_code == 201, second.text
     assert second.json()["run"]["resumed_from_run_id"]
-    assert second.json()["run"]["progress"]["completed_units"] == 1
-    assert len(service.prompts) == 1
+    assert second.json()["run"]["progress"]["completed_units"] == 9
+    assert len(service.prompts) == 7
+
+
+def test_failed_skill_stage_resumes_without_repeating_completed_stages(tmp_path: Path, monkeypatch) -> None:
+    service = StageFailureModelService()
+    application = create_app(
+        tmp_path / "v020-stage-resume.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=1)
+        headers = {"X-Session-ID": "v020-stage-resume"}
+        client.post("/api/ai-session-config/test", headers=headers, json={
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        })
+        first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+        failed_run = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()["runs"][-1]
+        second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+
+    assert first.status_code == 502
+    assert [item["stage_id"] for item in failed_run["checkpoints"]] == ["S00", "S01", "S02"]
+    assert second.status_code == 201, second.text
+    assert second.json()["run"]["resumed_from_run_id"]
+    assert [re.search(r"当前阶段：(S\d{2})", prompt).group(1) for prompt in service.prompts] == [
+        "S00", "S01", "S02", "S03", "S03", "S04", "S05", "S06",
+    ]
 
 
 def test_invalid_batch_is_rejected_before_checkpoint_is_saved(tmp_path: Path, monkeypatch) -> None:
@@ -736,7 +817,7 @@ def test_invalid_batch_is_rejected_before_checkpoint_is_saved(tmp_path: Path, mo
                   "api_key": "test-only-secret", "remember_api_key": False}
         client.post("/api/ai-session-config/test", headers=headers, json=config)
         response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
         workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
 
@@ -823,14 +904,14 @@ def test_analysis_uses_persisted_material_understanding_as_model_context(tmp_pat
             json={"mode": "direct", "confirmed": True},
         )
         analysis = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
 
     assert understood.status_code == 201
     assert analysis.status_code == 201, analysis.text
     assert analysis.json()["run"]["input_summary"]["material_understanding_used"] is True
     assert analysis.json()["rows"][0]["test_basis"] == "AI 整理结果包含明确时限"
-    assert len(service.prompts) == 2
+    assert len(service.prompts) == 8
     assert '"material_understanding_used":true' in service.prompts[1]
     assert "状态切换时限为 2 秒" in service.prompts[1]
 
@@ -857,7 +938,7 @@ def test_model_timeout_returns_actionable_error_and_persists_failed_run(tmp_path
         }
         assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
         response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
         workspace = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()
 
@@ -873,7 +954,41 @@ def test_model_timeout_returns_actionable_error_and_persists_failed_run(tmp_path
     assert "600 秒" in failed["error"]
 
 
-def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path: Path, monkeypatch) -> None:
+def test_truncated_model_output_reports_length_limit_and_persists_diagnostics(tmp_path: Path, monkeypatch) -> None:
+    application = create_app(
+        tmp_path / "v020-truncated.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=TruncatedModelService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_and_material(client)
+        headers = {"X-Session-ID": "v020-truncated"}
+        client.post("/api/ai-session-config/test", headers=headers, json={
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        })
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+        failed = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()["runs"][-1]
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_type"] == "output_truncated"
+    assert "模型输出达到长度上限" in response.json()["detail"]["user_message"]
+    assert failed["attempts"][-1] == {
+        "unit": 1, "stage_id": "S00", "attempt": 1, "error_code": "provider_response_truncated",
+        "duration_ms": 2345, "first_event_ms": 120, "finish_reason": "length",
+        "response_length": 8192, "diagnostic": "finish_reason=length",
+    }
+
+
+def test_direct_mode_is_disabled_and_skill_mode_runs_versioned_stages(tmp_path: Path, monkeypatch) -> None:
     service = CaptureModelService()
     application = create_app(
         tmp_path / "v020-ai.db", local_credentials_path=tmp_path / ".env.local",
@@ -901,15 +1016,15 @@ def test_direct_and_skill_use_same_scope_but_distinct_versioned_prompts(tmp_path
             "mode": "skill", "confirmed": True,
         })
 
-    assert direct.status_code == 201, direct.text
+    assert direct.status_code == 422, direct.text
+    assert "已停用" in direct.json()["detail"]
     assert skill.status_code == 201, skill.text
-    assert direct.json()["run"]["input_summary"] == skill.json()["run"]["input_summary"]
-    assert direct.json()["run"]["prompt_version"] == "requirement-analysis.direct.v4"
-    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v4"
+    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v5"
     assert skill.json()["run"]["skill_version"] == "ai-test-design-requirement-analysis.v1"
-    assert "Step 00" not in service.prompts[0]
-    assert "Step 00" in service.prompts[1] and "Step 08" in service.prompts[1]
-    assert skill.json()["run"]["actual_usage"]["total_tokens"] == 200
+    assert len(service.prompts) == 7
+    assert "当前阶段：S00" in service.prompts[0]
+    assert "当前阶段：S06" in service.prompts[-1]
+    assert skill.json()["run"]["actual_usage"]["total_tokens"] == 1_050
 
 
 def test_real_model_is_not_called_twice_for_identical_completed_input(tmp_path: Path, monkeypatch) -> None:
@@ -934,16 +1049,16 @@ def test_real_model_is_not_called_twice_for_identical_completed_input(tmp_path: 
         }
         assert client.post("/api/ai-session-config/test", headers=headers, json=config).json()["success"] is True
         first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
         second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
-            "mode": "direct", "confirmed": True,
+            "mode": "skill", "confirmed": True,
         })
 
     assert first.status_code == 201
     assert second.status_code == 200
     assert second.json()["reused"] is True
-    assert len(service.prompts) == 1
+    assert len(service.prompts) == 7
 
 
 def test_case_xlsx_respects_confirmed_template_field_mapping() -> None:

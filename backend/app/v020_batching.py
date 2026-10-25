@@ -90,6 +90,8 @@ def execute_model_batches(
             run["attempts"].append({
                 "unit": index, "attempt": attempt, "error_code": response.error_code,
                 "duration_ms": response.duration_ms, "first_event_ms": response.first_event_ms,
+                "finish_reason": response.finish_reason, "response_length": response.response_length,
+                "diagnostic": response.diagnostic,
             })
             run_repository.update_run(run)
             if run.get("cancel_requested") and response.error_code != "provider_cancelled":

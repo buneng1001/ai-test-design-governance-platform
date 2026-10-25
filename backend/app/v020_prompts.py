@@ -5,7 +5,7 @@ from app.v020_contracts import TEST_TYPES
 
 PROMPT_VERSIONS = {
     "understanding": {"direct": "material-understanding.direct.v2"},
-    "analysis": {"direct": "requirement-analysis.direct.v4", "skill": "requirement-analysis.skill.v4"},
+    "analysis": {"direct": "requirement-analysis.direct.v4", "skill": "requirement-analysis.skill.v5"},
     "suggestions": {"direct": "coverage-suggestions.direct.v2", "skill": "coverage-suggestions.skill.v2"},
     "review": {"direct": "role-review.direct.v2", "skill": "role-review.skill.v2"},
     "cases": {"direct": "case-generation.direct.v2", "skill": "case-generation.skill.v2"},
@@ -53,8 +53,7 @@ def build_prompt(page: str, mode: str, context: dict) -> str:
     }[page]
     method = _skill_method(page) if mode == "skill" else _direct_method(page)
     return (
-        f"提示版本：{PROMPT_VERSIONS[page][mode]}。当前输入可能是完整任务的一个独立来源范围；"
-        f"只分析本次 request_scope，平台会确定性合并各范围结果。{method}\n{contract}"
+        f"提示版本：{PROMPT_VERSIONS[page][mode]}。这是当前完整输入的一次分析。{method}\n{contract}"
         f"test_type 只能从以下常见分类中选择：{test_types}。优先级只使用 P0、P1、P2、P3。"
         "只输出有明确输入依据且适用于当前测试项的测试类型；不得为了覆盖上述分类而机械凑数或重复改写同一测试项。"
         "只使用输入范围中的事实与 ID，只输出 JSON，不得补造来源或输出 API Key。\n"

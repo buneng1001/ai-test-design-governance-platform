@@ -23,6 +23,7 @@ export interface RunEvidence {
     material_understanding_run_id?: string | null };
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
   request_count?: number;
+  workflow_stage_count?: number;
   max_request_input_tokens?: number;
   max_total_output_tokens?: number;
   model_timeout_seconds?: number | null;
@@ -34,6 +35,9 @@ export interface RunEvidence {
   next_step: string; result_summary: { count: number; label: string } | null;
   reused?: boolean; cancel_requested?: boolean;
   progress?: { completed_units: number; total_units: number; stage: string };
+  attempts?: Array<{ unit: number; stage_id?: string; attempt: number; error_code?: string | null;
+    duration_ms?: number | null; first_event_ms?: number | null; finish_reason?: string | null;
+    response_length?: number | null; diagnostic?: string | null }>;
   role_reports?: Array<{ role: string; summary: string; strengths: string[]; concerns: string[] }>;
 }
 export interface RunPreflight {
@@ -42,6 +46,7 @@ export interface RunPreflight {
   supplemental_requirements: string; template_filename: string | null;
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
   request_count?: number;
+  workflow_stage_count?: number;
   max_request_input_tokens?: number;
   max_total_output_tokens?: number;
   model_timeout_seconds?: number | null;

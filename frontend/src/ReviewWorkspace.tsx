@@ -26,6 +26,7 @@ export function ReviewWorkspace({ projectId, workspace, onChanged, onSkip }: {
     <fieldset className="role-picker"><legend>选择审核身份</legend>{Object.entries(roleLabels).map(([role, label]) => <label key={role}>
       <input type="checkbox" checked={roles.includes(role)} onChange={(event) => toggleRole(role, event.target.checked)} /> {label}</label>)}</fieldset>
     <WorkflowRunControls projectId={projectId} page="review" roles={roles} actionLabel="开始审核" latestRun={latestRun}
+      allowedModes={["skill", "local"]} defaultMode="skill"
       onRunSettled={onChanged}
       disabled={!workspace.analysis_rows.length || !roles.length}
       onRun={async (mode, confirmed, runId) => {

@@ -24,6 +24,9 @@ from app.v020_run_evidence import completed_events, failed_events, next_step, re
 from app.v020_run_schemas import (
     AnalysisModelOutput, CaseModelOutput, MaterialUnderstandingOutput, ReviewModelOutput, SuggestionModelOutput,
 )
+from app.v020_skill_analysis import (
+    SKILL_STAGE_COUNT, SKILL_STAGE_OUTPUT_TOKENS, execute_skill_analysis, skill_preflight_prompts,
+)
 
 
 def estimate_input_tokens(value: str) -> int:
@@ -55,6 +58,8 @@ class V020RunService:
         *, template_mode: str = "default", template_mapping_id: int | None = None,
         supplemental_requirements: str = "",
     ) -> dict:
+        if mode == "direct" and page != "understanding":
+            raise V020RunError(422, "真实模型（直接调用）已停用；请选择真实模型（Skill 工作流）或本地模式。")
         if page == "understanding" and mode != "direct":
             raise V020RunError(422, "资料理解只支持已验证真实模型直接调用。")
         context = self._input_context(project_id, page, roles or [])
@@ -66,11 +71,18 @@ class V020RunService:
         input_summary = self._input_summary(context)
         serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         contexts = batch_contexts(page, context) if mode != "local" else [context]
-        max_output_tokens = PER_REQUEST_OUTPUT_TOKENS if page in {"understanding", "analysis"} else 4_000
-        request_input_tokens = (
-            [estimate_input_tokens(build_prompt(page, mode, item)) for item in contexts]
-            if mode != "local" else [estimate_input_tokens(serialized)]
-        )
+        if page == "analysis" and mode == "skill":
+            prompts = skill_preflight_prompts(context)
+            max_output_tokens = SKILL_STAGE_OUTPUT_TOKENS
+            request_input_tokens = [estimate_input_tokens(prompt) for prompt in prompts]
+            request_count = len(prompts)
+        else:
+            max_output_tokens = PER_REQUEST_OUTPUT_TOKENS if page in {"understanding", "analysis"} else 4_000
+            request_input_tokens = (
+                [estimate_input_tokens(build_prompt(page, mode, item)) for item in contexts]
+                if mode != "local" else [estimate_input_tokens(serialized)]
+            )
+            request_count = len(contexts)
         estimated_tokens = sum(request_input_tokens)
         max_request_input_tokens = max(request_input_tokens)
         if max_request_input_tokens + max_output_tokens > 32_000:
@@ -102,8 +114,9 @@ class V020RunService:
             "estimated_input_tokens": estimated_tokens,
             "max_request_input_tokens": max_request_input_tokens,
             "max_output_tokens": max_output_tokens,
-            "max_total_output_tokens": max_output_tokens * len(contexts),
-            "request_count": len(contexts),
+            "max_total_output_tokens": max_output_tokens * request_count,
+            "request_count": request_count,
+            "workflow_stage_count": SKILL_STAGE_COUNT if page == "analysis" and mode == "skill" else request_count,
             "model_timeout_seconds": MODEL_RUN_TOTAL_TIMEOUT_SECONDS if mode != "local" else None,
             "timeout_policy": ({
                 "response_start_seconds": MODEL_RESPONSE_START_TIMEOUT_SECONDS,
@@ -247,6 +260,10 @@ class V020RunService:
             }[page](context)
             return output, {"status": "unavailable", "reason": "本地模式未调用外部模型。"}
         resolved, _ = self._verified_model(session_id)
+        if page == "analysis" and mode == "skill":
+            return execute_skill_analysis(
+                self.real_model_service, self.runs, resolved, context, preflight, run,
+            )
         return execute_model_batches(
             self.real_model_service, self.runs, resolved, page, mode, context, preflight, run,
         )
@@ -455,7 +472,7 @@ class V020RunService:
             "stage": "准备输入", "stage_events": [], "duration_ms": None,
             "started_at": started.isoformat(), "completed_at": None, "actual_usage": None,
             "actual_cost": None, "error": None, "next_step": "等待运行完成。", "result_summary": None,
-            "progress": {"completed_units": 0, "total_units": preflight.get("request_count", 1), "stage": "准备输入"},
+            "progress": {"completed_units": 0, "total_units": preflight.get("workflow_stage_count", preflight.get("request_count", 1)), "stage": "准备输入"},
             "checkpoints": [], "attempts": [], "cancel_requested": False,
         }
 

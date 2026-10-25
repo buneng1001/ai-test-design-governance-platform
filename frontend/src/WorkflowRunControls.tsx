@@ -11,7 +11,7 @@ const modeLabels: Record<RunMode, string> = {
 
 export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, roles = [], disabled = false,
   supplementalRequirements = "", templateMode = "default", templateMappingId = null, beforeAction, onRun,
-  onRunSettled, allowedModes = ["direct", "skill", "local"], defaultMode = "local",
+  onRunSettled, allowedModes = ["skill", "local"], defaultMode = "skill",
   preflightActionLabel = "查看调用范围" }: {
   projectId: number; page: RunPage; actionLabel: string; latestRun?: RunEvidence; roles?: string[]; disabled?: boolean;
   supplementalRequirements?: string; templateMode?: "default" | "uploaded"; templateMappingId?: number | null;
@@ -92,28 +92,30 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
       </fieldset>}
     {beforeAction}
     <div className="action-row"><button type="button" disabled={busy || disabled} onClick={() => void prepare()}>
-      {busy ? "正在准备…" : prepareLabel}
+      {busy ? (runningSince === null ? "正在准备…" : "正在执行…") : prepareLabel}
     </button></div>
     {preflight && <section className="run-confirmation" aria-label="真实模型调用确认">
-      <h4>调用前确认（尚未发送）</h4>
-      <p>请确认模型、输入范围和 Token 预算；点击下方确认按钮后才会发送给模型。</p>
+      <h4>{runningSince === null ? "调用前确认（尚未发送）" : "本次调用信息（已确认并发送）"}</h4>
+      <p>{runningSince === null
+        ? "请确认模型、输入范围和 Token 预算；点击下方确认按钮后才会发送给模型。"
+        : "以下是本次运行已经确认的模型、输入范围和 Token 预算；实时进度见下方运行状态。"}</p>
       <dl><dt>模型</dt><dd>{preflight.provider} · {preflight.model}（{preflight.verification_status}）</dd>
         <dt>输入范围</dt><dd>{inputSummary(preflight)}</dd>
         <dt>人工补充</dt><dd>{preflight.supplemental_notes || "无"}</dd>
         {preflight.template_filename && <><dt>测试用例模板</dt><dd>{preflight.template_filename}</dd></>}
         {page === "cases" && <><dt>补充生成要求</dt><dd>{preflight.supplemental_requirements || "无"}</dd></>}
         <dt>Prompt / Skill</dt><dd>{preflight.prompt_version}{preflight.skill_version ? ` · ${preflight.skill_version}` : ""}</dd>
-        <dt>预计 Token</dt><dd>所有请求输入合计约 {preflight.estimated_input_tokens.toLocaleString()}；单次输入最多约 {(preflight.max_request_input_tokens ?? preflight.estimated_input_tokens).toLocaleString()}；每次请求最大输出 {preflight.max_output_tokens.toLocaleString()}{preflight.request_count && preflight.request_count > 1 ? `；预计调用 ${preflight.request_count} 次，全部输出上限 ${preflight.max_total_output_tokens?.toLocaleString() ?? "-"}` : ""}</dd>
+        <dt>预计 Token</dt><dd>所有请求输入合计约 {preflight.estimated_input_tokens.toLocaleString()}；单次输入最多约 {(preflight.max_request_input_tokens ?? preflight.estimated_input_tokens).toLocaleString()}；每次请求最大输出 {preflight.max_output_tokens.toLocaleString()}{preflight.request_count && preflight.request_count > 1 ? `；预计调用模型 ${preflight.request_count} 次，全部输出上限 ${preflight.max_total_output_tokens?.toLocaleString() ?? "-"}` : ""}{preflight.workflow_stage_count && preflight.workflow_stage_count !== preflight.request_count ? `；工作流共 ${preflight.workflow_stage_count} 个阶段` : ""}</dd>
         {preflight.timeout_policy ? <><dt>超时限制</dt><dd>首个响应 {preflight.timeout_policy.response_start_seconds} 秒；流式停顿 {preflight.timeout_policy.stream_idle_seconds} 秒；单次模型请求总计 {preflight.timeout_policy.request_total_seconds} 秒</dd></>
           : preflight.model_timeout_seconds && <><dt>模型响应超时</dt><dd>{preflight.model_timeout_seconds} 秒</dd></>}
         <dt>费用</dt><dd>{costText(preflight.estimated_cost)}</dd></dl>
-      <div className="action-row"><button type="button" disabled={busy} onClick={() => void confirm()}>
+      {runningSince === null && <div className="action-row"><button type="button" disabled={busy} onClick={() => void confirm()}>
         {actionLabel.startsWith("开始") ? `确认并${actionLabel}` : `确认并执行：${actionLabel}`}</button>
-        <button type="button" className="secondary" onClick={() => setPreflight(null)}>取消</button></div>
+        <button type="button" className="secondary" onClick={() => setPreflight(null)}>取消</button></div>}
     </section>}
     {runningSince !== null ? <section className="run-evidence running" aria-label="运行状态"><header><strong>运行状态：{liveRun?.cancel_requested ? "正在停止" : "正在执行"}</strong><span>{modeLabels[mode]}</span></header>
       <p>当前阶段：{liveRun?.stage ?? "准备输入 / 调用模型"} · 已用时间：{elapsedSeconds} 秒</p>
-      {liveRun?.progress && <p>模型请求进度 {liveRun.progress.completed_units}/{liveRun.progress.total_units}；已完成请求均已保存检查点。</p>}
+      {liveRun?.progress && <p>{mode === "skill" ? "Skill 阶段进度" : "模型请求进度"} {liveRun.progress.completed_units}/{liveRun.progress.total_units}；已完成阶段均已保存检查点。</p>}
       <p>预计剩余时间不可获得，不显示虚构倒计时。</p>
       {activeRunId && <button type="button" className="secondary" disabled={Boolean(liveRun?.cancel_requested)} onClick={() => void stop()}>停止本次运行</button>}</section>
       : latestRun ? <RunEvidenceCard run={latestRun} /> : <section className="run-evidence pending" aria-label="运行状态"><header><strong>运行状态：尚未执行</strong></header>
@@ -124,6 +126,7 @@ export function WorkflowRunControls({ projectId, page, actionLabel, latestRun, r
 }
 
 export function RunEvidenceCard({ run }: { run: RunEvidence }) {
+  const diagnostic = run.attempts?.at(-1);
   return <section className={`run-evidence ${run.status}`} aria-label="运行状态">
     <header><strong>运行状态：{statusLabel(run.status)}</strong><span>{run.source_label}</span></header>
     <p>当前阶段：{run.stage} · 耗时：{run.duration_ms === null ? "正在计时" : `${(run.duration_ms / 1000).toFixed(1)} 秒`}</p>
@@ -134,7 +137,11 @@ export function RunEvidenceCard({ run }: { run: RunEvidence }) {
     {run.stage_events.length > 0 && <ol className="stage-events">{run.stage_events.map((event) =>
       <li key={`${event.stage}-${event.status}`}>{event.stage}：{event.detail}</li>)}</ol>}
     {run.error && <p className="error">失败原因：{run.error}</p>}
-    {run.progress && <p>模型请求进度：{run.progress.completed_units}/{run.progress.total_units}</p>}
+    {diagnostic && (diagnostic.finish_reason || diagnostic.response_length || diagnostic.diagnostic) &&
+      <p>模型诊断：{diagnostic.stage_id ? `${diagnostic.stage_id} · ` : ""}
+        finish_reason={diagnostic.finish_reason ?? "未知"}；响应长度={diagnostic.response_length ?? "未知"}；
+        {diagnostic.diagnostic ?? "无附加诊断"}</p>}
+    {run.progress && <p>{run.mode === "skill" ? "Skill 阶段进度" : "模型请求进度"}：{run.progress.completed_units}/{run.progress.total_units}</p>}
     <p><strong>下一步建议：</strong>{decodeEntities(run.next_step)}</p>
   </section>;
 }

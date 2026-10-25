@@ -21,6 +21,17 @@ class V020RunError(Exception):
 
 def model_failure(response: ModelResponse, provider: str, model: str, page: str) -> tuple[int, dict]:
     """把模型适配器错误转换成工作台可展示、可重试的脱敏契约。"""
+    if response.error_code == "provider_response_truncated":
+        return 502, {
+            "stage": "model_call", "provider": provider, "model": model,
+            "error_type": "output_truncated", "retryable": True,
+            "user_message": "模型输出达到长度上限，结果被截断",
+            "suggested_action": "改用 Skill 分阶段工作流，或缩小单阶段输出范围后重试",
+            "detail": {
+                "error_code": response.error_code, "finish_reason": response.finish_reason or "length",
+                "response_length": response.response_length, "diagnostic": response.diagnostic,
+            },
+        }
     error_type = provider_error_type(response.error_code)
     error = service_error("model_call", provider, model, error_type, response.error_code)
     if error_type == "timeout":

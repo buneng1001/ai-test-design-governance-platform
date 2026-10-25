@@ -25,12 +25,12 @@ test("正式工作台固定显示五个产品页签，上传页明确不调用 A
   expect(screen.queryByText(/批次/)).not.toBeInTheDocument();
 });
 
-test("需求分析页显示三种模式、完整筛选和分页条数", async () => {
+test("需求分析页停用直接调用并显示 Skill、本地模式及完整筛选", async () => {
   mockRequests(); const user = userEvent.setup(); renderShell();
   await screen.findByText("本页面不调用 AI");
   await user.click(screen.getByRole("tab", { name: "2需求分析" }));
 
-  expect(screen.getByLabelText("真实模型（直接调用）")).toBeInTheDocument();
+  expect(screen.queryByLabelText("真实模型（直接调用）")).not.toBeInTheDocument();
   expect(screen.getByLabelText("真实模型（Skill 工作流）")).toBeInTheDocument();
   expect(screen.getByLabelText("本地模式（不调用 AI）")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "需求分析筛选" })).toHaveTextContent("功能模块");
