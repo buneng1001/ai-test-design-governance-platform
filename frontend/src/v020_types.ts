@@ -23,6 +23,9 @@ export interface RunEvidence {
     material_understanding_run_id?: string | null };
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
   request_count?: number;
+  max_request_count?: number;
+  retry_policy?: { max_retries_per_stage: number; max_additional_requests: number } | null;
+  repair_policy?: { max_requests_per_stage: number; max_additional_requests: number } | null;
   workflow_stage_count?: number;
   max_request_input_tokens?: number;
   max_total_output_tokens?: number;
@@ -36,6 +39,7 @@ export interface RunEvidence {
   reused?: boolean; cancel_requested?: boolean;
   progress?: { completed_units: number; total_units: number; stage: string };
   attempts?: Array<{ unit: number; stage_id?: string; attempt: number; error_code?: string | null;
+    operation?: string;
     duration_ms?: number | null; first_event_ms?: number | null; finish_reason?: string | null;
     response_length?: number | null; diagnostic?: string | null }>;
   role_reports?: Array<{ role: string; summary: string; strengths: string[]; concerns: string[] }>;
@@ -46,6 +50,9 @@ export interface RunPreflight {
   supplemental_requirements: string; template_filename: string | null;
   prompt_version: string; skill_version: string | null; estimated_input_tokens: number; max_output_tokens: number;
   request_count?: number;
+  max_request_count?: number;
+  retry_policy?: { max_retries_per_stage: number; max_additional_requests: number } | null;
+  repair_policy?: { max_requests_per_stage: number; max_additional_requests: number } | null;
   workflow_stage_count?: number;
   max_request_input_tokens?: number;
   max_total_output_tokens?: number;

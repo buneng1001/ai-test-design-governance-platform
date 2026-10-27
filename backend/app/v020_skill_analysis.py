@@ -1,145 +1,23 @@
 import json
-from dataclasses import dataclass
 from math import ceil
-
-from pydantic import BaseModel, ConfigDict, Field
+from copy import deepcopy
 
 from app.ai_schemas import AIModelConfig
 from app.ai_service import ModelRequest
 from app.v020_batching import aggregate_usage, response_usage
 from app.v020_contracts import TEST_TYPES
 from app.v020_model_errors import V020RunError, model_failure
-from app.v020_run_schemas import AnalysisOutputRow, NonEmptyText
-
-
-SKILL_PROMPT_VERSION = "requirement-analysis.skill.v5"
-SKILL_STAGE_OUTPUT_TOKENS = 4_000
-SKILL_STAGE_COUNT = 9
-
-
-class AtomicRequirement(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    requirement_id: NonEmptyText
-    statement: NonEmptyText
-    source_reference_id: NonEmptyText
-
-
-class Stage00Output(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    atomic_requirements: list[AtomicRequirement] = Field(min_length=1, max_length=300)
-    questions: list[str] = Field(default_factory=list, max_length=100)
-
-
-class IdentifiedFunction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    function_id: NonEmptyText
-    module: NonEmptyText
-    name: NonEmptyText
-    description: NonEmptyText
-    requirement_ids: list[NonEmptyText] = Field(min_length=1, max_length=100)
-
-
-class Stage01Output(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    functions: list[IdentifiedFunction] = Field(min_length=1, max_length=300)
-
-
-class BusinessRule(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    rule_id: NonEmptyText
-    description: NonEmptyText
-    requirement_ids: list[NonEmptyText] = Field(min_length=1, max_length=100)
-
-
-class Stage02Output(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    rules: list[BusinessRule] = Field(default_factory=list, max_length=500)
-
-
-class StageRowsOutput(BaseModel):
-    """某一分析方向可以没有适用项，避免模型为满足契约而机械凑数。"""
-
-    model_config = ConfigDict(extra="forbid")
-    rows: list[AnalysisOutputRow] = Field(default_factory=list, max_length=500)
-
-
-@dataclass(frozen=True)
-class StageDefinition:
-    stage_id: str
-    name: str
-    instruction: str
-    output_contract: str
-    model: type[BaseModel]
-
-
-MODEL_STAGES = (
-    StageDefinition(
-        "S00", "材料基线与原子需求", "逐条提取资料中的原子需求，不扩写资料没有表达的功能。",
-        '{"atomic_requirements":[{"requirement_id":"REQ-001","statement":"...",'
-        '"source_reference_id":"input-1"}],"questions":[]}', Stage00Output,
-    ),
-    StageDefinition(
-        "S01", "功能识别", "基于原子需求识别宽泛业务模块及其功能，保留需求 ID 关联。",
-        '{"functions":[{"function_id":"FUN-001","module":"...","name":"...",'
-        '"description":"...","requirement_ids":["REQ-001"]}]}', Stage01Output,
-    ),
-    StageDefinition(
-        "S02", "业务规则提取", "提取状态、阈值、前置条件、限制、异常处理和验收条件。",
-        '{"rules":[{"rule_id":"RULE-001","description":"...",'
-        '"requirement_ids":["REQ-001"]}]}', Stage02Output,
-    ),
-    StageDefinition(
-        "S03", "正常场景构建", "只构建正常、主流程、冒烟和基础功能测试项。", "", StageRowsOutput,
-    ),
-    StageDefinition(
-        "S04", "异常场景构建", "只构建异常、失败分支、错误处理和恢复相关测试项。", "", StageRowsOutput,
-    ),
-    StageDefinition(
-        "S05", "边界场景构建", "只构建数值、容量、时间、状态转换和输入边界测试项。", "", StageRowsOutput,
-    ),
-    StageDefinition(
-        "S06", "风险与专项补全", "只补充权限、安全、性能、兼容、稳定性及适用专项测试项。", "", StageRowsOutput,
-    ),
+from app.v020_skill_contracts import (
+    MODEL_STAGES, SKILL_PROMPT_VERSION, SKILL_STAGE_COUNT, SKILL_STAGE_OUTPUT_TOKENS,
+    StageDefinition, build_stage_prompt,
 )
 
 
-def skill_preflight_prompts(context: dict) -> list[str]:
-    """预检只能按最小上游产物估算；运行时会对每个实际阶段再次检查。"""
-    placeholders = {
-        "S00": {"atomic_requirements": [], "questions": []},
-        "S01": {"functions": []},
-        "S02": {"rules": []},
-    }
-    return [build_stage_prompt(stage, context, placeholders) for stage in MODEL_STAGES]
-
-
-def build_stage_prompt(stage: StageDefinition, context: dict, artifacts: dict[str, dict]) -> str:
-    row_contract = (
-        '{"rows":[{"module":"宽泛业务模块","test_item":"可验证测试项",'
-        '"test_basis":"资料依据与分析理由","source_reference_id":"input-1",'
-        '"test_type":"功能测试","priority":"P1","related_requirement_id":"REQ-001"}]}'
-    )
-    prior = {key: value for key, value in artifacts.items() if key in _prior_stage_ids(stage.stage_id)}
-    payload = {
-        "project": {"test_object": context["test_object"], "software_version": context["software_version"]},
-        "supplemental_notes": context.get("supplemental_notes", ""),
-        "input_metadata": {
-            "material_understanding_used": context.get("material_understanding_used", False),
-            "material_understanding_run_id": context.get("material_understanding_run_id"),
-        },
-        "materials": context["fragments"],
-        "prior_stage_outputs": prior,
-    }
-    return (
-        f"提示版本：{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}。\n"
-        f"当前阶段：{stage.stage_id} {stage.name}。{stage.instruction}\n"
-        "每个阶段都针对同一份完整资料执行，并使用所需的上游阶段产物。"
-        "必须以 materials 和已给出的上游阶段产物为依据；ID 必须原样复用，禁止补造来源。\n"
-        f"输出契约：{stage.output_contract or row_contract}\n"
-        f"test_type 仅可从以下分类中选择：{'、'.join(TEST_TYPES)}；priority 仅可使用 P0、P1、P2、P3。"
-        "只输出 JSON 对象，不要输出解释、Markdown 或 API Key。\n"
-        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    )
+class StageOutputInvalid(Exception):
+    def __init__(self, stage_id: str, errors: list[dict]) -> None:
+        self.stage_id = stage_id
+        self.errors = errors
+        super().__init__(_validation_message(stage_id, errors, repaired=False))
 
 
 def execute_skill_analysis(model_service, run_repository, resolved, context: dict, preflight: dict, run: dict):
@@ -185,13 +63,57 @@ def execute_skill_analysis(model_service, run_repository, resolved, context: dic
             raise V020RunError(status, detail)
         if not isinstance(response.raw_output, dict):
             raise V020RunError(502, f"{stage.stage_id} 模型返回内容不是 JSON 对象。")
-        output = _validate_stage(stage, response.raw_output, context, artifacts)
+        candidate = _safe_stage_defaults(stage, response.raw_output)
         usage = response_usage(response)
-        artifacts[stage.stage_id] = output
         usages.append(usage)
+        repair_applied = False
+        try:
+            output = _validate_stage(stage, candidate, context, artifacts)
+        except StageOutputInvalid as validation_error:
+            repair_prompt = _repair_prompt(stage, candidate, validation_error.errors, context, artifacts)
+            if _estimate_tokens(repair_prompt) + SKILL_STAGE_OUTPUT_TOKENS > 32_000:
+                reason = _validation_message(stage.stage_id, validation_error.errors, repaired=False)
+                raise V020RunError(422, f"{reason} 自动修复请求超过 32k 保守上下文上限，请缩小资料范围后重试。")
+            repair_response = model_service.complete(ModelRequest(
+                task_type="requirement_review",
+                prompt_version=f"{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}.repair",
+                model_parameters=AIModelConfig(provider=resolved.provider, model=resolved.model, temperature=0,
+                                               max_tokens=SKILL_STAGE_OUTPUT_TOKENS),
+                input_asset_versions=(), scenario="normal", base_url=resolved.base_url, api_key=resolved.api_key,
+                prompt_override=repair_prompt,
+                network_mode=resolved.network_mode,
+                cancel_requested=lambda: _is_cancelled(run_repository, run),
+            ))
+            run["attempts"].append({
+                "unit": position, "stage_id": stage.stage_id, "attempt": 1, "operation": "schema_repair",
+                "error_code": repair_response.error_code, "duration_ms": repair_response.duration_ms,
+                "first_event_ms": repair_response.first_event_ms, "finish_reason": repair_response.finish_reason,
+                "response_length": repair_response.response_length, "diagnostic": repair_response.diagnostic,
+            })
+            run_repository.update_run(run)
+            if repair_response.error_code == "provider_cancelled":
+                raise V020RunError(409, "本次运行已停止；已完成阶段已保留，可稍后继续。")
+            if repair_response.error_code:
+                status, detail = model_failure(
+                    repair_response, preflight["provider"], preflight["model"], "analysis",
+                )
+                raise V020RunError(status, detail)
+            if not isinstance(repair_response.raw_output, dict):
+                raise V020RunError(502, f"{stage.stage_id} 结构修复返回内容不是 JSON 对象。")
+            repair_usage = response_usage(repair_response)
+            usages.append(repair_usage)
+            repaired = _safe_stage_defaults(stage, repair_response.raw_output)
+            _ensure_repair_preserves_rows(stage, candidate, repaired)
+            try:
+                output = _validate_stage(stage, repaired, context, artifacts)
+            except StageOutputInvalid as repair_error:
+                raise V020RunError(422, _validation_message(stage.stage_id, repair_error.errors, repaired=True))
+            usage = aggregate_usage([usage, repair_usage])
+            repair_applied = True
+        artifacts[stage.stage_id] = output
         run["checkpoints"].append({
             "unit": position, "stage_id": stage.stage_id, "stage_name": stage.name,
-            "model_call": True, "output": output, "usage": usage,
+            "model_call": True, "repair_applied": repair_applied, "output": output, "usage": usage,
         })
         _set_progress(run_repository, run, position, stage, "阶段完成")
 
@@ -217,7 +139,7 @@ def _validate_stage(stage: StageDefinition, raw: dict, context: dict, artifacts:
     try:
         parsed = stage.model.model_validate(raw)
     except ValueError as error:
-        raise V020RunError(422, f"{stage.stage_id} 输出结构校验失败：{str(error)[:400]}") from error
+        raise StageOutputInvalid(stage.stage_id, error.errors()) from error
     output = parsed.model_dump(mode="json")
     sources = {item["source_reference_id"] for item in context["fragments"]}
     if stage.stage_id == "S00":
@@ -226,6 +148,15 @@ def _validate_stage(stage: StageDefinition, raw: dict, context: dict, artifacts:
         ids = [item["requirement_id"] for item in output["atomic_requirements"]]
         if len(ids) != len(set(ids)):
             raise V020RunError(422, "S00 原子需求 ID 必须唯一。")
+        coverage_ids = [item["source_reference_id"] for item in output["source_coverage"]]
+        if len(coverage_ids) != len(set(coverage_ids)) or set(coverage_ids) != sources:
+            raise StageOutputInvalid("S00", [{"loc": ("source_coverage",), "type": "coverage_mismatch"}])
+        atomic_by_source: dict[str, set[str]] = {source_id: set() for source_id in sources}
+        for item in output["atomic_requirements"]:
+            atomic_by_source[item["source_reference_id"]].add(item["requirement_id"])
+        if any(set(item["requirement_ids"]) != atomic_by_source[item["source_reference_id"]]
+               for item in output["source_coverage"]):
+            raise StageOutputInvalid("S00", [{"loc": ("source_coverage",), "type": "requirement_link_mismatch"}])
     requirement_ids = {item["requirement_id"] for item in artifacts.get("S00", {}).get("atomic_requirements", [])}
     if stage.stage_id in {"S01", "S02"}:
         key = "functions" if stage.stage_id == "S01" else "rules"
@@ -237,6 +168,101 @@ def _validate_stage(stage: StageDefinition, raw: dict, context: dict, artifacts:
         if any(item["related_requirement_id"] not in requirement_ids for item in output["rows"]):
             raise V020RunError(422, f"{stage.stage_id} 输出引用了不存在的原子需求 ID。")
     return output
+
+
+def _safe_stage_defaults(stage: StageDefinition, raw: dict) -> dict:
+    candidate = deepcopy(raw)
+    if stage.stage_id == "S04" and isinstance(candidate.get("rows"), list):
+        for row in candidate["rows"]:
+            if isinstance(row, dict):
+                row.setdefault("test_type", "异常测试")
+    return candidate
+
+
+def _repair_prompt(
+    stage: StageDefinition, invalid_output: dict, errors: list[dict], context: dict, artifacts: dict[str, dict],
+) -> str:
+    compact_errors = [{"path": ".".join(map(str, item.get("loc", ()))), "type": item.get("type", "invalid")}
+                      for item in errors[:100]]
+    repair_context: dict[str, object] = {
+        "allowed_source_reference_ids": [item["source_reference_id"] for item in context["fragments"]],
+        "allowed_requirement_ids": [
+            item["requirement_id"] for item in artifacts.get("S00", {}).get("atomic_requirements", [])
+        ],
+        "validation_errors": compact_errors,
+        "invalid_output": invalid_output,
+    }
+    if stage.stage_id == "S00":
+        covered = {item.get("source_reference_id") for item in invalid_output.get("source_coverage", [])
+                   if isinstance(item, dict)}
+        repair_context["materials_missing_coverage"] = [
+            item for item in context["fragments"] if item["source_reference_id"] not in covered
+        ]
+        return (
+            f"提示版本：{SKILL_PROMPT_VERSION}.s00.repair。\n当前阶段：S00 结构修复。"
+            "修复 atomic_requirements、source_coverage 和 questions。source_coverage 必须逐一覆盖"
+            " allowed_source_reference_ids，不能重复或遗漏。有需求的来源列出全部 requirement_ids；"
+            "没有需求的来源必须填写 no_requirement_reason。只可依据 materials_missing_coverage 补充遗漏内容，"
+            "不得删除已有原子需求。只输出完整 JSON 对象，不要解释。\n"
+            + json.dumps(repair_context, ensure_ascii=False, separators=(",", ":"))
+        )
+    if stage.stage_id in {"S01", "S02"}:
+        return (
+            f"提示版本：{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}.repair。\n"
+            f"当前阶段：{stage.stage_id} 结构修复。只修复缺失字段和 JSON 结构，"
+            "不得删除或改写已有的有效业务内容和 ID。"
+            f"输出契约：{stage.output_contract}。只输出完整 JSON 对象，不要解释。\n"
+            + json.dumps(repair_context, ensure_ascii=False, separators=(",", ":"))
+        )
+    return (
+        f"提示版本：{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}.repair。\n"
+        f"当前阶段：{stage.stage_id} 结构修复。只修复下面 JSON 的结构和缺失字段。"
+        "不得增加、删除或改写测试项，不得改变 module、test_item、test_basis、source_reference_id、"
+        "related_requirement_id；每行必须包含 test_type 和 priority。"
+        f"test_type 只能从以下分类中选择：{'、'.join(TEST_TYPES)}；priority 只能是 P0、P1、P2、P3。"
+        "只输出修复后的 JSON 对象，不要解释。\n"
+        + json.dumps(repair_context, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
+def _ensure_repair_preserves_rows(stage: StageDefinition, before: dict, after: dict) -> None:
+    if stage.stage_id not in {"S03", "S04", "S05", "S06"}:
+        return
+    before_rows, after_rows = before.get("rows"), after.get("rows")
+    if not isinstance(before_rows, list) or not isinstance(after_rows, list) or len(before_rows) != len(after_rows):
+        raise V020RunError(422, f"{stage.stage_id} 结构修复改变了测试项数量，已拒绝该结果。")
+    protected = ("module", "test_item", "test_basis", "source_reference_id", "related_requirement_id")
+    if any(any(original.get(key) != repaired.get(key) for key in protected)
+           for original, repaired in zip(before_rows, after_rows)):
+        raise V020RunError(422, f"{stage.stage_id} 结构修复改写了测试项内容，已拒绝该结果。")
+    valid_values = {"test_type": set(TEST_TYPES), "priority": {"P0", "P1", "P2", "P3"}}
+    if any(any(original.get(key) in allowed and original.get(key) != repaired.get(key)
+               for key, allowed in valid_values.items())
+           for original, repaired in zip(before_rows, after_rows)):
+        raise V020RunError(422, f"{stage.stage_id} 结构修复改写了已有的有效分类，已拒绝该结果。")
+
+
+def _validation_message(stage_id: str, errors: list[dict], *, repaired: bool) -> str:
+    missing: dict[str, int] = {}
+    invalid: dict[str, int] = {}
+    invalid_count = 0
+    for item in errors:
+        if item.get("type") == "missing" and item.get("loc"):
+            field = str(item["loc"][-1])
+            missing[field] = missing.get(field, 0) + 1
+        else:
+            invalid_count += 1
+            field = str(item.get("loc", ("结构",))[-1])
+            invalid[field] = invalid.get(field, 0) + 1
+    details = []
+    if missing:
+        details.append("缺少字段 " + "、".join(f"{field}（{count} 处）" for field, count in sorted(missing.items())))
+    if invalid_count:
+        details.append("字段或结构不合法 " + "、".join(
+            f"{field}（{count} 处）" for field, count in sorted(invalid.items())
+        ))
+    phase = "一次结构修复后仍" if repaired else ""
+    return f"{stage_id} 模型输出{phase}不符合字段契约：{'；'.join(details) or '结构不合法'}。"
 
 
 def _merge_rows(*groups: list[dict]) -> list[dict]:
@@ -258,12 +284,6 @@ def _coverage(stage00: dict, stage07: dict) -> dict:
     covered = {item["related_requirement_id"] for item in stage07["rows"]}
     return {"covered_requirement_ids": sorted(expected & covered),
             "uncovered_requirement_ids": sorted(expected - covered), "passed": expected <= covered}
-
-
-def _prior_stage_ids(stage_id: str) -> set[str]:
-    return {"S01": {"S00"}, "S02": {"S00", "S01"},
-            "S03": {"S00", "S01", "S02"}, "S04": {"S00", "S01", "S02"},
-            "S05": {"S00", "S01", "S02"}, "S06": {"S00", "S01", "S02"}}.get(stage_id, set())
 
 
 def _set_progress(repository, run: dict, completed: int, stage: StageDefinition, status: str) -> None:

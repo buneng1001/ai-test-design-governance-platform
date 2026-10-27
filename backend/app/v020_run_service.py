@@ -24,8 +24,9 @@ from app.v020_run_evidence import completed_events, failed_events, next_step, re
 from app.v020_run_schemas import (
     AnalysisModelOutput, CaseModelOutput, MaterialUnderstandingOutput, ReviewModelOutput, SuggestionModelOutput,
 )
-from app.v020_skill_analysis import (
-    SKILL_STAGE_COUNT, SKILL_STAGE_OUTPUT_TOKENS, execute_skill_analysis, skill_preflight_prompts,
+from app.v020_skill_analysis import execute_skill_analysis
+from app.v020_skill_contracts import (
+    SKILL_STAGE_COUNT, SKILL_STAGE_OUTPUT_TOKENS, skill_preflight_prompts,
 )
 
 
@@ -76,6 +77,16 @@ class V020RunService:
             max_output_tokens = SKILL_STAGE_OUTPUT_TOKENS
             request_input_tokens = [estimate_input_tokens(prompt) for prompt in prompts]
             request_count = len(prompts)
+            max_request_count = request_count * 3
+            max_output_request_count = request_count * 2
+            retry_policy = {
+                "max_retries_per_stage": 1,
+                "max_additional_requests": request_count,
+            }
+            repair_policy = {
+                "max_requests_per_stage": 1,
+                "max_additional_requests": request_count,
+            }
         else:
             max_output_tokens = PER_REQUEST_OUTPUT_TOKENS if page in {"understanding", "analysis"} else 4_000
             request_input_tokens = (
@@ -83,6 +94,10 @@ class V020RunService:
                 if mode != "local" else [estimate_input_tokens(serialized)]
             )
             request_count = len(contexts)
+            max_request_count = request_count
+            max_output_request_count = request_count
+            retry_policy = None
+            repair_policy = None
         estimated_tokens = sum(request_input_tokens)
         max_request_input_tokens = max(request_input_tokens)
         if max_request_input_tokens + max_output_tokens > 32_000:
@@ -114,8 +129,11 @@ class V020RunService:
             "estimated_input_tokens": estimated_tokens,
             "max_request_input_tokens": max_request_input_tokens,
             "max_output_tokens": max_output_tokens,
-            "max_total_output_tokens": max_output_tokens * request_count,
+            "max_total_output_tokens": max_output_tokens * max_output_request_count,
             "request_count": request_count,
+            "max_request_count": max_request_count,
+            "retry_policy": retry_policy,
+            "repair_policy": repair_policy,
             "workflow_stage_count": SKILL_STAGE_COUNT if page == "analysis" and mode == "skill" else request_count,
             "model_timeout_seconds": MODEL_RUN_TOTAL_TIMEOUT_SECONDS if mode != "local" else None,
             "timeout_policy": ({
@@ -469,6 +487,12 @@ class V020RunService:
             "estimated_input_tokens": preflight["estimated_input_tokens"],
             "max_output_tokens": preflight["max_output_tokens"], "estimated_cost": preflight["estimated_cost"],
             "request_count": preflight.get("request_count", 1),
+            "max_request_count": preflight.get("max_request_count"),
+            "retry_policy": preflight.get("retry_policy"), "repair_policy": preflight.get("repair_policy"),
+            "max_request_input_tokens": preflight.get("max_request_input_tokens"),
+            "max_total_output_tokens": preflight.get("max_total_output_tokens"),
+            "model_timeout_seconds": preflight.get("model_timeout_seconds"),
+            "timeout_policy": preflight.get("timeout_policy"),
             "stage": "准备输入", "stage_events": [], "duration_ms": None,
             "started_at": started.isoformat(), "completed_at": None, "actual_usage": None,
             "actual_cost": None, "error": None, "next_step": "等待运行完成。", "result_summary": None,

@@ -15,8 +15,11 @@ test("真实模型先展示输入与成本确认，取消时不会调用模型",
     input_summary: { file_count: 2, fragment_count: 8, analysis_row_count: 0, selected_row_count: 0,
       requirement_version_id: 3, roles: [] }, supplemental_notes: "关注异常流程",
     supplemental_requirements: "", template_filename: null,
-    prompt_version: "requirement-analysis.skill.v5", skill_version: "ai-test-design-requirement-analysis.v1",
-    estimated_input_tokens: 1280, max_output_tokens: 10000, model_timeout_seconds: 120,
+    prompt_version: "requirement-analysis.skill.v6", skill_version: "ai-test-design-requirement-analysis.v1",
+    estimated_input_tokens: 1280, max_output_tokens: 4000, request_count: 7, max_request_count: 21,
+    max_total_output_tokens: 56000,
+    retry_policy: { max_retries_per_stage: 1, max_additional_requests: 7 },
+    repair_policy: { max_requests_per_stage: 1, max_additional_requests: 7 }, model_timeout_seconds: 120,
     estimated_cost: { status: "unavailable", reason: "未登记单价" }, requires_confirmation: true,
   }), { status: 200, headers: { "Content-Type": "application/json" } }));
 
@@ -25,7 +28,9 @@ test("真实模型先展示输入与成本确认，取消时不会调用模型",
   await user.click(screen.getByRole("button", { name: "查看调用范围" }));
 
   expect(await screen.findByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("2 份资料、8 个来源片段");
-  expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("所有请求输入合计约 1,280");
+  expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("所有常规请求输入合计约 1,280");
+  expect(screen.getByRole("region", { name: "真实模型调用确认" }))
+    .toHaveTextContent("常规调用模型 7 次；可重试连接错误每阶段最多重试 1 次；输出字段不完整时每阶段最多修复 1 次；最坏最多调用 21 次");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("模型响应超时120 秒");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("不可获得：未登记单价");
   expect(onRun).not.toHaveBeenCalled();

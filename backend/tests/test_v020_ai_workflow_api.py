@@ -405,7 +405,7 @@ class MaterialUnderstandingModelService:
 
     def complete(self, request) -> ModelResponse:
         self.prompts.append(request.prompt_override)
-        if "requirement-analysis.skill.v5" in request.prompt_override:
+        if "requirement-analysis.skill.v6" in request.prompt_override:
             return _analysis_stage_response(request.prompt_override, basis="AI 整理结果包含明确时限")
         source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', request.prompt_override)))
         return ModelResponse(raw_output={
@@ -458,6 +458,39 @@ class StageFailureModelService:
         return _analysis_stage_response(request.prompt_override)
 
 
+class RecoverableIncompleteS04ModelService:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, request) -> ModelResponse:
+        self.prompts.append(request.prompt_override)
+        if request.prompt_version.endswith(".repair"):
+            return _analysis_stage_response(request.prompt_override)
+        response = _analysis_stage_response(request.prompt_override)
+        if "当前阶段：S04" not in request.prompt_override:
+            return response
+        raw = response.raw_output
+        assert isinstance(raw, dict)
+        for row in raw["rows"]:
+            row.pop("test_type")
+            row.pop("priority")
+        return response
+
+
+class MissingS00CoverageModelService:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, request) -> ModelResponse:
+        self.prompts.append(request.prompt_override)
+        response = _analysis_stage_response(request.prompt_override)
+        if "当前阶段：S00" in request.prompt_override:
+            raw = response.raw_output
+            assert isinstance(raw, dict)
+            raw.pop("source_coverage")
+        return response
+
+
 class CancellableModelService:
     def __init__(self) -> None:
         self.started = Event()
@@ -487,7 +520,12 @@ def _analysis_stage_response(prompt: str, *, basis: str = "来源中存在明确
         raw = {"atomic_requirements": [{
             "requirement_id": requirement_id, "statement": f"{source_id} 的明确需求",
             "source_reference_id": source_id,
-        } for source_id, requirement_id in zip(source_ids, requirement_ids)], "questions": []}
+        } for source_id, requirement_id in zip(source_ids, requirement_ids)],
+            "source_coverage": [{
+                "source_reference_id": source_id, "requirement_ids": [requirement_id],
+                "no_requirement_reason": "",
+            } for source_id, requirement_id in zip(source_ids, requirement_ids)],
+            "questions": []}
     elif stage == "S01":
         raw = {"functions": [{
             "function_id": f"FUN-{index:03d}", "module": "状态管理", "name": f"功能 {index}",
@@ -594,17 +632,27 @@ def test_skill_analysis_runs_stages_against_the_complete_parsed_document(tmp_pat
     assert preflight["request_count"] == 7
     assert preflight["workflow_stage_count"] == 9
     assert preflight["max_output_tokens"] == 4_000
-    assert preflight["max_total_output_tokens"] == 28_000
+    assert preflight["max_request_count"] == 21
+    assert preflight["max_total_output_tokens"] == 56_000
+    assert preflight["retry_policy"] == {"max_retries_per_stage": 1, "max_additional_requests": 7}
+    assert preflight["repair_policy"] == {"max_requests_per_stage": 1, "max_additional_requests": 7}
     assert preflight["timeout_policy"]["request_total_seconds"] == 600
     assert len(service.prompts) == 7
     assert [re.search(r"当前阶段：(S\d{2})", prompt).group(1) for prompt in service.prompts] == [
         "S00", "S01", "S02", "S03", "S04", "S05", "S06",
     ]
-    assert all("requirement-analysis.skill.v5" in prompt for prompt in service.prompts)
+    assert all("requirement-analysis.skill.v6" in prompt for prompt in service.prompts)
+    assert "七个字段" not in service.prompts[0]
+    assert "七个字段" not in service.prompts[1]
+    assert "七个字段" not in service.prompts[2]
+    assert all("七个字段" in prompt for prompt in service.prompts[3:])
     assert all('"source_reference_id":"input-1"' in prompt for prompt in service.prompts)
     assert all('"source_reference_id":"input-9"' in prompt for prompt in service.prompts)
     assert all("独立来源范围" not in prompt and "平台会确定性合并" not in prompt for prompt in service.prompts)
     run = response.json()["run"]
+    assert run["max_request_count"] == 21
+    assert run["retry_policy"]["max_retries_per_stage"] == 1
+    assert run["repair_policy"]["max_requests_per_stage"] == 1
     assert run["progress"] == {"completed_units": 9, "total_units": 9, "stage": "保存结果"}
     assert [item["stage_id"] for item in run["checkpoints"]] == [
         "S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
@@ -796,6 +844,70 @@ def test_failed_skill_stage_resumes_without_repeating_completed_stages(tmp_path:
     assert [re.search(r"当前阶段：(S\d{2})", prompt).group(1) for prompt in service.prompts] == [
         "S00", "S01", "S02", "S03", "S03", "S04", "S05", "S06",
     ]
+
+
+def test_skill_repairs_missing_s04_fields_once_and_continues(tmp_path: Path, monkeypatch) -> None:
+    service = RecoverableIncompleteS04ModelService()
+    application = create_app(
+        tmp_path / "v020-stage-repair.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=1)
+        headers = {"X-Session-ID": "v020-stage-repair"}
+        client.post("/api/ai-session-config/test", headers=headers, json={
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        })
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+
+    assert response.status_code == 201, response.text
+    run = response.json()["run"]
+    repaired = next(item for item in run["checkpoints"] if item["stage_id"] == "S04")
+    assert repaired["repair_applied"] is True
+    assert repaired["output"]["rows"][0]["test_type"] == "异常测试"
+    assert repaired["output"]["rows"][0]["priority"] == "P1"
+    assert sum("结构修复" in prompt for prompt in service.prompts) == 1
+
+
+def test_skill_rejects_s00_when_model_does_not_account_for_every_input_context(tmp_path: Path, monkeypatch) -> None:
+    service = MissingS00CoverageModelService()
+    application = create_app(
+        tmp_path / "v020-s00-coverage.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=2)
+        headers = {"X-Session-ID": "v020-s00-coverage"}
+        client.post("/api/ai-session-config/test", headers=headers, json={
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        })
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+
+    assert response.status_code == 422
+    assert "S00" in response.json()["detail"]
+    assert "source_coverage" in response.json()["detail"]
+    assert "errors.pydantic.dev" not in response.json()["detail"]
+    assert sum("结构修复" in prompt for prompt in service.prompts) == 1
 
 
 def test_invalid_batch_is_rejected_before_checkpoint_is_saved(tmp_path: Path, monkeypatch) -> None:
@@ -1019,7 +1131,7 @@ def test_direct_mode_is_disabled_and_skill_mode_runs_versioned_stages(tmp_path: 
     assert direct.status_code == 422, direct.text
     assert "已停用" in direct.json()["detail"]
     assert skill.status_code == 201, skill.text
-    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v5"
+    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v6"
     assert skill.json()["run"]["skill_version"] == "ai-test-design-requirement-analysis.v1"
     assert len(service.prompts) == 7
     assert "当前阶段：S00" in service.prompts[0]
