@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import re
 import sqlite3
 import time
@@ -405,7 +406,7 @@ class MaterialUnderstandingModelService:
 
     def complete(self, request) -> ModelResponse:
         self.prompts.append(request.prompt_override)
-        if "requirement-analysis.skill.v6" in request.prompt_override:
+        if "requirement-analysis.skill.v7" in request.prompt_override:
             return _analysis_stage_response(request.prompt_override, basis="AI 整理结果包含明确时限")
         source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', request.prompt_override)))
         return ModelResponse(raw_output={
@@ -430,6 +431,45 @@ class TruncatedModelService:
             error_code="provider_response_truncated", retryable=False, diagnostic="finish_reason=length",
             finish_reason="length", response_length=8192, duration_ms=2345, first_event_ms=120,
         )
+
+
+class AdaptiveBatchModelService:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+        self.max_tokens: list[int] = []
+
+    def complete(self, request) -> ModelResponse:
+        self.prompts.append(request.prompt_override)
+        self.max_tokens.append(request.model_parameters.max_tokens)
+        payload = json.loads(request.prompt_override.rsplit("\n", 1)[-1])
+        stage = re.search(r"当前阶段：(S\d{2})", request.prompt_override).group(1)
+        batch_scope = payload.get("batch_scope", {})
+        scope_ids = batch_scope.get("requirement_ids") or batch_scope.get("source_reference_ids", [])
+        if len(scope_ids) > 1:
+            return ModelResponse(
+                error_code="provider_response_truncated", retryable=False, diagnostic="finish_reason=length",
+                finish_reason="length", response_length=8192, duration_ms=100, first_event_ms=10,
+            )
+        return _analysis_stage_response(request.prompt_override)
+
+
+class MidStageBatchFailureModelService:
+    def __init__(self) -> None:
+        self.scopes: list[tuple[str, tuple[str, ...]]] = []
+        self.failed = False
+
+    def complete(self, request) -> ModelResponse:
+        payload = json.loads(request.prompt_override.rsplit("\n", 1)[-1])
+        stage = re.search(r"当前阶段：(S\d{2})", request.prompt_override).group(1)
+        scope = tuple(
+            payload.get("batch_scope", {}).get("requirement_ids")
+            or payload.get("batch_scope", {}).get("source_reference_ids", [])
+        )
+        self.scopes.append((stage, scope))
+        if stage == "S03" and payload["batch_scope"]["batch_number"] == 2 and not self.failed:
+            self.failed = True
+            return ModelResponse(error_code="provider_http_400", retryable=False, diagnostic="simulated")
+        return _analysis_stage_response(request.prompt_override)
 
 
 class AnalysisModelService:
@@ -512,10 +552,24 @@ class InvalidSourceModelService:
 def _analysis_stage_response(prompt: str, *, basis: str = "来源中存在明确要求",
                              invalid_source: bool = False) -> ModelResponse:
     stage = re.search(r"当前阶段：(S\d{2})", prompt).group(1)
-    source_ids = sorted(set(re.findall(r'"source_reference_id":"(input-\d+)"', prompt))) or ["input-1"]
+    payload = json.loads(prompt.rsplit("\n", 1)[-1])
+    materials = payload.get("materials") or payload.get("materials_missing_coverage") or []
+    source_ids = [item["source_reference_id"] for item in materials]
+    source_ids = source_ids or payload.get("allowed_source_reference_ids") or ["input-1"]
     if invalid_source:
         source_ids = ["input-999"]
-    requirement_ids = [f"REQ-{index:03d}" for index in range(1, len(source_ids) + 1)]
+    prior_requirements = (
+        payload.get("prior_stage_outputs", {}).get("S00", {}).get("atomic_requirements", [])
+    )
+    requirement_ids = (
+        payload.get("batch_scope", {}).get("requirement_ids")
+        or payload.get("allowed_requirement_ids")
+        or [item["requirement_id"] for item in prior_requirements]
+        or [f"REQ-{index:03d}" for index in range(1, len(source_ids) + 1)]
+    )
+    source_by_requirement = {
+        item["requirement_id"]: item["source_reference_id"] for item in prior_requirements
+    }
     if stage == "S00":
         raw = {"atomic_requirements": [{
             "requirement_id": requirement_id, "statement": f"{source_id} 的明确需求",
@@ -537,7 +591,12 @@ def _analysis_stage_response(prompt: str, *, basis: str = "来源中存在明确
                           for index, requirement_id in enumerate(requirement_ids, start=1)]}
     else:
         stage_type = {"S03": "功能测试", "S04": "异常测试", "S05": "边界测试", "S06": "安全性测试"}[stage]
-        pairs = list(zip(source_ids, requirement_ids)) if stage == "S03" else [(source_ids[0], requirement_ids[0])]
+        pairs = [
+            (source_by_requirement.get(requirement_id, source_ids[min(index, len(source_ids) - 1)]), requirement_id)
+            for index, requirement_id in enumerate(requirement_ids)
+        ]
+        if stage != "S03":
+            pairs = pairs[:1]
         raw = {"rows": [{
             "module": "状态管理", "test_item": f"{stage} 验证 {source_id} 对应功能",
             "test_basis": basis, "source_reference_id": source_id, "test_type": stage_type,
@@ -565,7 +624,7 @@ def _project_with_many_sections(client: TestClient, count: int = 9) -> int:
     return project["id"]
 
 
-def test_preflight_rejects_a_complete_document_over_the_conservative_context_limit(
+def test_preflight_accepts_a_large_document_when_each_semantic_batch_fits_the_context_limit(
     tmp_path: Path, monkeypatch,
 ) -> None:
     application = create_app(
@@ -597,9 +656,9 @@ def test_preflight_rejects_a_complete_document_over_the_conservative_context_lim
             "page": "analysis", "mode": "skill",
         })
 
-    assert response.status_code == 422
-    assert "当前完整资料" in response.json()["detail"]
-    assert "32k" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    assert response.json()["request_count"] > 7
+    assert response.json()["max_request_input_tokens"] + response.json()["max_output_tokens"] <= 32_000
 
 
 def test_skill_analysis_runs_stages_against_the_complete_parsed_document(tmp_path: Path, monkeypatch) -> None:
@@ -629,36 +688,123 @@ def test_skill_analysis_runs_stages_against_the_complete_parsed_document(tmp_pat
         })
 
     assert response.status_code == 201, response.text
-    assert preflight["request_count"] == 7
+    assert preflight["request_count"] == 15
     assert preflight["workflow_stage_count"] == 9
-    assert preflight["max_output_tokens"] == 4_000
-    assert preflight["max_request_count"] == 21
-    assert preflight["max_total_output_tokens"] == 56_000
-    assert preflight["retry_policy"] == {"max_retries_per_stage": 1, "max_additional_requests": 7}
-    assert preflight["repair_policy"] == {"max_requests_per_stage": 1, "max_additional_requests": 7}
+    assert preflight["max_output_tokens"] == 8_192
+    assert preflight["max_request_count"] == 45
+    assert preflight["max_total_output_tokens"] == 245_760
+    assert preflight["retry_policy"] == {"max_retries_per_batch": 1, "max_additional_requests": 15}
+    assert preflight["repair_policy"] == {"max_requests_per_batch": 1, "max_additional_requests": 15}
     assert preflight["timeout_policy"]["request_total_seconds"] == 600
-    assert len(service.prompts) == 7
-    assert [re.search(r"当前阶段：(S\d{2})", prompt).group(1) for prompt in service.prompts] == [
-        "S00", "S01", "S02", "S03", "S04", "S05", "S06",
+    assert len(service.prompts) == 15
+    stage_prompts = {
+        stage: [prompt for prompt in service.prompts if f"当前阶段：{stage}" in prompt]
+        for stage in ("S00", "S01", "S02", "S03", "S04", "S05", "S06")
+    }
+    assert [len(stage_prompts[stage]) for stage in stage_prompts] == [3, 2, 2, 2, 2, 2, 2]
+    assert all("requirement-analysis.skill.v7" in prompt for prompt in service.prompts)
+    assert all("七个字段" not in prompt for stage in ("S00", "S01", "S02") for prompt in stage_prompts[stage])
+    assert all("七个字段" in prompt for stage in ("S03", "S04", "S05", "S06")
+               for prompt in stage_prompts[stage])
+    s00_scopes = [
+        json.loads(prompt.rsplit("\n", 1)[-1])["batch_scope"]["source_reference_ids"]
+        for prompt in stage_prompts["S00"]
     ]
-    assert all("requirement-analysis.skill.v6" in prompt for prompt in service.prompts)
-    assert "七个字段" not in service.prompts[0]
-    assert "七个字段" not in service.prompts[1]
-    assert "七个字段" not in service.prompts[2]
-    assert all("七个字段" in prompt for prompt in service.prompts[3:])
-    assert all('"source_reference_id":"input-1"' in prompt for prompt in service.prompts)
-    assert all('"source_reference_id":"input-9"' in prompt for prompt in service.prompts)
-    assert all("独立来源范围" not in prompt and "平台会确定性合并" not in prompt for prompt in service.prompts)
+    assert sum("input-1" in scope for scope in s00_scopes) == 1
+    assert sum("input-9" in scope for scope in s00_scopes) == 1
     run = response.json()["run"]
-    assert run["max_request_count"] == 21
-    assert run["retry_policy"]["max_retries_per_stage"] == 1
-    assert run["repair_policy"]["max_requests_per_stage"] == 1
+    assert run["max_request_count"] == 45
+    assert run["retry_policy"]["max_retries_per_batch"] == 1
+    assert run["repair_policy"]["max_requests_per_batch"] == 1
     assert run["progress"] == {"completed_units": 9, "total_units": 9, "stage": "保存结果"}
-    assert [item["stage_id"] for item in run["checkpoints"]] == [
+    assert [item["stage_id"] for item in run["checkpoints"] if item.get("checkpoint_type") != "skill_batch"] == [
         "S00", "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
     ]
-    assert run["actual_usage"]["total_tokens"] == 1_050
+    assert run["actual_usage"]["total_tokens"] == 2_250
     assert len(response.json()["rows"]) >= 9
+
+
+def test_skill_analysis_batches_every_model_stage_and_shrinks_a_truncated_batch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    service = AdaptiveBatchModelService()
+    application = create_app(
+        tmp_path / "v020-adaptive-stage-batches.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=9)
+        headers = {"X-Session-ID": "v020-adaptive-stage-batches"}
+        client.post("/api/ai-session-config/test", headers=headers, json={
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        })
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+
+    assert response.status_code == 201, response.text
+    run = response.json()["run"]
+    model_stages = {f"S{index:02d}" for index in range(7)}
+    batch_checkpoints = [
+        checkpoint for checkpoint in run["checkpoints"]
+        if checkpoint.get("checkpoint_type") == "skill_batch"
+    ]
+    assert {checkpoint["stage_id"] for checkpoint in batch_checkpoints} == model_stages
+    assert all(service.max_tokens[index] == 8192 for index in range(len(service.max_tokens)))
+    assert {
+        attempt["stage_id"] for attempt in run["attempts"]
+        if attempt.get("error_code") == "provider_response_truncated"
+    } == model_stages
+    assert run["status"] == "completed"
+    assert run["progress"]["completed_units"] == 9
+
+
+def test_skill_analysis_resumes_from_the_last_completed_stage_batch(tmp_path: Path, monkeypatch) -> None:
+    service = MidStageBatchFailureModelService()
+    application = create_app(
+        tmp_path / "v020-stage-batch-resume.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=9)
+        headers = {"X-Session-ID": "v020-stage-batch-resume"}
+        client.post("/api/ai-session-config/test", headers=headers, json={
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        })
+        first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+        failed_run = client.get(f"/api/v0.2/projects/{project_id}/workspace").json()["runs"][-1]
+        second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+
+    assert first.status_code == 502
+    completed_s03 = [
+        checkpoint for checkpoint in failed_run["checkpoints"]
+        if checkpoint.get("checkpoint_type") == "skill_batch" and checkpoint.get("stage_id") == "S03"
+    ]
+    assert len(completed_s03) == 1
+    first_scope = tuple(completed_s03[0]["scope_ids"])
+    assert second.status_code == 201, second.text
+    assert second.json()["run"]["resumed_from_run_id"] == failed_run["id"]
+    assert sum(stage == "S03" and scope == first_scope for stage, scope in service.scopes) == 1
 
 
 def test_material_understanding_sends_the_complete_parsed_document_in_one_request(
@@ -798,6 +944,7 @@ def test_failed_final_save_reuses_the_completed_model_request_checkpoint(tmp_pat
         first = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
             "mode": "skill", "confirmed": True,
         })
+        prompt_count_after_first = len(service.prompts)
         second = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
             "mode": "skill", "confirmed": True,
         })
@@ -806,7 +953,7 @@ def test_failed_final_save_reuses_the_completed_model_request_checkpoint(tmp_pat
     assert second.status_code == 201, second.text
     assert second.json()["run"]["resumed_from_run_id"]
     assert second.json()["run"]["progress"]["completed_units"] == 9
-    assert len(service.prompts) == 7
+    assert len(service.prompts) == prompt_count_after_first
 
 
 def test_failed_skill_stage_resumes_without_repeating_completed_stages(tmp_path: Path, monkeypatch) -> None:
@@ -838,7 +985,10 @@ def test_failed_skill_stage_resumes_without_repeating_completed_stages(tmp_path:
         })
 
     assert first.status_code == 502
-    assert [item["stage_id"] for item in failed_run["checkpoints"]] == ["S00", "S01", "S02"]
+    assert [
+        item["stage_id"] for item in failed_run["checkpoints"]
+        if item.get("checkpoint_type") != "skill_batch"
+    ] == ["S00", "S01", "S02"]
     assert second.status_code == 201, second.text
     assert second.json()["run"]["resumed_from_run_id"]
     assert [re.search(r"当前阶段：(S\d{2})", prompt).group(1) for prompt in service.prompts] == [
@@ -1094,7 +1244,8 @@ def test_truncated_model_output_reports_length_limit_and_persists_diagnostics(tm
     assert response.json()["detail"]["error_type"] == "output_truncated"
     assert "模型输出达到长度上限" in response.json()["detail"]["user_message"]
     assert failed["attempts"][-1] == {
-        "unit": 1, "stage_id": "S00", "attempt": 1, "error_code": "provider_response_truncated",
+        "unit": 1, "stage_id": "S00", "batch_scope_ids": ["input-1"], "attempt": 1,
+        "operation": "generate", "error_code": "provider_response_truncated",
         "duration_ms": 2345, "first_event_ms": 120, "finish_reason": "length",
         "response_length": 8192, "diagnostic": "finish_reason=length",
     }
@@ -1131,7 +1282,7 @@ def test_direct_mode_is_disabled_and_skill_mode_runs_versioned_stages(tmp_path: 
     assert direct.status_code == 422, direct.text
     assert "已停用" in direct.json()["detail"]
     assert skill.status_code == 201, skill.text
-    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v6"
+    assert skill.json()["run"]["prompt_version"] == "requirement-analysis.skill.v7"
     assert skill.json()["run"]["skill_version"] == "ai-test-design-requirement-analysis.v1"
     assert len(service.prompts) == 7
     assert "当前阶段：S00" in service.prompts[0]

@@ -97,7 +97,7 @@ function runPreflight() {
       file_count: 1, fragment_count: 1, source_fragment_count: 3, context_chunk_count: 1,
       analysis_row_count: 0, selected_row_count: 0, requirement_version_id: 1, roles: [],
     }, supplemental_notes: "", supplemental_requirements: "", template_filename: null,
-    prompt_version: "requirement-analysis.skill.v6", skill_version: "ai-test-design-requirement-analysis.v1",
+    prompt_version: "requirement-analysis.skill.v7", skill_version: "ai-test-design-requirement-analysis.v1",
     estimated_input_tokens: 1200, max_output_tokens: 10000,
     estimated_cost: { status: "unavailable", reason: "未登记价格" }, requires_confirmation: true,
   };
@@ -108,7 +108,7 @@ function timeoutRun(): RunEvidence {
     id: "run-timeout", project_id: 1, page: "analysis", mode: "skill", status: "failed",
     source_label: "真实模型（Skill 工作流）", provider: "硅基流动", model: "Qwen3.5-27B",
     credential_source: "会话配置", input_summary: runPreflight().input_summary,
-    prompt_version: "requirement-analysis.skill.v6", skill_version: "ai-test-design-requirement-analysis.v1",
+    prompt_version: "requirement-analysis.skill.v7", skill_version: "ai-test-design-requirement-analysis.v1",
     estimated_input_tokens: 1200, max_output_tokens: 10000, supplemental_notes: "",
     supplemental_requirements: "", template_filename: null,
     estimated_cost: { status: "unavailable", reason: "未登记价格" },

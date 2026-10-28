@@ -13,7 +13,7 @@ PER_REQUEST_OUTPUT_TOKENS = 8_000
 
 
 def batch_contexts(_page: str, context: dict) -> list[dict]:
-    """每个工作阶段保持一次完整模型请求，超限输入由调用前检查明确拒绝。"""
+    """非 Skill 页面保持一次完整模型请求；Skill 需求分析使用独立的语义批次执行器。"""
     return [context]
 
 

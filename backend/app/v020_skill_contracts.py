@@ -8,9 +8,11 @@ from app.v020_contracts import TEST_TYPES
 from app.v020_run_schemas import AnalysisOutputRow, NonEmptyText
 
 
-SKILL_PROMPT_VERSION = "requirement-analysis.skill.v6"
-SKILL_STAGE_OUTPUT_TOKENS = 4_000
+SKILL_PROMPT_VERSION = "requirement-analysis.skill.v7"
+SKILL_STAGE_OUTPUT_TOKENS = 8_192
 SKILL_STAGE_COUNT = 9
+SKILL_SOURCE_BATCH_SIZE = 4
+SKILL_REQUIREMENT_BATCH_SIZE = 8
 
 
 class AtomicRequirement(BaseModel):
@@ -35,7 +37,7 @@ class SourceCoverage(BaseModel):
 
 class Stage00Output(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    atomic_requirements: list[AtomicRequirement] = Field(min_length=1, max_length=300)
+    atomic_requirements: list[AtomicRequirement] = Field(default_factory=list, max_length=300)
     source_coverage: list[SourceCoverage] = Field(min_length=1, max_length=200)
     questions: list[str] = Field(default_factory=list, max_length=100)
 
@@ -51,7 +53,7 @@ class IdentifiedFunction(BaseModel):
 
 class Stage01Output(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    functions: list[IdentifiedFunction] = Field(min_length=1, max_length=300)
+    functions: list[IdentifiedFunction] = Field(default_factory=list, max_length=300)
 
 
 class BusinessRule(BaseModel):
@@ -107,16 +109,57 @@ MODEL_STAGES = (
 
 
 def skill_preflight_prompts(context: dict) -> list[str]:
-    """预检只能按最小上游产物估算；运行时会对每个实际阶段再次检查。"""
+    """预检估算首轮有界请求；上游产物形成后运行时会重新计算后续批次。"""
     placeholders = {
         "S00": {"atomic_requirements": [], "source_coverage": [], "questions": []},
         "S01": {"functions": []},
         "S02": {"rules": []},
     }
-    return [build_stage_prompt(stage, context, placeholders) for stage in MODEL_STAGES]
+    source_batches = [
+        context["fragments"][index:index + SKILL_SOURCE_BATCH_SIZE]
+        for index in range(0, len(context["fragments"]), SKILL_SOURCE_BATCH_SIZE)
+    ]
+    prompts = []
+    for index, fragments in enumerate(source_batches, start=1):
+        batch_context = {**context, "fragments": fragments}
+        prompts.append(build_stage_prompt(MODEL_STAGES[0], batch_context, {}, {
+            "batch_number": index,
+            "batch_count": len(source_batches),
+            "source_reference_ids": [item["source_reference_id"] for item in fragments],
+            "requirement_ids": [],
+        }))
+    requirement_batches = [
+        context["fragments"][index:index + SKILL_REQUIREMENT_BATCH_SIZE]
+        for index in range(0, len(context["fragments"]), SKILL_REQUIREMENT_BATCH_SIZE)
+    ]
+    for stage in MODEL_STAGES[1:]:
+        for index, fragments in enumerate(requirement_batches, start=1):
+            requirement_ids = [f"REQ-PREFLIGHT-{item['source_reference_id']}" for item in fragments]
+            stage_placeholders = {
+                "S00": {
+                    "atomic_requirements": [{
+                        "requirement_id": requirement_id,
+                        "statement": "预检占位需求",
+                        "source_reference_id": fragment["source_reference_id"],
+                    } for fragment, requirement_id in zip(fragments, requirement_ids)],
+                    "source_coverage": [], "questions": [],
+                },
+                "S01": placeholders["S01"], "S02": placeholders["S02"],
+            }
+            prompts.append(build_stage_prompt(stage, {**context, "fragments": fragments}, stage_placeholders, {
+                "batch_number": index, "batch_count": len(requirement_batches),
+                "source_reference_ids": [item["source_reference_id"] for item in fragments],
+                "requirement_ids": requirement_ids,
+            }))
+    return prompts
 
 
-def build_stage_prompt(stage: StageDefinition, context: dict, artifacts: dict[str, dict]) -> str:
+def build_stage_prompt(
+    stage: StageDefinition,
+    context: dict,
+    artifacts: dict[str, dict],
+    batch_scope: dict | None = None,
+) -> str:
     row_contract = (
         '{"rows":[{"module":"宽泛业务模块","test_item":"可验证测试项",'
         '"test_basis":"资料依据与分析理由","source_reference_id":"input-1",'
@@ -130,6 +173,7 @@ def build_stage_prompt(stage: StageDefinition, context: dict, artifacts: dict[st
             "material_understanding_used": context.get("material_understanding_used", False),
             "material_understanding_run_id": context.get("material_understanding_run_id"),
         },
+        "batch_scope": batch_scope or {},
         "materials": context["fragments"],
         "prior_stage_outputs": prior,
     }
@@ -143,13 +187,16 @@ def build_stage_prompt(stage: StageDefinition, context: dict, artifacts: dict[st
     return (
         f"提示版本：{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}。\n"
         f"当前阶段：{stage.stage_id} {stage.name}。{stage.instruction}\n"
-        "每个阶段都针对同一份完整资料执行，并使用所需的上游阶段产物。"
-        "必须以 materials 和已给出的上游阶段产物为依据；ID 必须原样复用，禁止补造来源。\n"
+        "本次仅处理 batch_scope 指定的来源或原子需求；必须逐一完成该范围。"
+        "系统会在全部有界范围完成后统一合并和校验。"
+        "必须以 materials 和已给出的上游阶段产物为依据；已有 ID 必须原样复用，禁止补造来源。\n"
         f"输出契约：{stage.output_contract or row_contract}\n"
         + ("S00 的 source_coverage 必须逐一覆盖 materials 中每个 source_reference_id；"
            "有需求时列出该来源对应的全部 requirement_ids，没有需求时 requirement_ids 为空并填写明确原因。\n"
            if stage.stage_id == "S00" else "")
         + row_constraints
+        + ("每个原子需求最多输出 12 个不重复测试项；module、test_item 和 test_basis 均使用简洁中文，"
+           "避免复述整段资料。\n" if stage.stage_id in {"S03", "S04", "S05", "S06"} else "")
         + "只输出 JSON 对象，不要输出解释、Markdown 或 API Key。\n"
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     )

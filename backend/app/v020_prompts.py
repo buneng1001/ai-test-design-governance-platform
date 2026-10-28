@@ -5,7 +5,7 @@ from app.v020_contracts import TEST_TYPES
 
 PROMPT_VERSIONS = {
     "understanding": {"direct": "material-understanding.direct.v2"},
-    "analysis": {"direct": "requirement-analysis.direct.v4", "skill": "requirement-analysis.skill.v6"},
+    "analysis": {"direct": "requirement-analysis.direct.v4", "skill": "requirement-analysis.skill.v7"},
     "suggestions": {"direct": "coverage-suggestions.direct.v2", "skill": "coverage-suggestions.skill.v2"},
     "review": {"direct": "role-review.direct.v2", "skill": "role-review.skill.v2"},
     "cases": {"direct": "case-generation.direct.v2", "skill": "case-generation.skill.v2"},

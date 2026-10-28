@@ -7,6 +7,9 @@ from app.ai_service import ModelRequest
 from app.v020_batching import aggregate_usage, response_usage
 from app.v020_contracts import TEST_TYPES
 from app.v020_model_errors import V020RunError, model_failure
+from app.v020_skill_batching import (
+    SkillStageBatch, canonicalize_batch_output, merge_stage_outputs, split_batch, stage_batches,
+)
 from app.v020_skill_contracts import (
     MODEL_STAGES, SKILL_PROMPT_VERSION, SKILL_STAGE_COUNT, SKILL_STAGE_OUTPUT_TOKENS,
     StageDefinition, build_stage_prompt,
@@ -21,99 +24,81 @@ class StageOutputInvalid(Exception):
 
 
 def execute_skill_analysis(model_service, run_repository, resolved, context: dict, preflight: dict, run: dict):
-    checkpoints = {item.get("stage_id"): item for item in run.get("checkpoints", []) if item.get("stage_id")}
-    artifacts = {stage_id: item["output"] for stage_id, item in checkpoints.items() if "output" in item}
-    usages = [item["usage"] for item in checkpoints.values() if item.get("model_call") and item.get("usage")]
+    stage_checkpoints = {
+        item.get("stage_id"): item for item in run.get("checkpoints", [])
+        if item.get("stage_id") and item.get("checkpoint_type") != "skill_batch"
+    }
+    artifacts = {stage_id: item["output"] for stage_id, item in stage_checkpoints.items() if "output" in item}
+    usages = [
+        item["usage"] for item in run.get("checkpoints", [])
+        if item.get("usage") and (
+            item.get("checkpoint_type") == "skill_batch"
+            or item.get("checkpoint_type") is None and item.get("model_call")
+        )
+    ]
     for position, stage in enumerate(MODEL_STAGES, start=1):
         if stage.stage_id in artifacts:
             continue
         _ensure_not_cancelled(run_repository, run)
-        _set_progress(run_repository, run, position - 1, stage, "调用模型")
-        prompt = build_stage_prompt(stage, context, artifacts)
-        if _estimate_tokens(prompt) + SKILL_STAGE_OUTPUT_TOKENS > 32_000:
-            raise V020RunError(
-                422, f"{stage.stage_id} 的完整资料、上游产物与预留输出合计超过 32k 保守上下文上限；"
-                "请缩小资料范围后重试。",
-            )
-        response = None
-        for attempt in range(1, 3):
+        saved_batches = [
+            item for item in run.get("checkpoints", [])
+            if item.get("checkpoint_type") == "skill_batch" and item.get("stage_id") == stage.stage_id
+        ]
+        completed_scope_ids = {
+            scope_id for item in saved_batches for scope_id in item.get("scope_ids", [])
+        }
+        queue = stage_batches(stage, context, artifacts, completed_scope_ids)
+        batch_outputs = [item["output"] for item in saved_batches]
+        while queue:
             _ensure_not_cancelled(run_repository, run)
-            response = model_service.complete(ModelRequest(
-                task_type="requirement_review", prompt_version=f"{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}",
-                model_parameters=AIModelConfig(provider=resolved.provider, model=resolved.model, temperature=0,
-                                               max_tokens=SKILL_STAGE_OUTPUT_TOKENS),
-                input_asset_versions=(), scenario="normal", base_url=resolved.base_url, api_key=resolved.api_key,
-                prompt_override=prompt, network_mode=resolved.network_mode,
-                cancel_requested=lambda: _is_cancelled(run_repository, run),
-            ))
-            run["attempts"].append({
-                "unit": position, "stage_id": stage.stage_id, "attempt": attempt,
-                "error_code": response.error_code, "duration_ms": response.duration_ms,
-                "first_event_ms": response.first_event_ms, "finish_reason": response.finish_reason,
-                "response_length": response.response_length, "diagnostic": response.diagnostic,
-            })
-            run_repository.update_run(run)
-            if not response.error_code or not response.retryable or attempt == 2:
-                break
-        assert response is not None
-        if response.error_code == "provider_cancelled":
-            raise V020RunError(409, "本次运行已停止；已完成阶段已保留，可稍后继续。")
-        if response.error_code:
-            status, detail = model_failure(response, preflight["provider"], preflight["model"], "analysis")
-            raise V020RunError(status, detail)
-        if not isinstance(response.raw_output, dict):
-            raise V020RunError(502, f"{stage.stage_id} 模型返回内容不是 JSON 对象。")
-        candidate = _safe_stage_defaults(stage, response.raw_output)
-        usage = response_usage(response)
-        usages.append(usage)
-        repair_applied = False
-        try:
-            output = _validate_stage(stage, candidate, context, artifacts)
-        except StageOutputInvalid as validation_error:
-            repair_prompt = _repair_prompt(stage, candidate, validation_error.errors, context, artifacts)
-            if _estimate_tokens(repair_prompt) + SKILL_STAGE_OUTPUT_TOKENS > 32_000:
-                reason = _validation_message(stage.stage_id, validation_error.errors, repaired=False)
-                raise V020RunError(422, f"{reason} 自动修复请求超过 32k 保守上下文上限，请缩小资料范围后重试。")
-            repair_response = model_service.complete(ModelRequest(
-                task_type="requirement_review",
-                prompt_version=f"{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}.repair",
-                model_parameters=AIModelConfig(provider=resolved.provider, model=resolved.model, temperature=0,
-                                               max_tokens=SKILL_STAGE_OUTPUT_TOKENS),
-                input_asset_versions=(), scenario="normal", base_url=resolved.base_url, api_key=resolved.api_key,
-                prompt_override=repair_prompt,
-                network_mode=resolved.network_mode,
-                cancel_requested=lambda: _is_cancelled(run_repository, run),
-            ))
-            run["attempts"].append({
-                "unit": position, "stage_id": stage.stage_id, "attempt": 1, "operation": "schema_repair",
-                "error_code": repair_response.error_code, "duration_ms": repair_response.duration_ms,
-                "first_event_ms": repair_response.first_event_ms, "finish_reason": repair_response.finish_reason,
-                "response_length": repair_response.response_length, "diagnostic": repair_response.diagnostic,
-            })
-            run_repository.update_run(run)
-            if repair_response.error_code == "provider_cancelled":
-                raise V020RunError(409, "本次运行已停止；已完成阶段已保留，可稍后继续。")
-            if repair_response.error_code:
-                status, detail = model_failure(
-                    repair_response, preflight["provider"], preflight["model"], "analysis",
+            batch = queue.pop(0)
+            batch_number = len(saved_batches) + 1
+            batch_count = len(saved_batches) + len(queue) + 1
+            _set_batch_progress(run_repository, run, position - 1, stage, batch_number, batch_count)
+            prompt = build_stage_prompt(stage, batch.context, batch.artifacts, _batch_scope(batch, batch_number, batch_count))
+            if _estimate_tokens(prompt) + SKILL_STAGE_OUTPUT_TOKENS > 32_000:
+                if len(batch.scope_ids) > 1:
+                    queue[0:0] = split_batch(stage, context, artifacts, batch)
+                    continue
+                raise V020RunError(
+                    422, f"{stage.stage_id} 的单个语义范围与预留输出仍超过 32k 保守上下文上限；"
+                    "请缩小对应资料范围后重试。",
                 )
-                raise V020RunError(status, detail)
-            if not isinstance(repair_response.raw_output, dict):
-                raise V020RunError(502, f"{stage.stage_id} 结构修复返回内容不是 JSON 对象。")
-            repair_usage = response_usage(repair_response)
-            usages.append(repair_usage)
-            repaired = _safe_stage_defaults(stage, repair_response.raw_output)
-            _ensure_repair_preserves_rows(stage, candidate, repaired)
-            try:
-                output = _validate_stage(stage, repaired, context, artifacts)
-            except StageOutputInvalid as repair_error:
-                raise V020RunError(422, _validation_message(stage.stage_id, repair_error.errors, repaired=True))
-            usage = aggregate_usage([usage, repair_usage])
-            repair_applied = True
+            response = _call_stage_model(
+                model_service, run_repository, resolved, run, stage, position, batch, prompt,
+            )
+            if response.error_code == "provider_response_truncated" and len(batch.scope_ids) > 1:
+                queue[0:0] = split_batch(stage, context, artifacts, batch)
+                continue
+            if response.error_code:
+                _raise_model_error(response, preflight)
+            if not isinstance(response.raw_output, dict):
+                raise V020RunError(502, f"{stage.stage_id} 模型返回内容不是 JSON 对象。")
+            candidate = canonicalize_batch_output(
+                stage, _safe_stage_defaults(stage, response.raw_output), batch,
+            )
+            usage = response_usage(response)
+            output, usage, repair_applied = _validate_or_repair_batch(
+                model_service, run_repository, resolved, run, stage, position, batch, candidate, usage, preflight,
+            )
+            usages.append(usage)
+            checkpoint = {
+                "checkpoint_type": "skill_batch", "unit": position, "stage_id": stage.stage_id,
+                "stage_name": stage.name, "batch_index": batch_number, "scope_ids": list(batch.scope_ids),
+                "model_call": True, "repair_applied": repair_applied, "output": output, "usage": usage,
+            }
+            run["checkpoints"].append(checkpoint)
+            saved_batches.append(checkpoint)
+            batch_outputs.append(output)
+            run_repository.update_run(run)
+        output = merge_stage_outputs(stage, batch_outputs)
+        output = _validate_stage(stage, output, context, artifacts)
+        if stage.stage_id == "S00" and not output["atomic_requirements"]:
+            raise V020RunError(422, "S00 未从当前资料中识别出可用于测试设计的原子需求。")
         artifacts[stage.stage_id] = output
         run["checkpoints"].append({
-            "unit": position, "stage_id": stage.stage_id, "stage_name": stage.name,
-            "model_call": True, "repair_applied": repair_applied, "output": output, "usage": usage,
+            "checkpoint_type": "skill_stage", "unit": position, "stage_id": stage.stage_id,
+            "stage_name": stage.name, "model_call": False, "output": output,
         })
         _set_progress(run_repository, run, position, stage, "阶段完成")
 
@@ -133,6 +118,105 @@ def execute_skill_analysis(model_service, run_repository, resolved, context: dic
                                    "output": coverage})
         _set_local_progress(run_repository, run, 9, "S08 覆盖校验")
     return artifacts["S07"], aggregate_usage(usages)
+
+
+def _batch_scope(batch: SkillStageBatch, batch_number: int, batch_count: int) -> dict:
+    source_ids = [item["source_reference_id"] for item in batch.context["fragments"]]
+    requirement_ids = [
+        item["requirement_id"]
+        for item in batch.artifacts.get("S00", {}).get("atomic_requirements", [])
+    ]
+    return {
+        "batch_number": batch_number,
+        "batch_count": batch_count,
+        "source_reference_ids": source_ids,
+        "requirement_ids": requirement_ids,
+    }
+
+
+def _call_stage_model(model_service, repository, resolved, run: dict, stage: StageDefinition, position: int,
+                      batch: SkillStageBatch, prompt: str):
+    response = None
+    for attempt in range(1, 3):
+        _ensure_not_cancelled(repository, run)
+        response = model_service.complete(ModelRequest(
+            task_type="requirement_review",
+            prompt_version=f"{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}",
+            model_parameters=AIModelConfig(
+                provider=resolved.provider, model=resolved.model, temperature=0,
+                max_tokens=SKILL_STAGE_OUTPUT_TOKENS,
+            ),
+            input_asset_versions=(), scenario="normal", base_url=resolved.base_url, api_key=resolved.api_key,
+            prompt_override=prompt, network_mode=resolved.network_mode,
+            cancel_requested=lambda: _is_cancelled(repository, run),
+        ))
+        _record_attempt(repository, run, response, position, stage.stage_id, attempt, batch)
+        if not response.error_code or not response.retryable or attempt == 2:
+            break
+    assert response is not None
+    return response
+
+
+def _validate_or_repair_batch(
+    model_service, repository, resolved, run: dict, stage: StageDefinition, position: int,
+    batch: SkillStageBatch, candidate: dict, usage: dict, preflight: dict,
+) -> tuple[dict, dict, bool]:
+    try:
+        return _validate_stage(stage, candidate, batch.context, batch.artifacts), usage, False
+    except StageOutputInvalid as validation_error:
+        repair_prompt = _repair_prompt(
+            stage, candidate, validation_error.errors, batch.context, batch.artifacts,
+        )
+        if _estimate_tokens(repair_prompt) + SKILL_STAGE_OUTPUT_TOKENS > 32_000:
+            reason = _validation_message(stage.stage_id, validation_error.errors, repaired=False)
+            raise V020RunError(422, f"{reason} 自动修复请求超过 32k 保守上下文上限。")
+        repair_response = model_service.complete(ModelRequest(
+            task_type="requirement_review",
+            prompt_version=f"{SKILL_PROMPT_VERSION}.{stage.stage_id.lower()}.repair",
+            model_parameters=AIModelConfig(
+                provider=resolved.provider, model=resolved.model, temperature=0,
+                max_tokens=SKILL_STAGE_OUTPUT_TOKENS,
+            ),
+            input_asset_versions=(), scenario="normal", base_url=resolved.base_url, api_key=resolved.api_key,
+            prompt_override=repair_prompt, network_mode=resolved.network_mode,
+            cancel_requested=lambda: _is_cancelled(repository, run),
+        ))
+        _record_attempt(
+            repository, run, repair_response, position, stage.stage_id, 1, batch,
+            operation="schema_repair",
+        )
+        if repair_response.error_code:
+            _raise_model_error(repair_response, preflight)
+        if not isinstance(repair_response.raw_output, dict):
+            raise V020RunError(502, f"{stage.stage_id} 结构修复返回内容不是 JSON 对象。")
+        repaired = canonicalize_batch_output(
+            stage, _safe_stage_defaults(stage, repair_response.raw_output), batch,
+        )
+        _ensure_repair_preserves_rows(stage, candidate, repaired)
+        try:
+            output = _validate_stage(stage, repaired, batch.context, batch.artifacts)
+        except StageOutputInvalid as repair_error:
+            raise V020RunError(422, _validation_message(stage.stage_id, repair_error.errors, repaired=True))
+        return output, aggregate_usage([usage, response_usage(repair_response)]), True
+
+
+def _record_attempt(repository, run: dict, response, position: int, stage_id: str, attempt: int,
+                    batch: SkillStageBatch, operation: str = "generate") -> None:
+    run["attempts"].append({
+        "unit": position, "stage_id": stage_id, "batch_scope_ids": list(batch.scope_ids),
+        "attempt": attempt, "operation": operation, "error_code": response.error_code,
+        "duration_ms": response.duration_ms, "first_event_ms": response.first_event_ms,
+        "finish_reason": response.finish_reason, "response_length": response.response_length,
+        "diagnostic": response.diagnostic,
+    })
+    repository.update_run(run)
+
+
+def _raise_model_error(response, preflight: dict) -> None:
+    if response.error_code == "provider_cancelled":
+        raise V020RunError(409, "本次运行已停止；已完成批次和阶段已保留，可稍后继续。")
+    status, detail = model_failure(response, preflight["provider"], preflight["model"], "analysis")
+    raise V020RunError(status, detail)
 
 
 def _validate_stage(stage: StageDefinition, raw: dict, context: dict, artifacts: dict[str, dict]) -> dict:
@@ -289,6 +373,16 @@ def _coverage(stage00: dict, stage07: dict) -> dict:
 def _set_progress(repository, run: dict, completed: int, stage: StageDefinition, status: str) -> None:
     run["stage"] = f"{stage.stage_id} {stage.name} · {status}"
     run["progress"] = {"completed_units": completed, "total_units": SKILL_STAGE_COUNT, "stage": run["stage"]}
+    repository.update_run(run)
+
+
+def _set_batch_progress(repository, run: dict, completed: int, stage: StageDefinition,
+                        batch_number: int, batch_count: int) -> None:
+    run["stage"] = f"{stage.stage_id} {stage.name} · 模型批次 {batch_number}/{batch_count}"
+    run["progress"] = {
+        "completed_units": completed, "total_units": SKILL_STAGE_COUNT, "stage": run["stage"],
+        "current_batch": batch_number, "stage_batch_count": batch_count,
+    }
     repository.update_run(run)
 
 

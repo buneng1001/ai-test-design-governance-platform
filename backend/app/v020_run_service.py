@@ -80,11 +80,11 @@ class V020RunService:
             max_request_count = request_count * 3
             max_output_request_count = request_count * 2
             retry_policy = {
-                "max_retries_per_stage": 1,
+                "max_retries_per_batch": 1,
                 "max_additional_requests": request_count,
             }
             repair_policy = {
-                "max_requests_per_stage": 1,
+                "max_requests_per_batch": 1,
                 "max_additional_requests": request_count,
             }
         else:
@@ -188,7 +188,10 @@ class V020RunService:
         if resumable:
             run["checkpoints"] = list(resumable.get("checkpoints", []))
             run["resumed_from_run_id"] = resumable["id"]
-            run["progress"]["completed_units"] = len(run["checkpoints"])
+            run["progress"]["completed_units"] = len({
+                item.get("stage_id") for item in run["checkpoints"]
+                if item.get("stage_id") and item.get("checkpoint_type") != "skill_batch"
+            })
         self.runs.create_run(run)
         try:
             raw, usage = self._produce(page, mode, context, preflight, session_id, run)
