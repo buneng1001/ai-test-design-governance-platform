@@ -83,6 +83,45 @@ def safe_stage_defaults(stage: StageDefinition, raw: dict) -> dict:
     return candidate
 
 
+def apply_deterministic_stage_repairs(
+    stage: StageDefinition, candidate: dict, context: dict,
+) -> tuple[dict, bool]:
+    """只补全可由已有 ID 关系确定推导的字段，不生成新的业务内容。"""
+    if stage.stage_id != "S00" or isinstance(candidate.get("source_coverage"), list):
+        return candidate, False
+    requirements = candidate.get("atomic_requirements")
+    if not isinstance(requirements, list):
+        return candidate, False
+    source_ids = [item["source_reference_id"] for item in context.get("fragments", [])]
+    requirements_by_source: dict[str, list[str]] = {source_id: [] for source_id in source_ids}
+    for item in requirements:
+        if not isinstance(item, dict):
+            return candidate, False
+        source_id = item.get("source_reference_id")
+        requirement_id = item.get("requirement_id")
+        if source_id not in requirements_by_source or not isinstance(requirement_id, str):
+            return candidate, False
+        requirements_by_source[source_id].append(requirement_id)
+    if not source_ids:
+        return candidate, False
+    repaired = deepcopy(candidate)
+    repaired["source_coverage"] = [{
+        "source_reference_id": source_id,
+        "requirement_ids": requirements_by_source[source_id],
+        "no_requirement_reason": (
+            "" if requirements_by_source[source_id]
+            else "当前模型输出未从该来源提取原子需求，需人工复核"
+        ),
+    } for source_id in source_ids]
+    questions = list(repaired.get("questions", [])) if isinstance(repaired.get("questions"), list) else []
+    questions.extend(
+        f"请复核 {source_id} 是否确实不包含可测试需求。"
+        for source_id in source_ids if not requirements_by_source[source_id]
+    )
+    repaired["questions"] = list(dict.fromkeys(questions))
+    return repaired, True
+
+
 def repair_prompt(
     stage: StageDefinition, invalid_output: dict, errors: list[dict], context: dict, artifacts: dict[str, dict],
 ) -> str:

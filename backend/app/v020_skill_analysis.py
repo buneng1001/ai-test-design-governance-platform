@@ -11,6 +11,7 @@ from app.v020_skill_contracts import (
 from app.v020_skill_model_runner import SkillModelRunner
 from app.v020_skill_validation import (
     StageOutputInvalid,
+    apply_deterministic_stage_repairs,
     ensure_repair_preserves_rows,
     repair_prompt,
     safe_stage_defaults,
@@ -73,6 +74,9 @@ def execute_skill_analysis(model_service, run_repository, resolved, context: dic
             candidate = canonicalize_batch_output(
                 stage, safe_stage_defaults(stage, response.raw_output), batch,
             )
+            candidate, local_repair_applied = apply_deterministic_stage_repairs(
+                stage, candidate, batch.context,
+            )
             usage = response_usage(response)
             output, usage, repair_applied = _validate_or_repair_batch(
                 runner, stage, position, batch, candidate, usage,
@@ -81,7 +85,8 @@ def execute_skill_analysis(model_service, run_repository, resolved, context: dic
             checkpoint = {
                 "checkpoint_type": "skill_batch", "unit": position, "stage_id": stage.stage_id,
                 "stage_name": stage.name, "batch_index": batch_number, "scope_ids": list(batch.scope_ids),
-                "model_call": True, "repair_applied": repair_applied, "output": output, "usage": usage,
+                "model_call": True, "local_repair_applied": local_repair_applied,
+                "repair_applied": repair_applied, "output": output, "usage": usage,
             }
             run["checkpoints"].append(checkpoint)
             saved_batches.append(checkpoint)

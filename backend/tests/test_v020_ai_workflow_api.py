@@ -519,7 +519,7 @@ class RecoverableIncompleteS04ModelService:
         return response
 
 
-class MissingS00CoverageModelService:
+class IrrecoverableS00StructureModelService:
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
@@ -530,6 +530,26 @@ class MissingS00CoverageModelService:
             raw = response.raw_output
             assert isinstance(raw, dict)
             raw.pop("source_coverage")
+            raw["atomic_requirements"] = raw["atomic_requirements"][:-1]
+            if raw["atomic_requirements"]:
+                raw["atomic_requirements"][0].pop("statement")
+        return response
+
+
+class EchoedS00RepairContextModelService:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, request) -> ModelResponse:
+        self.prompts.append(request.prompt_override)
+        if request.prompt_version.endswith(".repair"):
+            return ModelResponse(raw_output=json.loads(request.prompt_override.rsplit("\n", 1)[-1]))
+        response = _analysis_stage_response(request.prompt_override)
+        if "当前阶段：S00" in request.prompt_override:
+            raw = response.raw_output
+            assert isinstance(raw, dict)
+            raw.pop("source_coverage")
+            raw["atomic_requirements"] = raw["atomic_requirements"][:-1]
         return response
 
 
@@ -1047,8 +1067,8 @@ def test_skill_repairs_missing_s04_fields_once_and_continues(tmp_path: Path, mon
     assert sum("结构修复" in prompt for prompt in service.prompts) == 1
 
 
-def test_skill_rejects_s00_when_model_does_not_account_for_every_input_context(tmp_path: Path, monkeypatch) -> None:
-    service = MissingS00CoverageModelService()
+def test_skill_rejects_s00_when_business_content_is_still_invalid_after_repair(tmp_path: Path, monkeypatch) -> None:
+    service = IrrecoverableS00StructureModelService()
     application = create_app(
         tmp_path / "v020-s00-coverage.db", local_credentials_path=tmp_path / ".env.local",
         real_model_service=service,
@@ -1073,9 +1093,51 @@ def test_skill_rejects_s00_when_model_does_not_account_for_every_input_context(t
 
     assert response.status_code == 422
     assert "S00" in response.json()["detail"]
-    assert "source_coverage" in response.json()["detail"]
+    assert "statement" in response.json()["detail"]
     assert "errors.pydantic.dev" not in response.json()["detail"]
     assert sum("结构修复" in prompt for prompt in service.prompts) == 1
+
+
+def test_skill_locally_rebuilds_missing_s00_coverage_instead_of_accepting_repair_context_echo(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    service = EchoedS00RepairContextModelService()
+    application = create_app(
+        tmp_path / "v020-s00-local-coverage-repair.db", local_credentials_path=tmp_path / ".env.local",
+        real_model_service=service,
+    )
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self) -> bytes: return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    monkeypatch.setattr("app.model_config_api.urlopen", lambda *_, **__: FakeResponse())
+    with TestClient(application) as client:
+        project_id = _project_with_many_sections(client, count=2)
+        headers = {"X-Session-ID": "v020-s00-local-coverage-repair"}
+        client.post("/api/ai-session-config/test", headers=headers, json={
+            "provider": "custom", "model": "capture-model", "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-secret", "remember_api_key": False,
+        })
+        response = client.post(f"/api/v0.2/projects/{project_id}/analysis-runs", headers=headers, json={
+            "mode": "skill", "confirmed": True,
+        })
+
+    assert response.status_code == 201, response.text
+    s00_batches = [
+        item for item in response.json()["run"]["checkpoints"]
+        if item.get("checkpoint_type") == "skill_batch" and item.get("stage_id") == "S00"
+    ]
+    assert s00_batches
+    assert all(item["repair_applied"] is False for item in s00_batches)
+    assert all(item["local_repair_applied"] is True for item in s00_batches)
+    assert all(item["output"]["source_coverage"] for item in s00_batches)
+    assert any(
+        coverage["no_requirement_reason"]
+        for item in s00_batches for coverage in item["output"]["source_coverage"]
+    )
+    assert not any("结构修复" in prompt for prompt in service.prompts)
 
 
 def test_invalid_batch_is_rejected_before_checkpoint_is_saved(tmp_path: Path, monkeypatch) -> None:
