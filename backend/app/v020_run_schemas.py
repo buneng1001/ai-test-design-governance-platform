@@ -2,7 +2,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
-from app.v020_contracts import TEST_TYPES
+from app.v020_contracts import MAX_SKILL_ANALYSIS_ROWS, TEST_TYPES
 
 
 RunMode = Literal["direct", "skill", "local"]
@@ -100,7 +100,7 @@ class AnalysisOutputRow(BaseModel):
 
 class AnalysisModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    rows: list[AnalysisOutputRow] = Field(min_length=1, max_length=500)
+    rows: list[AnalysisOutputRow] = Field(min_length=1, max_length=MAX_SKILL_ANALYSIS_ROWS)
 
 
 class MaterialUnderstandingFragment(BaseModel):

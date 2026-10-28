@@ -437,6 +437,7 @@ class AdaptiveBatchModelService:
     def __init__(self) -> None:
         self.prompts: list[str] = []
         self.max_tokens: list[int] = []
+        self.truncated_stages: set[str] = set()
 
     def complete(self, request) -> ModelResponse:
         self.prompts.append(request.prompt_override)
@@ -445,7 +446,8 @@ class AdaptiveBatchModelService:
         stage = re.search(r"当前阶段：(S\d{2})", request.prompt_override).group(1)
         batch_scope = payload.get("batch_scope", {})
         scope_ids = batch_scope.get("requirement_ids") or batch_scope.get("source_reference_ids", [])
-        if len(scope_ids) > 1:
+        if len(scope_ids) > 1 and stage not in self.truncated_stages:
+            self.truncated_stages.add(stage)
             return ModelResponse(
                 error_code="provider_response_truncated", retryable=False, diagnostic="finish_reason=length",
                 finish_reason="length", response_length=8192, duration_ms=100, first_event_ms=10,
@@ -691,10 +693,10 @@ def test_skill_analysis_runs_stages_against_the_complete_parsed_document(tmp_pat
     assert preflight["request_count"] == 15
     assert preflight["workflow_stage_count"] == 9
     assert preflight["max_output_tokens"] == 8_192
-    assert preflight["max_request_count"] == 45
-    assert preflight["max_total_output_tokens"] == 245_760
-    assert preflight["retry_policy"] == {"max_retries_per_batch": 1, "max_additional_requests": 15}
-    assert preflight["repair_policy"] == {"max_requests_per_batch": 1, "max_additional_requests": 15}
+    assert preflight["max_request_count"] == 120
+    assert preflight["max_total_output_tokens"] == 983_040
+    assert preflight["retry_policy"] == {"max_retries_per_batch": 1, "max_additional_requests": 105}
+    assert preflight["repair_policy"] == {"max_requests_per_batch": 1, "max_additional_requests": 105}
     assert preflight["timeout_policy"]["request_total_seconds"] == 600
     assert len(service.prompts) == 15
     stage_prompts = {
@@ -713,7 +715,7 @@ def test_skill_analysis_runs_stages_against_the_complete_parsed_document(tmp_pat
     assert sum("input-1" in scope for scope in s00_scopes) == 1
     assert sum("input-9" in scope for scope in s00_scopes) == 1
     run = response.json()["run"]
-    assert run["max_request_count"] == 45
+    assert run["max_request_count"] == 120
     assert run["retry_policy"]["max_retries_per_batch"] == 1
     assert run["repair_policy"]["max_requests_per_batch"] == 1
     assert run["progress"] == {"completed_units": 9, "total_units": 9, "stage": "保存结果"}
@@ -722,6 +724,21 @@ def test_skill_analysis_runs_stages_against_the_complete_parsed_document(tmp_pat
     ]
     assert run["actual_usage"]["total_tokens"] == 2_250
     assert len(response.json()["rows"]) >= 9
+
+
+def test_skill_preflight_rejects_a_regular_plan_above_the_hard_request_limit(
+    client: TestClient, monkeypatch,
+) -> None:
+    project_id = _project_and_material(client)
+    monkeypatch.setattr("app.v020_run_service.skill_preflight_prompts", lambda _context: ["prompt"] * 121)
+
+    response = client.post(f"/api/v0.2/projects/{project_id}/run-preflight", json={
+        "page": "analysis", "mode": "skill",
+    })
+
+    assert response.status_code == 422
+    assert "预计需要 121 次常规模型调用" in response.json()["detail"]
+    assert "120 次硬上限" in response.json()["detail"]
 
 
 def test_skill_analysis_batches_every_model_stage_and_shrinks_a_truncated_batch(
@@ -764,6 +781,7 @@ def test_skill_analysis_batches_every_model_stage_and_shrinks_a_truncated_batch(
         if attempt.get("error_code") == "provider_response_truncated"
     } == model_stages
     assert run["status"] == "completed"
+    assert len(run["attempts"]) <= run["max_request_count"]
     assert run["progress"]["completed_units"] == 9
 
 

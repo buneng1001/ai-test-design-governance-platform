@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from math import ceil
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -13,6 +14,8 @@ SKILL_STAGE_OUTPUT_TOKENS = 8_192
 SKILL_STAGE_COUNT = 9
 SKILL_SOURCE_BATCH_SIZE = 4
 SKILL_REQUIREMENT_BATCH_SIZE = 8
+SKILL_MAX_MODEL_REQUESTS = 120
+SKILL_RETRY_BACKOFF_SECONDS = 1.0
 
 
 class AtomicRequirement(BaseModel):
@@ -109,49 +112,61 @@ MODEL_STAGES = (
 
 
 def skill_preflight_prompts(context: dict) -> list[str]:
-    """预检估算首轮有界请求；上游产物形成后运行时会重新计算后续批次。"""
-    placeholders = {
-        "S00": {"atomic_requirements": [], "source_coverage": [], "questions": []},
+    """预检按运行时规则缩小超限批次；上游真实产物形成后仍会重新计算。"""
+    global_index = [{
+        "requirement_id": f"REQ-PREFLIGHT-{item['source_reference_id']}",
+        "statement": "预检占位需求",
+        "source_reference_id": item["source_reference_id"],
+    } for item in context["fragments"]]
+    prompts: list[str] = []
+    for stage in MODEL_STAGES:
+        size = SKILL_SOURCE_BATCH_SIZE if stage.stage_id == "S00" else SKILL_REQUIREMENT_BATCH_SIZE
+        for index in range(0, len(context["fragments"]), size):
+            prompts.extend(_fit_preflight_batch(
+                stage, context, context["fragments"][index:index + size], global_index,
+            ))
+    return prompts
+
+
+def _fit_preflight_batch(
+    stage: StageDefinition, context: dict, fragments: list[dict], global_index: list[dict],
+) -> list[str]:
+    requirement_ids = [f"REQ-PREFLIGHT-{item['source_reference_id']}" for item in fragments]
+    artifacts = {} if stage.stage_id == "S00" else {
+        "S00": {
+            "atomic_requirements": [{
+                "requirement_id": requirement_id,
+                "statement": "预检占位需求",
+                "source_reference_id": fragment["source_reference_id"],
+            } for fragment, requirement_id in zip(fragments, requirement_ids)],
+            "source_coverage": [], "questions": [],
+        },
         "S01": {"functions": []},
         "S02": {"rules": []},
     }
-    source_batches = [
-        context["fragments"][index:index + SKILL_SOURCE_BATCH_SIZE]
-        for index in range(0, len(context["fragments"]), SKILL_SOURCE_BATCH_SIZE)
+    batch_context = {
+        **context,
+        "fragments": fragments,
+        "global_requirement_index": global_index,
+    }
+    prompt = build_stage_prompt(stage, batch_context, artifacts, {
+        "batch_number": 1,
+        "batch_count": 1,
+        "source_reference_ids": [item["source_reference_id"] for item in fragments],
+        "requirement_ids": [] if stage.stage_id == "S00" else requirement_ids,
+    })
+    if _estimate_prompt_tokens(prompt) + SKILL_STAGE_OUTPUT_TOKENS <= 32_000 or len(fragments) <= 1:
+        return [prompt]
+    middle = len(fragments) // 2
+    return [
+        *_fit_preflight_batch(stage, context, fragments[:middle], global_index),
+        *_fit_preflight_batch(stage, context, fragments[middle:], global_index),
     ]
-    prompts = []
-    for index, fragments in enumerate(source_batches, start=1):
-        batch_context = {**context, "fragments": fragments}
-        prompts.append(build_stage_prompt(MODEL_STAGES[0], batch_context, {}, {
-            "batch_number": index,
-            "batch_count": len(source_batches),
-            "source_reference_ids": [item["source_reference_id"] for item in fragments],
-            "requirement_ids": [],
-        }))
-    requirement_batches = [
-        context["fragments"][index:index + SKILL_REQUIREMENT_BATCH_SIZE]
-        for index in range(0, len(context["fragments"]), SKILL_REQUIREMENT_BATCH_SIZE)
-    ]
-    for stage in MODEL_STAGES[1:]:
-        for index, fragments in enumerate(requirement_batches, start=1):
-            requirement_ids = [f"REQ-PREFLIGHT-{item['source_reference_id']}" for item in fragments]
-            stage_placeholders = {
-                "S00": {
-                    "atomic_requirements": [{
-                        "requirement_id": requirement_id,
-                        "statement": "预检占位需求",
-                        "source_reference_id": fragment["source_reference_id"],
-                    } for fragment, requirement_id in zip(fragments, requirement_ids)],
-                    "source_coverage": [], "questions": [],
-                },
-                "S01": placeholders["S01"], "S02": placeholders["S02"],
-            }
-            prompts.append(build_stage_prompt(stage, {**context, "fragments": fragments}, stage_placeholders, {
-                "batch_number": index, "batch_count": len(requirement_batches),
-                "source_reference_ids": [item["source_reference_id"] for item in fragments],
-                "requirement_ids": requirement_ids,
-            }))
-    return prompts
+
+
+def _estimate_prompt_tokens(value: str) -> int:
+    non_ascii = sum(1 for character in value if ord(character) > 127)
+    return max(1, non_ascii + ceil((len(value) - non_ascii) / 4))
 
 
 def build_stage_prompt(
@@ -175,6 +190,9 @@ def build_stage_prompt(
         },
         "batch_scope": batch_scope or {},
         "materials": context["fragments"],
+        "global_requirement_index": (
+            context.get("global_requirement_index", []) if stage.stage_id in {"S01", "S02"} else []
+        ),
         "prior_stage_outputs": prior,
     }
     row_constraints = ""
@@ -189,7 +207,10 @@ def build_stage_prompt(
         f"当前阶段：{stage.stage_id} {stage.name}。{stage.instruction}\n"
         "本次仅处理 batch_scope 指定的来源或原子需求；必须逐一完成该范围。"
         "系统会在全部有界范围完成后统一合并和校验。"
-        "必须以 materials 和已给出的上游阶段产物为依据；已有 ID 必须原样复用，禁止补造来源。\n"
+        + ("识别功能或规则时必须同时参考 global_requirement_index；如果关系横跨当前批次，"
+           "输出中保留全部相关需求 ID，但至少包含一个 batch_scope 中的需求 ID。\n"
+           if stage.stage_id in {"S01", "S02"} else "")
+        + "必须以 materials 和已给出的上游阶段产物为依据；已有 ID 必须原样复用，禁止补造来源。\n"
         f"输出契约：{stage.output_contract or row_contract}\n"
         + ("S00 的 source_coverage 必须逐一覆盖 materials 中每个 source_reference_id；"
            "有需求时列出该来源对应的全部 requirement_ids，没有需求时 requirement_ids 为空并填写明确原因。\n"

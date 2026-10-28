@@ -26,7 +26,7 @@ from app.v020_run_schemas import (
 )
 from app.v020_skill_analysis import execute_skill_analysis
 from app.v020_skill_contracts import (
-    SKILL_STAGE_COUNT, SKILL_STAGE_OUTPUT_TOKENS, skill_preflight_prompts,
+    SKILL_MAX_MODEL_REQUESTS, SKILL_STAGE_COUNT, SKILL_STAGE_OUTPUT_TOKENS, skill_preflight_prompts,
 )
 
 
@@ -77,15 +77,21 @@ class V020RunService:
             max_output_tokens = SKILL_STAGE_OUTPUT_TOKENS
             request_input_tokens = [estimate_input_tokens(prompt) for prompt in prompts]
             request_count = len(prompts)
-            max_request_count = request_count * 3
-            max_output_request_count = request_count * 2
+            max_request_count = SKILL_MAX_MODEL_REQUESTS
+            if request_count > max_request_count:
+                raise V020RunError(
+                    422,
+                    f"当前输入预计需要 {request_count} 次常规模型调用，超过 "
+                    f"{max_request_count} 次硬上限；请缩小资料范围后再运行。",
+                )
+            max_output_request_count = max_request_count
             retry_policy = {
                 "max_retries_per_batch": 1,
-                "max_additional_requests": request_count,
+                "max_additional_requests": max(0, max_request_count - request_count),
             }
             repair_policy = {
                 "max_requests_per_batch": 1,
-                "max_additional_requests": request_count,
+                "max_additional_requests": max(0, max_request_count - request_count),
             }
         else:
             max_output_tokens = PER_REQUEST_OUTPUT_TOKENS if page in {"understanding", "analysis"} else 4_000

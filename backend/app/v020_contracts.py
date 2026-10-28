@@ -14,6 +14,11 @@ TEST_TYPES = (
     "传感器或驱动测试", "云端服务测试",
 )
 
+# Skill 工作流最多识别 300 个原子需求，每个分析方向对每项需求最多产出 12 条。
+# 单阶段和四个方向汇总分别使用明确上限，避免把单批 500 行契约误用于最终合并结果。
+MAX_SKILL_STAGE_ANALYSIS_ROWS = 3_600
+MAX_SKILL_ANALYSIS_ROWS = 14_400
+
 
 def normalize_analysis_row(item: dict, index: int | None = None) -> dict:
     """兼容旧版分析结果，并给当前结果集补齐统一需求点表字段。"""

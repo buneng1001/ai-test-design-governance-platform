@@ -30,7 +30,7 @@ test("真实模型先展示输入与成本确认，取消时不会调用模型",
   expect(await screen.findByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("2 份资料、8 个来源片段");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("所有常规批次输入合计约 1,280");
   expect(screen.getByRole("region", { name: "真实模型调用确认" }))
-    .toHaveTextContent("预计常规调用模型 7 次；可重试连接错误每批最多重试 1 次；输出字段不完整时每批最多修复 1 次；不含自适应缩小范围时最多调用 21 次");
+    .toHaveTextContent("预计常规调用模型 7 次；可重试连接错误每批最多重试 1 次；输出字段不完整时每批最多修复 1 次；包含重试、修复和自适应缩小范围在内，硬上限为 21 次调用");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("模型响应超时120 秒");
   expect(screen.getByRole("region", { name: "真实模型调用确认" })).toHaveTextContent("不可获得：未登记单价");
   expect(onRun).not.toHaveBeenCalled();

@@ -66,6 +66,14 @@ def stage_batch(
         "fragments": [
             item for item in context["fragments"] if item["source_reference_id"] in source_ids
         ],
+        "global_requirement_index": [
+            {
+                "requirement_id": item["requirement_id"],
+                "statement": str(item.get("statement", ""))[:80],
+                "source_reference_id": item["source_reference_id"],
+            }
+            for item in artifacts["S00"]["atomic_requirements"]
+        ],
     }
     batch_artifacts: dict[str, dict] = {
         "S00": {
@@ -164,12 +172,9 @@ def _source_coverage(stage00: dict, selected: set[str], source_ids: set[str]) ->
 
 
 def _filter_linked(items: list[dict], selected: set[str]) -> list[dict]:
-    filtered = []
-    for item in items:
-        requirement_ids = [value for value in item.get("requirement_ids", []) if value in selected]
-        if requirement_ids:
-            filtered.append({**item, "requirement_ids": requirement_ids})
-    return filtered
+    # 当前批次按 selected 决定处理范围，但函数和规则可能横跨多个需求。
+    # 保留完整关系，避免模型遗漏跨批次的组合条件、依赖和状态迁移。
+    return [deepcopy(item) for item in items if set(item.get("requirement_ids", [])) & selected]
 
 
 def _unique_items(outputs: list[dict], key: str, id_key: str) -> list[dict]:
