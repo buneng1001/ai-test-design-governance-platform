@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { downloadPageResult, runAnalysis, updateAnalysisSelection } from "./v020_api";
-import type { AnalysisRow, WorkspaceState } from "./v020_types";
+import type { AnalysisRow, RunEvidence, WorkspaceState } from "./v020_types";
 import { visibleRunForPage } from "./v020_run_state";
 import { PageHeader } from "./UploadWorkspace";
 import { RequirementPointTable } from "./RequirementPointTable";
@@ -16,17 +16,26 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selection, setSelection] = useState<Record<string, boolean>>(() => selectionMap(workspace.analysis_rows));
+  const [completedResult, setCompletedResult] = useState<{ run: RunEvidence; rows: AnalysisRow[] } | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => setSelection(selectionMap(workspace.analysis_rows)), [workspace.analysis_rows]);
-  const displayRows = useMemo(() => workspace.analysis_rows.map((row) => ({
+  const analysisRows = completedResult?.rows ?? workspace.analysis_rows;
+  useEffect(() => setSelection(selectionMap(analysisRows)), [analysisRows]);
+  useEffect(() => {
+    if (completedResult && (
+      workspace.active_run_ids?.analysis === completedResult.run.id
+      || workspace.analysis_rows.some((row) => row.run_id === completedResult.run.id)
+    )) setCompletedResult(null);
+  }, [completedResult, workspace.active_run_ids, workspace.analysis_rows]);
+  useEffect(() => setCompletedResult(null), [projectId]);
+  const displayRows = useMemo(() => analysisRows.map((row) => ({
     ...row, selected: selection[row.id] ?? row.selected,
-  })), [workspace.analysis_rows, selection]);
+  })), [analysisRows, selection]);
   const filtered = useMemo(() => displayRows.filter((row) => matches(row, filters)), [displayRows, filters]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const selectedCount = displayRows.filter((row) => row.selected).length;
-  const latestRun = visibleRunForPage(workspace, "analysis");
+  const latestRun = completedResult?.run ?? visibleRunForPage(workspace, "analysis");
   const setFilter = (name: keyof typeof emptyFilters, value: string) => { setFilters({ ...filters, [name]: value }); setPage(1); };
   const updateRows = async (ids: string[], selected: boolean) => {
     if (!ids.length) return;
@@ -45,7 +54,10 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
       allowedModes={["skill", "local"]} defaultMode="skill"
       onRunSettled={onChanged}
       disabled={!workspace.requirement_version} onRun={async (mode, confirmed, runId) => {
-        return runAnalysis(projectId, mode, confirmed, runId);
+        const result = await runAnalysis(projectId, mode, confirmed, runId);
+        setCompletedResult({ run: result.run, rows: result.rows });
+        setFilters(emptyFilters); setPage(1);
+        return result;
       }} />
     <div className="action-row"><button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "analysis", "xlsx")}>下载需求分析表（Excel）</button>
       <button type="button" className="secondary" onClick={() => void downloadPageResult(projectId, "analysis", "json")}>下载 JSON</button>
@@ -53,9 +65,9 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
     <RunComparison workspace={workspace} />
     <section className="filter-bar" aria-label="需求分析筛选">
       <Filter label="关键词"><input value={filters.keyword} placeholder="模块、测试项或关联需求 ID" onChange={(e) => setFilter("keyword", e.target.value)} /></Filter>
-      <SelectFilter label="功能模块" value={filters.module} values={unique(workspace.analysis_rows, "module")} onChange={(v) => setFilter("module", v)} />
-      <SelectFilter label="测试项" value={filters.testItem} values={unique(workspace.analysis_rows, "test_item")} onChange={(v) => setFilter("testItem", v)} />
-      <SelectFilter label="来源" value={filters.source} values={unique(workspace.analysis_rows, "source")} onChange={(v) => setFilter("source", v)} />
+      <SelectFilter label="功能模块" value={filters.module} values={unique(analysisRows, "module")} onChange={(v) => setFilter("module", v)} />
+      <SelectFilter label="测试项" value={filters.testItem} values={unique(analysisRows, "test_item")} onChange={(v) => setFilter("testItem", v)} />
+      <SelectFilter label="来源" value={filters.source} values={unique(analysisRows, "source")} onChange={(v) => setFilter("source", v)} />
       <Filter label="勾选状态"><select value={filters.selected} onChange={(e) => setFilter("selected", e.target.value)}><option value="">全部</option><option value="yes">已选</option><option value="no">未选</option></select></Filter>
       <Filter label="分析状态"><select value={filters.status} onChange={(e) => setFilter("status", e.target.value)}><option value="">全部</option><option value="ready">可使用</option><option value="needs_information">信息不足</option></select></Filter>
       <button type="button" className="secondary" onClick={() => { setFilters(emptyFilters); setPage(1); }}>清除筛选</button>
@@ -64,7 +76,7 @@ export function AnalysisWorkspace({ projectId, workspace, onChanged }: {
     </section>
     <RequirementPointTable rows={visible} selectable
       onSelectionChange={(id, selected) => void updateRows([id], selected)} />
-    <Pagination total={workspace.analysis_rows.length} filtered={filtered.length} page={currentPage} pageSize={pageSize}
+    <Pagination total={analysisRows.length} filtered={filtered.length} page={currentPage} pageSize={pageSize}
       setPage={setPage} setPageSize={(value) => { setPageSize(value); setPage(1); }} />
     {error && <p role="alert" className="error">{error}</p>}
   </section>;

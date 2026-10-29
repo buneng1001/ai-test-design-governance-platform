@@ -40,6 +40,16 @@ test("需求分析页停用直接调用并显示 Skill、本地模式及完整�
   expect(screen.getByRole("combobox", { name: /每页/ })).toHaveTextContent("2050100");
 });
 
+test("工作区刷新明确绕过浏览器缓存", async () => {
+  const fetchMock = mockRequests();
+  renderShell();
+
+  await screen.findByText("本页面不调用 AI");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/v0.2/projects/1/workspace", expect.objectContaining({ cache: "no-store" }),
+  );
+});
+
 test("审核可跳过并进入测试用例，模板是用例页第一项", async () => {
   mockRequests(); const user = userEvent.setup(); renderShell();
   await screen.findByText("本页面不调用 AI");
@@ -59,7 +69,7 @@ function renderShell() {
 }
 
 function mockRequests() {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     if (url.includes("/workspace")) return new Response(JSON.stringify(workspace), { status: 200 });
     if (url.includes("/ai-session-config")) return new Response("null", { status: 200 });

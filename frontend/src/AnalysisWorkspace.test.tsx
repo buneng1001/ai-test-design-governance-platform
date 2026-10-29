@@ -82,6 +82,38 @@ test("模型调用超时后刷新并显示已保存的失败运行而不是尚�
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
+test("Skill 运行完成后立即用 POST 返回结果替换旧本地表格", async () => {
+  const user = userEvent.setup();
+  const localRow = analysisRow(1);
+  const skillRow: AnalysisRow = {
+    ...analysisRow(2), id: "skill-row", run_id: "run-skill", mode: "skill",
+    test_item: "Skill 新测试项", test_point: "Skill 新测试项", function_point: "Skill 新测试项",
+  };
+  const completedRun: RunEvidence = {
+    ...timeoutRun(), id: "run-skill", status: "completed", stage: "完成", error: null,
+    duration_ms: 314600, completed_at: "2026-10-28T15:45:45Z",
+    result_summary: { count: 1, label: "需求分析项" },
+  };
+  const workspace = { ...emptyWorkspace(), analysis_rows: [localRow] };
+  const onChanged = vi.fn(async () => undefined);
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(runPreflight()), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      run: completedRun, rows: [skillRow], reused: false,
+    }), { status: 201, headers: { "Content-Type": "application/json" } }));
+
+  render(<AnalysisWorkspace projectId={1} workspace={workspace} onChanged={onChanged} />);
+  await user.click(screen.getByRole("button", { name: "查看调用范围" }));
+  await user.click(await screen.findByRole("button", { name: /确认.*开始需求分析/ }));
+
+  const table = screen.getByRole("table", { name: "需求点分析表" });
+  expect(await within(table).findByText("Skill 新测试项")).toBeInTheDocument();
+  expect(within(table).queryByText("测试项 1")).not.toBeInTheDocument();
+  expect(onChanged).toHaveBeenCalledTimes(1);
+});
+
 function emptyWorkspace(): WorkspaceState {
   return {
     project_id: 1, supplemental_notes: "", requirement_version: {} as WorkspaceState["requirement_version"],

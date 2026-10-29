@@ -13,7 +13,7 @@ export const setProjectArchived = (projectId: number, archived: boolean) =>
     method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived }),
   });
 export const getV020Workspace = (projectId: number): Promise<WorkspaceState> =>
-  request(`/api/v0.2/projects/${projectId}/workspace`);
+  request(`/api/v0.2/projects/${projectId}/workspace`, { cache: "no-store" });
 export const uploadAndParseMaterials = (projectId: number, supplementalNotes: string,
   files: Array<{ filename: string; media_type: string; content_base64: string }>) =>
   request<{ requirement_version: RequirementVersion | null }>(`/api/v0.2/projects/${projectId}/materials`, {
